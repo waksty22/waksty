@@ -364,7 +364,7 @@ function App() {
   const [agents, setAgents] = useState([]);
   const [coins, setCoins] = useState([]);
   const [recentDeposits, setRecentDeposits] = useState([]);
-  const [cameraPosition, setCameraPosition] = useState({ x: 0, y: 0 });
+  const [cameraPosition, setCameraPosition] = useState({ x: -100, y: -50 }); // Start near top of mines
 
   const safePosition = { x: 800, y: 100 }; // Top right safe position
 

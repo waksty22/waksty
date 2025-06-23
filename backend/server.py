@@ -357,7 +357,7 @@ async def collect_mine(request: UpgradeRequest, player_id: str = "default_player
     
     game_state.currency += earnings
     game_state.total_earnings += earnings
-    mine_state.last_collection = datetime.now(timezone.utc)
+    mine_state.last_collection = datetime.utcnow()
     mine_state.coins_to_collect = 0.0
     
     game_state.mines[str(request.mine_id)] = mine_state.dict()

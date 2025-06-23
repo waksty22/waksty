@@ -366,7 +366,7 @@ function App() {
   const [recentDeposits, setRecentDeposits] = useState([]);
   const [cameraPosition, setCameraPosition] = useState({ x: 0, y: 0 });
 
-  const safePosition = { x: 50, y: 350 }; // Central safe position
+  const safePosition = { x: 800, y: 100 }; // Top right safe position
 
   const fetchGameState = useCallback(async () => {
     try {

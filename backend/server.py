@@ -264,7 +264,7 @@ async def purchase_mine(request: PurchaseRequest, player_id: str = "default_play
     
     game_state.currency -= cost
     mine_state.owned = True
-    mine_state.last_collection = datetime.now(timezone.utc)
+    mine_state.last_collection = datetime.utcnow()
     
     game_state.mines[str(request.mine_id)] = mine_state.dict()
     await update_game_state(game_state)

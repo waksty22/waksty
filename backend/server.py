@@ -86,7 +86,7 @@ class MineState(BaseModel):
     level: int = Field(default=0)
     owned: bool = Field(default=False)
     has_manager: bool = Field(default=False)
-    last_collection: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_collection: datetime = Field(default_factory=datetime.utcnow)
     unlocked: bool = Field(default=False)
     coins_to_collect: float = Field(default=0.0)
 

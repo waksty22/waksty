@@ -78,7 +78,7 @@ class GameState(BaseModel):
     currency: float = Field(default=0.0)
     ncg_tokens: float = Field(default=0.0)
     mines: Dict = Field(default_factory=dict)
-    last_update: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_update: datetime = Field(default_factory=datetime.utcnow)
     total_earnings: float = Field(default=0.0)
 
 class MineState(BaseModel):

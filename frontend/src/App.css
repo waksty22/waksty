@@ -112,8 +112,8 @@
 
 .game-viewport {
   position: relative;
-  width: 2000px;
-  height: 1500px;
+  width: 1200px;
+  height: 3500px;
   transition: transform 0.3s ease;
 }
 

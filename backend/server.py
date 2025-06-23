@@ -120,7 +120,28 @@ async def get_or_create_game_state(player_id: str = "default_player") -> GameSta
     existing_state = await db.game_states.find_one({"player_id": player_id})
     
     if existing_state:
-        return GameState(**existing_state)
+        # Ensure all 30 mines are present (backward compatibility)
+        game_state = GameState(**existing_state)
+        missing_mines = []
+        
+        for mine_config in ALL_MINES:
+            mine_id_str = str(mine_config["id"])
+            if mine_id_str not in game_state.mines:
+                missing_mines.append(mine_config)
+        
+        if missing_mines:
+            # Add missing mines
+            for mine_config in missing_mines:
+                mine_state = MineState(
+                    mine_id=mine_config["id"],
+                    unlocked=mine_config["unlocked"]
+                )
+                game_state.mines[str(mine_config["id"])] = mine_state.dict()
+            
+            # Update database
+            await update_game_state(game_state)
+        
+        return game_state
     
     # Create new game state
     new_state = GameState(player_id=player_id, currency=50.0)  # Start with some currency

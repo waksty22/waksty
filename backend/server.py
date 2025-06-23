@@ -26,60 +26,49 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# Game Configuration
-INITIAL_MINES = [
-    {
-        "id": 1,
-        "name": "Basic Bitcoin Miner",
-        "base_production": 1.0,  # coins per second
-        "base_cost": 10.0,
-        "upgrade_multiplier": 1.15,
-        "manager_cost": 100.0,
-        "unlocked": True,
-        "description": "A simple cryptocurrency mining rig"
-    },
-    {
-        "id": 2,
-        "name": "Ethereum Farm",
-        "base_production": 5.0,
-        "base_cost": 100.0,
-        "upgrade_multiplier": 1.15,
-        "manager_cost": 1000.0,
-        "unlocked": True,
-        "description": "Industrial Ethereum mining facility"
-    },
-    {
-        "id": 3,
-        "name": "Altcoin Facility",
-        "base_production": 25.0,
-        "base_cost": 1000.0,
-        "upgrade_multiplier": 1.15,
-        "manager_cost": 10000.0,
-        "unlocked": True,
-        "description": "Advanced altcoin mining operation"
-    },
-    {
-        "id": 4,
-        "name": "Mining Warehouse",
-        "base_production": 100.0,
-        "base_cost": 12000.0,
-        "upgrade_multiplier": 1.15,
-        "manager_cost": 100000.0,
-        "unlocked": False,
-        "unlock_cost": 10000.0,
-        "description": "Massive warehouse mining operation"
-    },
-    {
-        "id": 5,
-        "name": "Crypto Data Center",
-        "base_production": 400.0,
-        "base_cost": 100000.0,
-        "upgrade_multiplier": 1.15,
-        "manager_cost": 1000000.0,
-        "unlocked": False,
-        "unlock_cost": 100000.0,
-        "description": "High-tech data center mining facility"
-    }
+# All 30 Mines Configuration
+ALL_MINES = [
+    # Tier 1: Basic Crypto Mines (1-5)
+    {"id": 1, "name": "Bitcoin Starter", "base_production": 1.0, "base_cost": 10.0, "upgrade_multiplier": 1.15, "manager_cost": 100.0, "unlocked": True, "description": "Basic Bitcoin mining rig", "emoji": "₿", "tier": 1, "position": {"x": 100, "y": 100}},
+    {"id": 2, "name": "Ethereum Farm", "base_production": 5.0, "base_cost": 100.0, "upgrade_multiplier": 1.15, "manager_cost": 1000.0, "unlocked": True, "description": "Ethereum mining facility", "emoji": "⟠", "tier": 1, "position": {"x": 200, "y": 100}},
+    {"id": 3, "name": "Litecoin Mine", "base_production": 25.0, "base_cost": 1000.0, "upgrade_multiplier": 1.15, "manager_cost": 10000.0, "unlocked": True, "description": "Litecoin mining operation", "emoji": "Ł", "tier": 1, "position": {"x": 300, "y": 100}},
+    {"id": 4, "name": "Dogecoin Dig", "base_production": 100.0, "base_cost": 12000.0, "upgrade_multiplier": 1.15, "manager_cost": 100000.0, "unlocked": False, "unlock_cost": 5000.0, "description": "Much mining, very wow", "emoji": "🐕", "tier": 1, "position": {"x": 400, "y": 100}},
+    {"id": 5, "name": "Cardano Station", "base_production": 400.0, "base_cost": 100000.0, "upgrade_multiplier": 1.15, "manager_cost": 1000000.0, "unlocked": False, "unlock_cost": 50000.0, "description": "Cardano staking pool", "emoji": "₳", "tier": 1, "position": {"x": 500, "y": 100}},
+    
+    # Tier 2: Advanced Crypto Operations (6-10)
+    {"id": 6, "name": "Polygon Network", "base_production": 1600.0, "base_cost": 800000.0, "upgrade_multiplier": 1.15, "manager_cost": 8000000.0, "unlocked": False, "unlock_cost": 400000.0, "description": "Polygon scaling solution", "emoji": "🔷", "tier": 2, "position": {"x": 100, "y": 200}},
+    {"id": 7, "name": "Solana Cluster", "base_production": 6400.0, "base_cost": 6400000.0, "upgrade_multiplier": 1.15, "manager_cost": 64000000.0, "unlocked": False, "unlock_cost": 3200000.0, "description": "High-speed Solana validator", "emoji": "◉", "tier": 2, "position": {"x": 200, "y": 200}},
+    {"id": 8, "name": "Avalanche Peak", "base_production": 25600.0, "base_cost": 51200000.0, "upgrade_multiplier": 1.15, "manager_cost": 512000000.0, "unlocked": False, "unlock_cost": 25600000.0, "description": "Avalanche consensus network", "emoji": "🏔️", "tier": 2, "position": {"x": 300, "y": 200}},
+    {"id": 9, "name": "Chainlink Oracle", "base_production": 102400.0, "base_cost": 409600000.0, "upgrade_multiplier": 1.15, "manager_cost": 4096000000.0, "unlocked": False, "unlock_cost": 204800000.0, "description": "Decentralized oracle network", "emoji": "🔗", "tier": 2, "position": {"x": 400, "y": 200}},
+    {"id": 10, "name": "Cosmos Hub", "base_production": 409600.0, "base_cost": 3276800000.0, "upgrade_multiplier": 1.15, "manager_cost": 32768000000.0, "unlocked": False, "unlock_cost": 1638400000.0, "description": "Internet of blockchains", "emoji": "⚛️", "tier": 2, "position": {"x": 500, "y": 200}},
+    
+    # Tier 3: Industrial Facilities (11-15)
+    {"id": 11, "name": "Mining Warehouse", "base_production": 1638400.0, "base_cost": 26214400000.0, "upgrade_multiplier": 1.15, "manager_cost": 262144000000.0, "unlocked": False, "unlock_cost": 13107200000.0, "description": "Massive mining warehouse", "emoji": "🏭", "tier": 3, "position": {"x": 100, "y": 300}},
+    {"id": 12, "name": "Hydro Power Plant", "base_production": 6553600.0, "base_cost": 209715200000.0, "upgrade_multiplier": 1.15, "manager_cost": 2097152000000.0, "unlocked": False, "unlock_cost": 104857600000.0, "description": "Renewable energy mining", "emoji": "💧", "tier": 3, "position": {"x": 200, "y": 300}},
+    {"id": 13, "name": "Solar Farm Complex", "base_production": 26214400.0, "base_cost": 1677721600000.0, "upgrade_multiplier": 1.15, "manager_cost": 16777216000000.0, "unlocked": False, "unlock_cost": 838860800000.0, "description": "Solar-powered mining farm", "emoji": "☀️", "tier": 3, "position": {"x": 300, "y": 300}},
+    {"id": 14, "name": "Geothermal Station", "base_production": 104857600.0, "base_cost": 13421772800000.0, "upgrade_multiplier": 1.15, "manager_cost": 134217728000000.0, "unlocked": False, "unlock_cost": 6710886400000.0, "description": "Geothermal energy mining", "emoji": "🌋", "tier": 3, "position": {"x": 400, "y": 300}},
+    {"id": 15, "name": "Nuclear Reactor", "base_production": 419430400.0, "base_cost": 107374182400000.0, "upgrade_multiplier": 1.15, "manager_cost": 1073741824000000.0, "unlocked": False, "unlock_cost": 53687091200000.0, "description": "Nuclear-powered mining", "emoji": "⚛️", "tier": 3, "position": {"x": 500, "y": 300}},
+    
+    # Tier 4: High-Tech Data Centers (16-20)
+    {"id": 16, "name": "Quantum Computer", "base_production": 1677721600.0, "base_cost": 858993459200000.0, "upgrade_multiplier": 1.15, "manager_cost": 8589934592000000.0, "unlocked": False, "unlock_cost": 429496729600000.0, "description": "Quantum computing cluster", "emoji": "🔬", "tier": 4, "position": {"x": 100, "y": 400}},
+    {"id": 17, "name": "AI Processing Center", "base_production": 6710886400.0, "base_cost": 6871947673600000.0, "upgrade_multiplier": 1.15, "manager_cost": 68719476736000000.0, "unlocked": False, "unlock_cost": 3435973836800000.0, "description": "AI-powered mining optimization", "emoji": "🤖", "tier": 4, "position": {"x": 200, "y": 400}},
+    {"id": 18, "name": "Supercomputer Array", "base_production": 26843545600.0, "base_cost": 54975581388800000.0, "upgrade_multiplier": 1.15, "manager_cost": 549755813888000000.0, "unlocked": False, "unlock_cost": 27487790694400000.0, "description": "Supercomputer mining array", "emoji": "🖥️", "tier": 4, "position": {"x": 300, "y": 400}},
+    {"id": 19, "name": "Blockchain Foundry", "base_production": 107374182400.0, "base_cost": 439804651110400000.0, "upgrade_multiplier": 1.15, "manager_cost": 4398046511104000000.0, "unlocked": False, "unlock_cost": 219902325555200000.0, "description": "Next-gen blockchain forge", "emoji": "⚒️", "tier": 4, "position": {"x": 400, "y": 400}},
+    {"id": 20, "name": "Metaverse Engine", "base_production": 429496729600.0, "base_cost": 3518437208883200000.0, "upgrade_multiplier": 1.15, "manager_cost": 35184372088832000000.0, "unlocked": False, "unlock_cost": 1759218604441600000.0, "description": "Virtual world mining engine", "emoji": "🌐", "tier": 4, "position": {"x": 500, "y": 400}},
+    
+    # Tier 5: Future Tech (21-25)
+    {"id": 21, "name": "Fusion Reactor", "base_production": 1717986918400.0, "base_cost": 28147497671065600000.0, "upgrade_multiplier": 1.15, "manager_cost": 281474976710656000000.0, "unlocked": False, "unlock_cost": 14073748835532800000.0, "description": "Fusion-powered mining", "emoji": "🔥", "tier": 5, "position": {"x": 100, "y": 500}},
+    {"id": 22, "name": "Antimatter Engine", "base_production": 6871947673600.0, "base_cost": 225179981368524800000.0, "upgrade_multiplier": 1.15, "manager_cost": 2251799813685248000000.0, "unlocked": False, "unlock_cost": 112589990684262400000.0, "description": "Antimatter energy mining", "emoji": "💥", "tier": 5, "position": {"x": 200, "y": 500}},
+    {"id": 23, "name": "Time Dilator", "base_production": 27487790694400.0, "base_cost": 1801439850948198400000.0, "upgrade_multiplier": 1.15, "manager_cost": 18014398509481984000000.0, "unlocked": False, "unlock_cost": 900719925474099200000.0, "description": "Time manipulation mining", "emoji": "⏰", "tier": 5, "position": {"x": 300, "y": 500}},
+    {"id": 24, "name": "Wormhole Generator", "base_production": 109951162777600.0, "base_cost": 14411518807585587200000.0, "upgrade_multiplier": 1.15, "manager_cost": 144115188075855872000000.0, "unlocked": False, "unlock_cost": 7205759403792793600000.0, "description": "Interdimensional mining", "emoji": "🌌", "tier": 5, "position": {"x": 400, "y": 500}},
+    {"id": 25, "name": "Reality Processor", "base_production": 439804651110400.0, "base_cost": 115292150460684697600000.0, "upgrade_multiplier": 1.15, "manager_cost": 1152921504606846976000000.0, "unlocked": False, "unlock_cost": 57646075230342348800000.0, "description": "Reality-bending mining rig", "emoji": "✨", "tier": 5, "position": {"x": 500, "y": 500}},
+    
+    # Tier 6: Space Mining (26-30)
+    {"id": 26, "name": "Moon Base Alpha", "base_production": 1759218604441600.0, "base_cost": 922337203685477580800000.0, "upgrade_multiplier": 1.15, "manager_cost": 9223372036854775808000000.0, "unlocked": False, "unlock_cost": 461168601842738790400000.0, "description": "Lunar mining outpost", "emoji": "🌙", "tier": 6, "position": {"x": 100, "y": 600}},
+    {"id": 27, "name": "Mars Colony", "base_production": 7036874417766400.0, "base_cost": 7378697629483820646400000.0, "upgrade_multiplier": 1.15, "manager_cost": 73786976294838206464000000.0, "unlocked": False, "unlock_cost": 3689348814741910323200000.0, "description": "Martian mining colony", "emoji": "🔴", "tier": 6, "position": {"x": 200, "y": 600}},
+    {"id": 28, "name": "Asteroid Belt", "base_production": 28147497671065600.0, "base_cost": 59029581035870565171200000.0, "upgrade_multiplier": 1.15, "manager_cost": 590295810358705651712000000.0, "unlocked": False, "unlock_cost": 29514790517935282585600000.0, "description": "Asteroid mining operation", "emoji": "☄️", "tier": 6, "position": {"x": 300, "y": 600}},
+    {"id": 29, "name": "Jupiter Station", "base_production": 112589990684262400.0, "base_cost": 472236648286964521369600000.0, "upgrade_multiplier": 1.15, "manager_cost": 4722366482869645213696000000.0, "unlocked": False, "unlock_cost": 236118324143482260684800000.0, "description": "Gas giant mining platform", "emoji": "🪐", "tier": 6, "position": {"x": 400, "y": 600}},
+    {"id": 30, "name": "Galactic Core", "base_production": 450359962737049600.0, "base_cost": 3777893186295716170956800000.0, "upgrade_multiplier": 1.15, "manager_cost": 37778931862957161709568000000.0, "unlocked": False, "unlock_cost": 1888946593147858085478400000.0, "description": "Ultimate cosmic mining station", "emoji": "🌌", "tier": 6, "position": {"x": 500, "y": 600}}
 ]
 
 # Define Models
@@ -99,6 +88,7 @@ class MineState(BaseModel):
     has_manager: bool = Field(default=False)
     last_collection: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     unlocked: bool = Field(default=False)
+    coins_to_collect: float = Field(default=0.0)
 
 class UpgradeRequest(BaseModel):
     mine_id: int
@@ -136,7 +126,7 @@ async def get_or_create_game_state(player_id: str = "default_player") -> GameSta
     new_state = GameState(player_id=player_id, currency=50.0)  # Start with some currency
     
     # Initialize mines
-    for mine_config in INITIAL_MINES:
+    for mine_config in ALL_MINES:
         mine_state = MineState(
             mine_id=mine_config["id"],
             unlocked=mine_config["unlocked"]
@@ -166,7 +156,7 @@ async def calculate_offline_income(game_state: GameState) -> float:
     for mine_id_str, mine_data in game_state.mines.items():
         mine_state = MineState(**mine_data)
         mine_id = int(mine_id_str)
-        mine_config = next((m for m in INITIAL_MINES if m["id"] == mine_id), None)
+        mine_config = next((m for m in ALL_MINES if m["id"] == mine_id), None)
         
         if mine_config and mine_state.owned and mine_state.has_manager:
             production_rate = calculate_mine_production(mine_config, mine_state)
@@ -186,12 +176,31 @@ async def get_game_state(player_id: str = "default_player"):
         game_state.currency += offline_income
         game_state.total_earnings += offline_income
     
+    # Update coin accumulation for owned mines
+    current_time = datetime.now(timezone.utc)
+    for mine_id_str, mine_data in game_state.mines.items():
+        mine_state = MineState(**mine_data)
+        mine_id = int(mine_id_str)
+        mine_config = next((m for m in ALL_MINES if m["id"] == mine_id), None)
+        
+        if mine_config and mine_state.owned:
+            time_since_collection = (current_time - mine_state.last_collection).total_seconds()
+            production_rate = calculate_mine_production(mine_config, mine_state)
+            
+            # Calculate coins to collect (limit to 1 hour for non-managed mines)
+            if not mine_state.has_manager:
+                time_since_collection = min(time_since_collection, 3600)
+            
+            coins_generated = production_rate * time_since_collection
+            mine_state.coins_to_collect = coins_generated
+            game_state.mines[mine_id_str] = mine_state.dict()
+    
     # Update last update time
-    game_state.last_update = datetime.now(timezone.utc)
+    game_state.last_update = current_time
     await update_game_state(game_state)
     
     # Add mine configurations for frontend
-    mine_configs = {str(mine["id"]): mine for mine in INITIAL_MINES}
+    mine_configs = {str(mine["id"]): mine for mine in ALL_MINES}
     
     return {
         "game_state": game_state,
@@ -203,7 +212,7 @@ async def get_game_state(player_id: str = "default_player"):
 async def purchase_mine(request: PurchaseRequest, player_id: str = "default_player"):
     """Purchase a mine"""
     game_state = await get_or_create_game_state(player_id)
-    mine_config = next((m for m in INITIAL_MINES if m["id"] == request.mine_id), None)
+    mine_config = next((m for m in ALL_MINES if m["id"] == request.mine_id), None)
     
     if not mine_config:
         raise HTTPException(status_code=404, detail="Mine not found")
@@ -245,7 +254,7 @@ async def purchase_mine(request: PurchaseRequest, player_id: str = "default_play
 async def upgrade_mine(request: UpgradeRequest, player_id: str = "default_player"):
     """Upgrade a mine"""
     game_state = await get_or_create_game_state(player_id)
-    mine_config = next((m for m in INITIAL_MINES if m["id"] == request.mine_id), None)
+    mine_config = next((m for m in ALL_MINES if m["id"] == request.mine_id), None)
     
     if not mine_config:
         raise HTTPException(status_code=404, detail="Mine not found")
@@ -275,7 +284,7 @@ async def upgrade_mine(request: UpgradeRequest, player_id: str = "default_player
 async def hire_manager(request: UpgradeRequest, player_id: str = "default_player"):
     """Hire a manager for a mine"""
     game_state = await get_or_create_game_state(player_id)
-    mine_config = next((m for m in INITIAL_MINES if m["id"] == request.mine_id), None)
+    mine_config = next((m for m in ALL_MINES if m["id"] == request.mine_id), None)
     
     if not mine_config:
         raise HTTPException(status_code=404, detail="Mine not found")
@@ -308,7 +317,7 @@ async def hire_manager(request: UpgradeRequest, player_id: str = "default_player
 async def collect_mine(request: UpgradeRequest, player_id: str = "default_player"):
     """Manually collect from a mine"""
     game_state = await get_or_create_game_state(player_id)
-    mine_config = next((m for m in INITIAL_MINES if m["id"] == request.mine_id), None)
+    mine_config = next((m for m in ALL_MINES if m["id"] == request.mine_id), None)
     
     if not mine_config:
         raise HTTPException(status_code=404, detail="Mine not found")
@@ -322,19 +331,13 @@ async def collect_mine(request: UpgradeRequest, player_id: str = "default_player
     if not mine_state.owned:
         raise HTTPException(status_code=400, detail="Mine not owned")
     
-    # Calculate time since last collection
-    current_time = datetime.now(timezone.utc)
-    time_elapsed = (current_time - mine_state.last_collection).total_seconds()
-    
-    # Limit manual collection to 1 hour of production
-    time_elapsed = min(time_elapsed, 3600)
-    
-    production_rate = calculate_mine_production(mine_config, mine_state)
-    earnings = production_rate * time_elapsed
+    # Get the coins to collect
+    earnings = mine_state.coins_to_collect
     
     game_state.currency += earnings
     game_state.total_earnings += earnings
-    mine_state.last_collection = current_time
+    mine_state.last_collection = datetime.now(timezone.utc)
+    mine_state.coins_to_collect = 0.0
     
     game_state.mines[str(request.mine_id)] = mine_state.dict()
     await update_game_state(game_state)

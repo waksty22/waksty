@@ -6,6 +6,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const formatCurrency = (amount) => {
+  if (amount >= 1e15) return `${(amount / 1e15).toFixed(2)}Qa`;
   if (amount >= 1e12) return `${(amount / 1e12).toFixed(2)}T`;
   if (amount >= 1e9) return `${(amount / 1e9).toFixed(2)}B`;
   if (amount >= 1e6) return `${(amount / 1e6).toFixed(2)}M`;
@@ -13,7 +14,83 @@ const formatCurrency = (amount) => {
   return amount.toFixed(2);
 };
 
-const MineCard = ({ mine, mineConfig, onPurchase, onUpgrade, onHireManager, onCollect, gameState }) => {
+const Agent = ({ id, position, targetPosition, isMoving, carryingCoins }) => {
+  const [animationPosition, setAnimationPosition] = useState(position);
+
+  useEffect(() => {
+    if (isMoving && targetPosition) {
+      // Animate agent movement
+      const animationDuration = 2000; // 2 seconds
+      const startTime = Date.now();
+      const startPos = { ...position };
+      const endPos = { ...targetPosition };
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / animationDuration, 1);
+        
+        // Easing function for smooth movement
+        const easeInOut = progress < 0.5 
+          ? 2 * progress * progress 
+          : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+        const currentPos = {
+          x: startPos.x + (endPos.x - startPos.x) * easeInOut,
+          y: startPos.y + (endPos.y - startPos.y) * easeInOut
+        };
+
+        setAnimationPosition(currentPos);
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+
+      animate();
+    } else {
+      setAnimationPosition(position);
+    }
+  }, [position, targetPosition, isMoving]);
+
+  return (
+    <div
+      className={`agent ${isMoving ? 'moving' : ''} ${carryingCoins ? 'carrying-coins' : ''}`}
+      style={{
+        left: `${animationPosition.x}px`,
+        top: `${animationPosition.y}px`,
+        transform: 'translate(-50%, -50%)'
+      }}
+    >
+      <div className="agent-body">
+        {carryingCoins ? '🪙' : '👷'}
+      </div>
+      {carryingCoins && (
+        <div className="coin-trail">
+          <span className="coin">🪙</span>
+          <span className="coin">🪙</span>
+          <span className="coin">🪙</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Coin = ({ id, position, collected }) => {
+  return (
+    <div
+      className={`floating-coin ${collected ? 'collected' : ''}`}
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        transform: 'translate(-50%, -50%)'
+      }}
+    >
+      🪙
+    </div>
+  );
+};
+
+const Mine = ({ mine, mineConfig, gameState, onPurchase, onUpgrade, onHireManager, onCollect, agents, coins }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   
   const mineState = gameState?.mines?.[mine.id] || {};
@@ -21,6 +98,10 @@ const MineCard = ({ mine, mineConfig, onPurchase, onUpgrade, onHireManager, onCo
   const hasManager = mineState.has_manager;
   const level = mineState.level || 0;
   const isUnlocked = mineState.unlocked;
+  const coinsToCollect = mineState.coins_to_collect || 0;
+  
+  const position = mineConfig.position;
+  const tier = mineConfig.tier;
   
   const baseCost = mineConfig.base_cost;
   const upgradeCost = baseCost * Math.pow(mineConfig.upgrade_multiplier, level);
@@ -43,28 +124,43 @@ const MineCard = ({ mine, mineConfig, onPurchase, onUpgrade, onHireManager, onCo
     }
   };
 
+  const getTierColor = (tier) => {
+    const colors = {
+      1: 'from-green-600 to-green-800',
+      2: 'from-blue-600 to-blue-800',
+      3: 'from-purple-600 to-purple-800',
+      4: 'from-red-600 to-red-800',
+      5: 'from-yellow-600 to-yellow-800',
+      6: 'from-pink-600 to-pink-800'
+    };
+    return colors[tier] || 'from-gray-600 to-gray-800';
+  };
+
+  // Show dedicated agents for this mine
+  const mineAgents = agents.filter(agent => agent.assignedMine === mine.id);
+  const mineCoins = coins.filter(coin => coin.mineId === mine.id);
+
   if (!isUnlocked && unlockCost) {
     return (
-      <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 opacity-75">
-        <div className="flex items-center mb-4">
-          <div className="w-12 h-12 bg-gray-600 rounded-lg flex items-center justify-center mr-4">
-            <span className="text-2xl">🔒</span>
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-white">{mineConfig.name}</h3>
-            <p className="text-gray-400 text-sm">{mineConfig.description}</p>
-          </div>
-        </div>
-        
-        <div className="space-y-3">
-          <div className="text-center">
-            <p className="text-gray-300 mb-2">Unlock Cost: {formatCurrency(unlockCost)} coins</p>
+      <div
+        className="mine locked-mine"
+        style={{
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          transform: 'translate(-50%, -50%)'
+        }}
+      >
+        <div className="mine-building locked">
+          <div className="lock-icon">🔒</div>
+          <div className="mine-info">
+            <div className="mine-name">{mineConfig.name}</div>
+            <div className="unlock-cost">Unlock: {formatCurrency(unlockCost)}</div>
             <button
               onClick={() => handleAction(onPurchase, mine.id)}
               disabled={isProcessing || gameState.currency < unlockCost}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold"
+              className="unlock-button"
             >
-              {isProcessing ? 'Unlocking...' : 'Unlock Mine'}
+              {isProcessing ? 'Unlocking...' : 'Unlock'}
             </button>
           </div>
         </div>
@@ -73,72 +169,139 @@ const MineCard = ({ mine, mineConfig, onPurchase, onUpgrade, onHireManager, onCo
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-6 border border-gray-700 shadow-lg">
-      <div className="flex items-center mb-4">
-        <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mr-4">
-          <span className="text-2xl">⛏️</span>
+    <div
+      className="mine"
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        transform: 'translate(-50%, -50%)'
+      }}
+    >
+      <div className={`mine-building ${isOwned ? 'owned' : 'available'} tier-${tier}`}>
+        <div className={`mine-icon bg-gradient-to-br ${getTierColor(tier)}`}>
+          <span className="mine-emoji">{mineConfig.emoji}</span>
+          {level > 0 && <div className="level-badge">{level}</div>}
         </div>
-        <div>
-          <h3 className="text-xl font-bold text-white">{mineConfig.name}</h3>
-          <p className="text-gray-400 text-sm">{mineConfig.description}</p>
+        
+        {/* Coins floating above mine */}
+        {isOwned && coinsToCollect > 0 && !hasManager && (
+          <div className="coins-indicator">
+            <div className="coin-count">🪙 {formatCurrency(coinsToCollect)}</div>
+          </div>
+        )}
+        
+        {/* Manager indicator */}
+        {hasManager && (
+          <div className="manager-indicator">
+            <span className="manager-icon">👨‍💼</span>
+          </div>
+        )}
+        
+        <div className="mine-info">
+          <div className="mine-name">{mineConfig.name}</div>
           {isOwned && (
-            <p className="text-green-400 text-sm">Level {level} • {formatCurrency(currentProduction)}/sec</p>
+            <div className="production-rate">
+              {formatCurrency(currentProduction)}/sec
+            </div>
           )}
         </div>
-      </div>
-      
-      {!isOwned ? (
-        <div className="space-y-3">
-          <div className="text-center">
-            <p className="text-gray-300 mb-2">Cost: {formatCurrency(baseCost)} coins</p>
+        
+        <div className="mine-controls">
+          {!isOwned ? (
             <button
               onClick={() => handleAction(onPurchase, mine.id)}
               disabled={isProcessing || gameState.currency < baseCost}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold"
+              className="buy-button"
             >
-              {isProcessing ? 'Purchasing...' : 'Purchase Mine'}
+              {isProcessing ? 'Buying...' : `Buy ${formatCurrency(baseCost)}`}
             </button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-1 gap-3">
-            <button
-              onClick={() => handleAction(onUpgrade, mine.id)}
-              disabled={isProcessing || gameState.currency < upgradeCost}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold"
-            >
-              {isProcessing ? 'Upgrading...' : `Upgrade (${formatCurrency(upgradeCost)})`}
-            </button>
-            
-            {!hasManager && (
+          ) : (
+            <div className="owned-controls">
               <button
-                onClick={() => handleAction(onHireManager, mine.id)}
-                disabled={isProcessing || gameState.currency < managerCost}
-                className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold"
+                onClick={() => handleAction(onUpgrade, mine.id)}
+                disabled={isProcessing || gameState.currency < upgradeCost}
+                className="upgrade-button"
               >
-                {isProcessing ? 'Hiring...' : `Hire Manager (${formatCurrency(managerCost)})`}
+                ⬆️ {formatCurrency(upgradeCost)}
               </button>
-            )}
-            
-            {!hasManager && (
-              <button
-                onClick={() => handleAction(onCollect, mine.id)}
-                disabled={isProcessing}
-                className="bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold"
-              >
-                {isProcessing ? 'Collecting...' : 'Collect'}
-              </button>
-            )}
-            
-            {hasManager && (
-              <div className="text-center text-green-400 font-semibold">
-                ✅ Manager Active - Auto Collection
-              </div>
-            )}
-          </div>
+              
+              {!hasManager && (
+                <>
+                  <button
+                    onClick={() => handleAction(onHireManager, mine.id)}
+                    disabled={isProcessing || gameState.currency < managerCost}
+                    className="manager-button"
+                  >
+                    👨‍💼 {formatCurrency(managerCost)}
+                  </button>
+                  
+                  {coinsToCollect > 0 && (
+                    <button
+                      onClick={() => handleAction(onCollect, mine.id)}
+                      disabled={isProcessing}
+                      className="collect-button"
+                    >
+                      Collect
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
+
+      {/* Render agents for this mine */}
+      {mineAgents.map(agent => (
+        <Agent
+          key={agent.id}
+          id={agent.id}
+          position={agent.position}
+          targetPosition={agent.targetPosition}
+          isMoving={agent.isMoving}
+          carryingCoins={agent.carryingCoins}
+        />
+      ))}
+
+      {/* Render coins for this mine */}
+      {mineCoins.map(coin => (
+        <Coin
+          key={coin.id}
+          id={coin.id}
+          position={coin.position}
+          collected={coin.collected}
+        />
+      ))}
+    </div>
+  );
+};
+
+const Safe = ({ position, totalCoins, recentDeposits }) => {
+  return (
+    <div
+      className="safe"
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        transform: 'translate(-50%, -50%)'
+      }}
+    >
+      <div className="safe-building">
+        <div className="safe-icon">🏦</div>
+        <div className="safe-info">
+          <div className="safe-title">Central Bank</div>
+          <div className="total-coins">{formatCurrency(totalCoins)} coins</div>
+          {recentDeposits.length > 0 && (
+            <div className="recent-deposits">
+              {recentDeposits.slice(-3).map((deposit, index) => (
+                <div key={index} className="deposit-animation">
+                  +{formatCurrency(deposit.amount)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -163,35 +326,30 @@ const TokenConverter = ({ gameState, onConvert }) => {
   };
 
   return (
-    <div className="bg-gradient-to-br from-yellow-800 to-yellow-900 rounded-lg p-6 border border-yellow-600">
-      <h3 className="text-xl font-bold text-yellow-100 mb-4 flex items-center">
-        <span className="mr-2">🪙</span>
-        NCG Token Converter
-      </h3>
+    <div className="token-converter">
+      <h3 className="converter-title">🪙 NCG Token Converter</h3>
       
-      <div className="space-y-4">
-        <div>
-          <p className="text-yellow-200 mb-2">Exchange Rate: 10,000 coins = 1 NCG</p>
-          <p className="text-yellow-200">Your NCG Tokens: {formatCurrency(gameState.ncg_tokens || 0)}</p>
-        </div>
-        
-        <div className="flex items-center space-x-4">
-          <input
-            type="number"
-            min="1"
-            value={convertAmount}
-            onChange={(e) => setConvertAmount(Math.max(1, parseInt(e.target.value) || 1))}
-            className="flex-1 bg-gray-700 text-white px-4 py-2 rounded-lg border border-gray-600"
-            placeholder="NCG to buy"
-          />
-          <button
-            onClick={handleConvert}
-            disabled={!canConvert || isProcessing}
-            className="bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg font-semibold"
-          >
-            {isProcessing ? 'Converting...' : `Convert (${formatCurrency(currencyNeeded)})`}
-          </button>
-        </div>
+      <div className="converter-info">
+        <p>Exchange Rate: 10,000 coins = 1 NCG</p>
+        <p>Your NCG Tokens: {formatCurrency(gameState.ncg_tokens || 0)}</p>
+      </div>
+      
+      <div className="converter-controls">
+        <input
+          type="number"
+          min="1"
+          value={convertAmount}
+          onChange={(e) => setConvertAmount(Math.max(1, parseInt(e.target.value) || 1))}
+          className="convert-input"
+          placeholder="NCG to buy"
+        />
+        <button
+          onClick={handleConvert}
+          disabled={!canConvert || isProcessing}
+          className="convert-button"
+        >
+          {isProcessing ? 'Converting...' : `Convert (${formatCurrency(currencyNeeded)})`}
+        </button>
       </div>
     </div>
   );
@@ -203,6 +361,12 @@ function App() {
   const [offlineIncome, setOfflineIncome] = useState(0);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
+  const [agents, setAgents] = useState([]);
+  const [coins, setCoins] = useState([]);
+  const [recentDeposits, setRecentDeposits] = useState([]);
+  const [cameraPosition, setCameraPosition] = useState({ x: 0, y: 0 });
+
+  const safePosition = { x: 50, y: 350 }; // Central safe position
 
   const fetchGameState = useCallback(async () => {
     try {
@@ -224,6 +388,103 @@ function App() {
   useEffect(() => {
     fetchGameState();
   }, [fetchGameState]);
+
+  // Initialize agents for managed mines
+  useEffect(() => {
+    if (!gameState || !mineConfigs) return;
+
+    const newAgents = [];
+    let agentId = 0;
+
+    Object.entries(gameState.mines).forEach(([mineId, mineData]) => {
+      if (mineData.owned && mineData.has_manager) {
+        const mineConfig = mineConfigs[mineId];
+        if (mineConfig) {
+          // Create an agent for this mine
+          newAgents.push({
+            id: agentId++,
+            assignedMine: parseInt(mineId),
+            position: { ...mineConfig.position },
+            targetPosition: null,
+            isMoving: false,
+            carryingCoins: false,
+            collectCooldown: 0
+          });
+        }
+      }
+    });
+
+    setAgents(newAgents);
+  }, [gameState, mineConfigs]);
+
+  // Agent movement and coin collection logic
+  useEffect(() => {
+    if (!gameState || !mineConfigs || agents.length === 0) return;
+
+    const interval = setInterval(() => {
+      setAgents(prevAgents => {
+        return prevAgents.map(agent => {
+          const mineConfig = mineConfigs[agent.assignedMine];
+          const mineState = gameState.mines[agent.assignedMine];
+          
+          if (!mineConfig || !mineState || !mineState.has_manager) {
+            return agent;
+          }
+
+          // Agent movement cycle: mine -> safe -> mine
+          if (!agent.isMoving && agent.collectCooldown <= 0) {
+            if (!agent.carryingCoins) {
+              // Go collect coins from mine
+              agent.targetPosition = { ...mineConfig.position };
+              agent.isMoving = true;
+              agent.carryingCoins = true;
+              agent.collectCooldown = 3000; // 3 second cooldown
+            } else {
+              // Go deposit coins at safe
+              agent.targetPosition = { ...safePosition };
+              agent.isMoving = true;
+              agent.carryingCoins = false;
+              
+              // Add recent deposit for animation
+              const baseProduction = mineConfig.base_production;
+              const levelMultiplier = Math.pow(mineConfig.upgrade_multiplier, mineState.level || 0);
+              const managerMultiplier = 2.0;
+              const production = baseProduction * levelMultiplier * managerMultiplier;
+              const coinsDeposited = production * 3; // 3 seconds worth
+              
+              setRecentDeposits(prev => [...prev.slice(-2), {
+                amount: coinsDeposited,
+                timestamp: Date.now()
+              }]);
+            }
+          }
+
+          // Update movement
+          if (agent.isMoving && agent.targetPosition) {
+            const dx = agent.targetPosition.x - agent.position.x;
+            const dy = agent.targetPosition.y - agent.position.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < 5) {
+              // Reached target
+              agent.position = { ...agent.targetPosition };
+              agent.isMoving = false;
+              agent.targetPosition = null;
+            }
+          }
+
+          // Update cooldown
+          if (agent.collectCooldown > 0) {
+            agent.collectCooldown -= 100;
+          }
+
+          return agent;
+        });
+      });
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [gameState, mineConfigs, agents, safePosition]);
 
   // Auto-update currency for managed mines
   useEffect(() => {
@@ -308,40 +569,53 @@ function App() {
     }
   };
 
+  // Camera controls
+  const moveCamera = (direction) => {
+    const step = 100;
+    setCameraPosition(prev => {
+      switch(direction) {
+        case 'up': return { ...prev, y: prev.y - step };
+        case 'down': return { ...prev, y: prev.y + step };
+        case 'left': return { ...prev, x: prev.x - step };
+        case 'right': return { ...prev, x: prev.x + step };
+        default: return prev;
+      }
+    });
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading Crypto Miner Tycoon...</div>
+      <div className="loading-screen">
+        <div className="loading-content">
+          <div className="loading-spinner">⚡</div>
+          <div className="loading-text">Loading Crypto Miner Tycoon...</div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900">
-      {/* Header */}
-      <div className="bg-black bg-opacity-50 backdrop-blur-sm border-b border-gray-700">
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-2xl">⛏️</span>
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-white">Crypto Miner Tycoon</h1>
-                <p className="text-gray-400">Build your mining empire!</p>
-              </div>
+    <div className="game-container">
+      {/* Fixed UI Header */}
+      <div className="game-header">
+        <div className="header-left">
+          <div className="game-title">
+            <span className="title-icon">⛏️</span>
+            Crypto Miner Tycoon
+          </div>
+          <div className="game-subtitle">Build your mining empire!</div>
+        </div>
+        
+        <div className="header-right">
+          <div className="currency-display">
+            <div className="primary-currency">
+              💰 {formatCurrency(gameState?.currency || 0)} Coins
             </div>
-            
-            <div className="text-right">
-              <div className="text-2xl font-bold text-green-400">
-                💰 {formatCurrency(gameState?.currency || 0)} Coins
-              </div>
-              <div className="text-lg text-yellow-400">
-                🪙 {formatCurrency(gameState?.ncg_tokens || 0)} NCG
-              </div>
-              <div className="text-sm text-gray-400">
-                Total Earned: {formatCurrency(gameState?.total_earnings || 0)}
-              </div>
+            <div className="secondary-currency">
+              🪙 {formatCurrency(gameState?.ncg_tokens || 0)} NCG
+            </div>
+            <div className="total-earnings">
+              Total: {formatCurrency(gameState?.total_earnings || 0)}
             </div>
           </div>
         </div>
@@ -349,21 +623,32 @@ function App() {
 
       {/* Offline Income Notification */}
       {offlineIncome > 0 && (
-        <div className="bg-green-600 text-white p-4 text-center">
+        <div className="offline-notification">
           Welcome back! You earned {formatCurrency(offlineIncome)} coins while away! 🎉
         </div>
       )}
 
-      <div className="container mx-auto px-4 py-8">
-        {/* Token Converter */}
-        <div className="mb-8">
-          <TokenConverter gameState={gameState} onConvert={handleConvertTokens} />
-        </div>
+      {/* Game World */}
+      <div className="game-world">
+        <div 
+          className="game-viewport"
+          style={{
+            transform: `translate(${-cameraPosition.x}px, ${-cameraPosition.y}px)`
+          }}
+        >
+          {/* Background */}
+          <div className="game-background"></div>
 
-        {/* Mines Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Central Safe */}
+          <Safe 
+            position={safePosition}
+            totalCoins={gameState?.currency || 0}
+            recentDeposits={recentDeposits}
+          />
+
+          {/* Mines */}
           {Object.entries(mineConfigs || {}).map(([mineId, mineConfig]) => (
-            <MineCard
+            <Mine
               key={mineId}
               mine={{ id: mineId }}
               mineConfig={mineConfig}
@@ -372,38 +657,47 @@ function App() {
               onUpgrade={handleUpgradeMine}
               onHireManager={handleHireManager}
               onCollect={handleCollectMine}
+              agents={agents}
+              coins={coins}
             />
           ))}
         </div>
+      </div>
 
-        {/* Game Stats */}
-        <div className="mt-8 bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <h3 className="text-xl font-bold text-white mb-4">Empire Stats</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-bold text-blue-400">
-                {Object.values(gameState?.mines || {}).filter(m => m.owned).length}
-              </div>
-              <div className="text-gray-400">Mines Owned</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-purple-400">
-                {Object.values(gameState?.mines || {}).filter(m => m.has_manager).length}
-              </div>
-              <div className="text-gray-400">Managers Hired</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-green-400">
-                {Object.values(gameState?.mines || {}).reduce((sum, m) => sum + (m.level || 0), 0)}
-              </div>
-              <div className="text-gray-400">Total Upgrades</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-yellow-400">
-                {formatCurrency(gameState?.total_earnings || 0)}
-              </div>
-              <div className="text-gray-400">Lifetime Earnings</div>
-            </div>
+      {/* Camera Controls */}
+      <div className="camera-controls">
+        <button onClick={() => moveCamera('up')} className="camera-btn">↑</button>
+        <div className="camera-middle">
+          <button onClick={() => moveCamera('left')} className="camera-btn">←</button>
+          <button onClick={() => setCameraPosition({ x: 0, y: 0 })} className="camera-btn">🏠</button>
+          <button onClick={() => moveCamera('right')} className="camera-btn">→</button>
+        </div>
+        <button onClick={() => moveCamera('down')} className="camera-btn">↓</button>
+      </div>
+
+      {/* Side Panel */}
+      <div className="side-panel">
+        <TokenConverter gameState={gameState} onConvert={handleConvertTokens} />
+        
+        <div className="empire-stats">
+          <h3>Empire Stats</h3>
+          <div className="stat-item">
+            <span className="stat-label">Mines Owned:</span>
+            <span className="stat-value">
+              {Object.values(gameState?.mines || {}).filter(m => m.owned).length}/30
+            </span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Managers:</span>
+            <span className="stat-value">
+              {Object.values(gameState?.mines || {}).filter(m => m.has_manager).length}
+            </span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Total Upgrades:</span>
+            <span className="stat-value">
+              {Object.values(gameState?.mines || {}).reduce((sum, m) => sum + (m.level || 0), 0)}
+            </span>
           </div>
         </div>
       </div>

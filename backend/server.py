@@ -198,7 +198,7 @@ async def get_game_state(player_id: str = "default_player"):
         game_state.total_earnings += offline_income
     
     # Update coin accumulation for owned mines
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.utcnow()
     for mine_id_str, mine_data in game_state.mines.items():
         mine_state = MineState(**mine_data)
         mine_id = int(mine_id_str)

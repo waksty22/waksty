@@ -166,7 +166,7 @@ async def update_game_state(game_state: GameState):
 
 async def calculate_offline_income(game_state: GameState) -> float:
     """Calculate income earned while offline"""
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.utcnow()
     time_away = (current_time - game_state.last_update).total_seconds()
     
     # Limit offline earnings to 24 hours

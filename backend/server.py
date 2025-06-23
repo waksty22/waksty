@@ -150,7 +150,8 @@ async def get_or_create_game_state(player_id: str = "default_player") -> GameSta
     for mine_config in ALL_MINES:
         mine_state = MineState(
             mine_id=mine_config["id"],
-            unlocked=mine_config["unlocked"]
+            unlocked=mine_config["unlocked"],
+            owned=(mine_config["id"] == 1)  # First mine is automatically owned
         )
         new_state.mines[str(mine_config["id"])] = mine_state.dict()
     

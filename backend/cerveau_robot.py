@@ -202,7 +202,7 @@ async def api_chat(msg: str):
         try:
             # Appel du modèle Gemini en streaming
             response = client.models.generate_content_stream(
-                model='gemini-2.5-flash',
+                model='gemini-2.0-flash',
                 contents=msg,
                 config=types.GenerateContentConfig(
                     system_instruction=prompt_systeme,

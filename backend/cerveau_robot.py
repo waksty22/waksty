@@ -167,13 +167,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function parler(texte) {
-            if ('speechSynthesis' in window) {
-                const utterance = new SpeechSynthesisUtterance(texte);
-                utterance.lang = 'fr-FR';
-                utterance.rate = 1.0;
-                window.speechSynthesis.speak(utterance);
-            }
+    if ('speechSynthesis' in window) {
+        // Annule ce qui est en train d'être dit pour éviter les superpositions
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(texte);
+        utterance.lang = 'fr-FR';
+        utterance.pitch = 1.05; // Un ton légèrement plus vivant
+        utterance.rate = 1.02;  // Un débit fluide
+
+        // Chercher une voix française de meilleure qualité (Google ou Microsoft)
+        const voices = window.speechSynthesis.getVoices();
+        const voixFrancaise = voices.find(v => v.lang.includes('fr') && 
+            (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Natural')));
+        
+        if (voixFrancaise) {
+            utterance.voice = voixFrancaise;
         }
+
+        window.speechSynthesis.speak(utterance);
+    }
+}
+
+// Assurez le chargement des voix sur certains navigateurs
+if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
     </script>
 </body>
 </html>"""

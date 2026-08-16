@@ -113,11 +113,64 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             btnMicro.style.display = 'none';
         }
 
+        // File d'attente pour la synthèse vocale afin de lire tout le texte sans coupure
+        let fileDeParole = [];
+        let enTrainDeParler = false;
+
+        function parler(texte) {
+            if (!('speechSynthesis' in window)) return;
+            
+            // Nettoyage basique des caractères spéciaux pour éviter les bugs de prononciation
+            const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
+            if (texteNettoye.length > 0) {
+                fileDeParole.push(texteNettoye);
+                traiterFileDeParole();
+            }
+        }
+
+        function traiterFileDeParole() {
+            if (enTrainDeParler || fileDeParole.length === 0) return;
+
+            enTrainDeParler = true;
+            const texteCourant = fileDeParole.shift();
+            const utterance = new SpeechSynthesisUtterance(texteCourant);
+            utterance.lang = 'fr-FR';
+            utterance.pitch = 1.05; 
+            utterance.rate = 1.02;  
+
+            const voices = window.speechSynthesis.getVoices();
+            const voixFrancaise = voices.find(v => v.lang.includes('fr') && 
+                (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Natural')));
+            
+            if (voixFrancaise) {
+                utterance.voice = voixFrancaise;
+            }
+
+            utterance.onend = () => {
+                enTrainDeParler = false;
+                traiterFileDeParole(); // Passe à la phrase suivante dans la file
+            };
+
+            utterance.onerror = () => {
+                enTrainDeParler = false;
+                traiterFileDeParole();
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }
+
         async function envoyerMessage() {
             const txt = texteInput.value.trim();
             if (!txt) return;
 
             texteInput.value = '';
+
+            // Arrêter toute parole en cours si l'utilisateur envoie un nouveau message
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+            fileDeParole = [];
+            enTrainDeParler = false;
 
             chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
@@ -147,6 +200,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
 
+                    // Découpage intelligent par phrase dès qu'un point, point d'interrogation ou point d'exclamation apparaît
                     let match;
                     const regex = /([.?!;]+\s)/;
                     while ((match = regex.exec(bufferVocal)) !== null) {
@@ -157,6 +211,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     }
                 }
 
+                // S'il reste un bout de texte non prononcé à la fin du flux
                 if (bufferVocal.trim().length > 0) {
                     parler(bufferVocal);
                 }
@@ -166,33 +221,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
-        function parler(texte) {
-    if ('speechSynthesis' in window) {
-        // Annule ce qui est en train d'être dit pour éviter les superpositions
-        window.speechSynthesis.cancel();
-
-        const utterance = new SpeechSynthesisUtterance(texte);
-        utterance.lang = 'fr-FR';
-        utterance.pitch = 1.05; // Un ton légèrement plus vivant
-        utterance.rate = 1.02;  // Un débit fluide
-
-        // Chercher une voix française de meilleure qualité (Google ou Microsoft)
-        const voices = window.speechSynthesis.getVoices();
-        const voixFrancaise = voices.find(v => v.lang.includes('fr') && 
-            (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Natural')));
-        
-        if (voixFrancaise) {
-            utterance.voice = voixFrancaise;
+        if (window.speechSynthesis.onvoiceschanged !== undefined) {
+            window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
         }
-
-        window.speechSynthesis.speak(utterance);
-    }
-}
-
-// Assurez le chargement des voix sur certains navigateurs
-if (window.speechSynthesis.onvoiceschanged !== undefined) {
-    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-}
     </script>
 </body>
 </html>"""
@@ -219,7 +250,6 @@ async def api_chat(msg: str):
     def generate():
         reponse_ia = ""
         try:
-            # Appel du modèle Gemini en streaming
             response = client.models.generate_content_stream(
                 model='gemini-3.5-flash',
                 contents=msg,

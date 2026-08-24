@@ -1,3 +1,6 @@
 fastapi
 uvicorn
 google-genai
+edge-tts
+torchaudio
+speechbrain

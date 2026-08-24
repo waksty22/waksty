@@ -297,14 +297,16 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
 
         for essai in range(tentatives):
             try:
-                response = client.models.generate_content_stream(
-                    model='gemini-2.5-flash',
-                    contents=msg,
+                # Correction : Utilisation d'une session de chat pour éviter l'avertissement AFC
+                chat_session = client.chats.create(
+                    model="gemini-2.5-flash",
                     config=types.GenerateContentConfig(
                         system_instruction=prompt_systeme,
                         temperature=0.8,
-                    ),
+                    )
                 )
+                response = chat_session.send_message_stream(msg)
+
                 for chunk in response:
                     morceau = chunk.text
                     if morceau:
@@ -313,6 +315,7 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
                 succes = True
                 break
             except Exception as e:
+                print(f"Erreur API Gemini: {e}")
                 if essai < tentatives - 1:
                     time.sleep(1)
                 else:

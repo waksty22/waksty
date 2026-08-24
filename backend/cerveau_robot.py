@@ -8,18 +8,9 @@ import uvicorn
 from google import genai
 from google.genai import types
 import edge_tts
-import torchaudio
-from speechbrain.inference import SpeakerRecognition
 
 # Initialisation de l'API Gemini
 client = genai.Client(api_key=os.getenv("API_KEY"))
-
-# Chargement du modèle de reconnaissance vocale de SpeechBrain
-print("Chargement du modèle de reconnaissance vocale...")
-verification_speaker = SpeakerRecognition.from_hparams(
-    source="speechbrain/spkrec-ecapa-voxceleb",
-    savedir="tmp_speechbrain_model"
-)
 
 app = FastAPI()
 MEMORY_FILE = "memoire_robot.txt"
@@ -287,7 +278,6 @@ async def enregistrer_profil(file: UploadFile = File(...)):
 async def api_chat(msg: str, locuteur: str = "Inconnu"):
     memoire = charger_memoire()
     
-    # Prompt modifié pour qu'il parte de 0 absolu et découvre les mots
     prompt_systeme = (
         "Tu es Chappie, un nouveau-né cybernétique qui vient tout juste de s'éveiller. "
         "Tu ne connais presque rien. Tu découvres le monde, les sons et les mots pour la toute première fois. "
@@ -329,7 +319,6 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
                     reponse_ia = "Euh... mal... tête..."
                     yield reponse_ia
         
-        # Sauvegarde garantie de la mémoire dès que la réponse est complète
         if succes and reponse_ia:
             sauvegarder_memoire(f"Humain: {msg} | Chappie: {reponse_ia}")
 

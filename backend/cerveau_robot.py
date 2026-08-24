@@ -1,19 +1,20 @@
 import os
 import time
 import tempfile
+import asyncio
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 import uvicorn
 from google import genai
 from google.genai import types
-from gtts import gTTS
+import edge_tts
 import torchaudio
 from speechbrain.inference import SpeakerRecognition
 
 # Initialisation de l'API Gemini
 client = genai.Client(api_key=os.getenv("API_KEY"))
 
-# Chargement du modèle de reconnaissance vocale de SpeechBrain (Speaker Verification)
+# Chargement du modèle de reconnaissance vocale de SpeechBrain
 print("Chargement du modèle de reconnaissance vocale...")
 verification_speaker = SpeakerRecognition.from_hparams(
     source="speechbrain/spkrec-ecapa-voxceleb",
@@ -42,7 +43,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Chappie Cloud - Reconnaissance Vocale</title>
+    <title>Chappie Cloud - Voix Naturelle Edge-TTS</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 40px auto; padding: 20px; }
         #chat { background: #1e1e1e; height: 300px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
@@ -61,7 +62,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <h2>🤖 Chappie (Étape 2 : Reconnaissance Vocale)</h2>
+    <h2>🤖 Chappie (Voix Ultra-Naturelle Edge-TTS)</h2>
     
     <div class="profile-box">
         <span id="statutProfil">🔍 Vérification du profil de Julien...</span>
@@ -70,7 +71,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <br>
 
     <div id="chat">
-        <div class="msg bot"><b>Chappie :</b> Salut ! Est-ce que c'est bien Julien qui me parle ?</div>
+        <div class="msg bot"><b>Chappie :</b> Salut ! J'ai une nouvelle voix, tu m'entends bien ?</div>
     </div>
     
     <div class="controls">
@@ -335,10 +336,15 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
 @app.get("/api/tts")
 async def api_tts(text: str):
     try:
-        tts = gTTS(text=text, lang='fr', slow=False)
+        # Utilisation d'une voix neurale Microsoft Edge ultra-naturelle en français (Henri ou HenriNeural)
+        VOIX_EDGE = "fr-FR-HenriNeural"
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
             temp_filename = fp.name
-            tts.save(temp_filename)
+
+        communicate = edge_tts.Communicate(text, VOIX_EDGE)
+        await communicate.save(temp_filename)
+
         return FileResponse(temp_filename, media_type="audio/mpeg")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

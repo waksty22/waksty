@@ -238,6 +238,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             arreterEcouteSecurite();
             audioChappie.pause();
 
+            // Affichage immédiat du message de l'utilisateur dans le tchat
+            chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
+            chat.scrollTop = chat.scrollHeight;
+
             try {
                 const res = await fetch('/api/chat?msg=' + encodeURIComponent(txt));
                 if (!res.ok) throw new Error("Erreur HTTP: " + res.status);
@@ -245,8 +249,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let reponseComplete = "";
-                let locuteurDetecte = "Inconnu";
-                let premierChunk = true;
 
                 const botDiv = document.createElement('div');
                 botDiv.className = 'msg bot';
@@ -258,11 +260,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     const { value, done } = await reader.read();
                     if (done) break;
                     let morceau = decoder.decode(value, { stream: true });
-                    
-                    if (premierChunk) {
-                        // Le premier mot renvoyé par l'IA indique le locuteur détecté ou le début
-                        premierChunk = false;
-                    }
                     reponseComplete += morceau;
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
@@ -311,7 +308,6 @@ async def enregistrer_profil(file: UploadFile = File(...), nom: str = Form(...))
 async def api_chat(msg: str):
     memoire = charger_memoire()
     
-    # On récupère la liste des personnes enregistrées
     try:
         fichiers = os.listdir(PROFILS_DIR)
         profils_existants = [f.replace(".wav", "") for f in fichiers if f.endswith(".wav")]

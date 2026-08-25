@@ -314,11 +314,11 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
                 succes = True
                 break
             except Exception as e:
-                print(f"Erreur API Gemini: {e}")
+                print(f"❌ ERREUR API GEMINI : {str(e)}")
                 if essai < tentatives - 1:
                     time.sleep(1)
                 else:
-                    reponse_ia = "Euh... mal... tête..."
+                    reponse_ia = f"Euh... mal... tête... ({str(e)[:45]})"
                     yield reponse_ia
         
         if succes and reponse_ia:

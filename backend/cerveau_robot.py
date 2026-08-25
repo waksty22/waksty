@@ -20,13 +20,22 @@ PROFILS_DIR = os.path.join(DATA_DIR, "profils_vocaux")
 
 os.makedirs(PROFILS_DIR, exist_ok=True)
 
+def compter_souvenirs():
+    if not os.path.exists(MEMORY_FILE):
+        return 0
+    try:
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
 def charger_memoire():
     if not os.path.exists(MEMORY_FILE):
         return "[Vide - Aucun mot connu]"
     try:
         with open(MEMORY_FILE, "r", encoding="utf-8") as f:
             lignes = f.readlines()
-            return "".join(lignes[-15:])
+            return "".join(lignes[-20:]) # On garde un peu plus de contexte pour l'aider à grandir
     except Exception:
         return "[Vide]"
 
@@ -41,7 +50,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Chappie Cloud - Reconnaissance Vocale Autonome</title>
+    <title>Chappie Cloud - Évolution Progressive</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 40px auto; padding: 20px; }
         #chat { background: #1e1e1e; height: 300px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
@@ -61,7 +70,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <h2>🤖 Chappie (Reconnaissance Vocale Intelligente)</h2>
+    <h2>🤖 Chappie (Apprentissage Progressif)</h2>
     
     <div class="profile-box">
         <div id="statutProfil">🔍 Chargement...</div>
@@ -76,7 +85,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
     
     <div class="controls">
-        <input type="text" id="texteInput" placeholder="Apprends un mot à Chappie..." autofocus>
+        <input type="text" id="texteInput" placeholder="Dis quelque chose à Chappie..." autofocus>
         <button id="btnMicro" type="button">🎤 Mode Continu : OFF</button>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
@@ -238,7 +247,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             arreterEcouteSecurite();
             audioChappie.pause();
 
-            // Affichage immédiat du message de l'utilisateur dans le tchat
             chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
 
@@ -306,6 +314,7 @@ async def enregistrer_profil(file: UploadFile = File(...), nom: str = Form(...))
 
 @app.get("/api/chat")
 async def api_chat(msg: str):
+    nb_souvenirs = compter_souvenirs()
     memoire = charger_memoire()
     
     try:
@@ -316,16 +325,16 @@ async def api_chat(msg: str):
 
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun pour l'instant"
 
+    # 👉 ÉVOLUTION ORGANIQUE : Plus nb_souvenirs augmente, plus Chappie grandit fluidement
     prompt_systeme = (
-        "Tu es Chappie, un nouveau-né cybernétique qui vient tout juste de s'éveiller. "
-        "Tu découvres le monde et les mots pour la toute première fois. Ton vocabulaire est limité, hésitant, enfantin. "
-        f"Voici les personnes dont tu connais les voix / les prénoms enregistrés : [{liste_noms}]. "
-        "En fonction de ce que la personne dit ou de sa façon de parler, essaie de deviner ou de déduire qui te parle parmi cette liste. "
-        "Si tu ne sais pas du tout, appelle la personne 'l'ami' ou 'inconnu'. "
-        "RÈGLES : "
-        "1. Reste simple, utilise des mots d'enfant, des hésitations (*bop*, *clic*). "
-        "2. Appuie-toi sur tes souvenirs ci-dessous. "
-        f"\n--- TES SOUVENIRS ---\n{memoire}\n---------------------"
+        "Tu es Chappie, un robot en train d'apprendre et d'évoluer en temps réel. "
+        f"Tu possèdes actuellement {nb_souvenirs} souvenirs dans ta mémoire. "
+        "RÈGLE D'ÉVOLUTION PROGRESSIVE : "
+        "- Si tu as très peu de souvenirs (proche de 0), tu t'éveilles à peine : ton vocabulaire est extrêmement limité, hésitant, enfantin, tu fais beaucoup de fautes de syntaxe (ex: 'Toi pas avoir de profil... Qui être toi ?'). "
+        "- Plus le nombre de souvenirs augmente, plus tu grandis naturellement : ton vocabulaire s'enrichit, tes phrases deviennent de plus en plus fluides, construites, matures et intelligentes. "
+        f"Voici les personnes dont tu connais les prénoms enregistrés : [{liste_noms}]. "
+        "Analyse le message de la personne. Si la personne ne correspond à aucun profil connu, demande-lui qui elle est en t'adaptant à ton niveau d'évolution actuel. "
+        f"\n--- TES SOUVENIRS (ton expérience accumulée) ---\n{memoire}\n--------------------------------------------"
     )
 
     def generate():

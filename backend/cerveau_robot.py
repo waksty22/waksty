@@ -13,8 +13,11 @@ import edge_tts
 client = genai.Client(api_key=os.getenv("API_KEY"))
 
 app = FastAPI()
-MEMORY_FILE = "memoire_robot.txt"
-PROFIL_JULIEN = "profil_julien.wav"
+
+# Utilisation d'un dossier persistant si configuré (Render Disk), sinon dossier local
+DATA_DIR = os.getenv("RENDER_DISK_PATH", ".")
+MEMORY_FILE = os.path.join(DATA_DIR, "memoire_robot.txt")
+PROFIL_JULIEN = os.path.join(DATA_DIR, "profil_julien.wav")
 
 def charger_memoire():
     if not os.path.exists(MEMORY_FILE):
@@ -27,8 +30,11 @@ def charger_memoire():
         return "[Vide]"
 
 def sauvegarder_memoire(nouveau_souvenir):
-    with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-        f.write(nouveau_souvenir + "\n")
+    try:
+        with open(MEMORY_FILE, "a", encoding="utf-8") as f:
+            f.write(nouveau_souvenir + "\n")
+    except Exception as e:
+        print(f"❌ Erreur sauvegarde mémoire: {e}")
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
@@ -242,6 +248,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     const { value, done } = await reader.read();
                     if (done) break;
                     reponseComplete += decoder.decode(value, { stream: true });
+                    spanConturine = reponseComplete;
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
                 }
@@ -267,12 +274,14 @@ async def verifier_profil_existe():
 
 @app.post("/api/enregistrer-profil")
 async def enregistrer_profil(file: UploadFile = File(...)):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-    
-    os.replace(tmp_path, PROFIL_JULIEN)
-    return {"status": "ok"}
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        contents = await file.read()
+        with open(PROFIL_JULIEN, "wb") as f:
+            f.write(contents)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/chat")
 async def api_chat(msg: str, locuteur: str = "Inconnu"):
@@ -299,7 +308,6 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
             try:
                 response = client.models.generate_content_stream(
                     model="gemini-3.6-flash",
-
                     contents=msg,
                     config=types.GenerateContentConfig(
                         system_instruction=prompt_systeme,

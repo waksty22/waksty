@@ -299,7 +299,7 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
             try:
                 # Correction : Utilisation d'une session de chat pour éviter l'avertissement AFC
                 chat_session = client.chats.create(
-                    model="gemini-2.5-flash",
+                    model="gemini-1.5-flash",
                     config=types.GenerateContentConfig(
                         system_instruction=prompt_systeme,
                         temperature=0.8,

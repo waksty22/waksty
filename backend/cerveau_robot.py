@@ -297,15 +297,14 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
 
         for essai in range(tentatives):
             try:
-                # Correction : Utilisation d'une session de chat pour éviter l'avertissement AFC
-                chat_session = client.chats.create(
+                response = client.models.generate_content_stream(
                     model="gemini-1.5-flash",
+                    contents=msg,
                     config=types.GenerateContentConfig(
                         system_instruction=prompt_systeme,
                         temperature=0.8,
                     )
                 )
-                response = chat_session.send_message_stream(msg)
 
                 for chunk in response:
                     morceau = chunk.text

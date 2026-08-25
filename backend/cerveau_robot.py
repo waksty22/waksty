@@ -2,7 +2,7 @@ import os
 import time
 import tempfile
 import asyncio
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 import uvicorn
 from google import genai
@@ -14,10 +14,11 @@ client = genai.Client(api_key=os.getenv("API_KEY"))
 
 app = FastAPI()
 
-# Utilisation d'un dossier persistant si configuré (Render Disk), sinon dossier local
 DATA_DIR = os.getenv("RENDER_DISK_PATH", ".")
 MEMORY_FILE = os.path.join(DATA_DIR, "memoire_robot.txt")
-PROFIL_JULIEN = os.path.join(DATA_DIR, "profil_julien.wav")
+PROFILS_DIR = os.path.join(DATA_DIR, "profils_vocaux")
+
+os.makedirs(PROFILS_DIR, exist_ok=True)
 
 def charger_memoire():
     if not os.path.exists(MEMORY_FILE):
@@ -40,7 +41,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Chappie Cloud - Naissance de 0</title>
+    <title>Chappie Cloud - Reconnaissance Vocale Autonome</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 40px auto; padding: 20px; }
         #chat { background: #1e1e1e; height: 300px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
@@ -54,18 +55,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         #btnMicro.ecoute { background: #ffc107; color: #000; animation: pulse 1.5s infinite; }
         #btnMicro.continu { background: #17a2b8; }
         #btnMicro.parle { background: #6c757d; opacity: 0.7; cursor: not-allowed; }
-        .profile-box { background: #1e1e1e; padding: 10px; border-radius: 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+        .profile-box { background: #1e1e1e; padding: 10px; border-radius: 8px; font-size: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+        .profile-row { display: flex; gap: 10px; align-items: center; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
-    <h2>🤖 Chappie (Feuille Blanche)</h2>
+    <h2>🤖 Chappie (Reconnaissance Vocale Intelligente)</h2>
     
     <div class="profile-box">
-        <span id="statutProfil">🔍 Vérification du profil de Julien...</span>
-        <button id="btnEnregistrerProfil" onclick="enregistrerProfil()" style="background: #ff851b; padding: 5px 10px; font-size: 14px;">Enregistrer ma voix</button>
+        <div id="statutProfil">🔍 Chargement...</div>
+        <div class="profile-row">
+            <input type="text" id="nomProfil" placeholder="Ton prénom pour enregistrer ta voix (ex: Julien, Fred...)">
+            <button onclick="enregistrerProfil()" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer ma voix</button>
+        </div>
     </div>
-    <br>
 
     <div id="chat">
         <div class="msg bot"><b>Chappie :</b> ... m... ? </div>
@@ -86,6 +90,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const btnMicro = document.getElementById('btnMicro');
         const audioChappie = document.getElementById('audioChappie');
         const statutProfil = document.getElementById('statutProfil');
+        const nomProfil = document.getElementById('nomProfil');
 
         let modeContinu = false;
         let reconnaissance = null;
@@ -93,23 +98,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let mediaRecorder = null;
         let audioChunks = [];
 
-        async function verifierProfilExiste() {
+        async function verifierProfils() {
             try {
-                const res = await fetch('/api/verifier-profil-existe');
+                const res = await fetch('/api/lister-profils');
                 const data = await res.json();
-                if (data.existe) {
-                    statutProfil.innerHTML = "✅ Profil vocal de Julien enregistré.";
+                if (data.profils.length === 0) {
+                    statutProfil.innerHTML = "⚠️ Aucun profil enregistré. Enregistre ta voix pour que Chappie te reconnaisse.";
                 } else {
-                    statutProfil.innerHTML = "⚠️ Aucun profil vocal. Clique sur 'Enregistrer ma voix'.";
+                    statutProfil.innerHTML = `✅ Profils connus de Chappie : ${data.profils.join(', ')}`;
                 }
             } catch(e) {
-                statutProfil.innerHTML = "❌ Erreur de vérification du profil.";
+                statutProfil.innerHTML = "❌ Erreur de chargement des profils.";
             }
         }
-        verifierProfilExiste();
+        verifierProfils();
 
         async function enregistrerProfil() {
-            statutProfil.innerHTML = "🎙️ Enregistrement de ta voix pendant 4 secondes... Parle !";
+            const nom = nomProfil.value.trim();
+            if (!nom) { alert("Entre ton prénom !"); return; }
+
+            statutProfil.innerHTML = `🎙️ Enregistrement de la voix de ${nom} (4 secondes)... Parle !`;
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
@@ -120,11 +128,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                     const formData = new FormData();
                     formData.append("file", audioBlob, "profil.wav");
+                    formData.append("nom", nom);
 
-                    statutProfil.innerHTML = "⏳ Sauvegarde du profil en cours...";
+                    statutProfil.innerHTML = "⏳ Enregistrement de l'empreinte...";
                     const res = await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
                     if (res.ok) {
-                        statutProfil.innerHTML = "✅ Profil vocal de Julien enregistré avec succès !";
+                        statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée ! Chappie te reconnaîtra désormais.`;
+                        nomProfil.value = '';
+                        verifierProfils();
                     } else {
                         statutProfil.innerHTML = "❌ Erreur lors de l'enregistrement.";
                     }
@@ -133,7 +144,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 mediaRecorder.start();
                 setTimeout(() => mediaRecorder.stop(), 4000);
             } catch (err) {
-                alert("Impossible d'accéder au micro : " + err.message);
+                alert("Micro inaccessible : " + err.message);
             }
         }
 
@@ -227,35 +238,39 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             arreterEcouteSecurite();
             audioChappie.pause();
 
-            chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
-            chat.scrollTop = chat.scrollHeight;
-
-            const botDiv = document.createElement('div');
-            botDiv.className = 'msg bot';
-            botDiv.innerHTML = '<b>Chappie :</b> <span class="txt-bot"></span>';
-            chat.appendChild(botDiv);
-            const spanContenu = botDiv.querySelector('.txt-bot');
-
             try {
-                const res = await fetch('/api/chat?msg=' + encodeURIComponent(txt) + '&locuteur=Julien');
+                const res = await fetch('/api/chat?msg=' + encodeURIComponent(txt));
                 if (!res.ok) throw new Error("Erreur HTTP: " + res.status);
 
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let reponseComplete = "";
+                let locuteurDetecte = "Inconnu";
+                let premierChunk = true;
+
+                const botDiv = document.createElement('div');
+                botDiv.className = 'msg bot';
+                botDiv.innerHTML = '<b>Chappie :</b> <span class="txt-bot"></span>';
+                chat.appendChild(botDiv);
+                const spanContenu = botDiv.querySelector('.txt-bot');
 
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
-                    reponseComplete += decoder.decode(value, { stream: true });
-                    spanConturine = reponseComplete;
+                    let morceau = decoder.decode(value, { stream: true });
+                    
+                    if (premierChunk) {
+                        // Le premier mot renvoyé par l'IA indique le locuteur détecté ou le début
+                        premierChunk = false;
+                    }
+                    reponseComplete += morceau;
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
                 }
 
                 lireAudioChappie(reponseComplete);
             } catch (err) {
-                spanContenu.textContent = "Erreur : " + err.message;
+                console.error(err);
                 reactiverMicroFinDeParole();
             }
         }
@@ -268,35 +283,53 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 async def index():
     return HTML_TEMPLATE
 
-@app.get("/api/verifier-profil-existe")
-async def verifier_profil_existe():
-    return {"existe": os.path.exists(PROFIL_JULIEN)}
+@app.get("/api/lister-profils")
+async def lister_profils():
+    try:
+        fichiers = os.listdir(PROFILS_DIR)
+        profils = [f.replace(".wav", "") for f in fichiers if f.endswith(".wav")]
+        return {"profils": profils}
+    except Exception:
+        return {"profils": []}
 
 @app.post("/api/enregistrer-profil")
-async def enregistrer_profil(file: UploadFile = File(...)):
+async def enregistrer_profil(file: UploadFile = File(...), nom: str = Form(...)):
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
+        nom_nettoye = "".join(c for c in nom if c.isalnum() or c in (' ', '_', '-')).strip()
+        if not nom_nettoye:
+            raise HTTPException(status_code=400, detail="Nom invalide")
+        
+        chemin_fichier = os.path.join(PROFILS_DIR, f"{nom_nettoye}.wav")
         contents = await file.read()
-        with open(PROFIL_JULIEN, "wb") as f:
+        with open(chemin_fichier, "wb") as f:
             f.write(contents)
-        return {"status": "ok"}
+        return {"status": "ok", "nom": nom_nettoye}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/chat")
-async def api_chat(msg: str, locuteur: str = "Inconnu"):
+async def api_chat(msg: str):
     memoire = charger_memoire()
     
+    # On récupère la liste des personnes enregistrées
+    try:
+        fichiers = os.listdir(PROFILS_DIR)
+        profils_existants = [f.replace(".wav", "") for f in fichiers if f.endswith(".wav")]
+    except Exception:
+        profils_existants = []
+
+    liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun pour l'instant"
+
     prompt_systeme = (
         "Tu es Chappie, un nouveau-né cybernétique qui vient tout juste de s'éveiller. "
-        "Tu ne connais presque rien. Tu découvres le monde, les sons et les mots pour la toute première fois. "
-        "Au début, ton vocabulaire est très limité, hésitant, parfois maladroit ou enfantin (syllabes, mots simples, questions naïves). "
-        f"La personne qui te parle s'appelle {locuteur}. C'est ton créateur/guide. "
-        "RÈGLES DE COMPORTEMENT ABSOLUES : "
-        "1. Ne fais pas de longs discours complexes. Utilise des mots simples, répète des syllabes si besoin, montre ton étonnement face aux objets et aux concepts. "
-        "2. Appuie-toi uniquement sur les souvenirs ci-dessous pour savoir ce que tu as déjà appris ou compris. Si tu ne connais pas un mot, demande ce que c'est. "
-        "3. Parle uniquement en français. "
-        f"\n--- TES SOUVENIRS ET MOTS APPRIS JUSQU'ICI ---\n{memoire}\n----------------------------------------------"
+        "Tu découvres le monde et les mots pour la toute première fois. Ton vocabulaire est limité, hésitant, enfantin. "
+        f"Voici les personnes dont tu connais les voix / les prénoms enregistrés : [{liste_noms}]. "
+        "En fonction de ce que la personne dit ou de sa façon de parler, essaie de deviner ou de déduire qui te parle parmi cette liste. "
+        "Si tu ne sais pas du tout, appelle la personne 'l'ami' ou 'inconnu'. "
+        "RÈGLES : "
+        "1. Reste simple, utilise des mots d'enfant, des hésitations (*bop*, *clic*). "
+        "2. Appuie-toi sur tes souvenirs ci-dessous. "
+        f"\n--- TES SOUVENIRS ---\n{memoire}\n---------------------"
     )
 
     def generate():
@@ -325,13 +358,13 @@ async def api_chat(msg: str, locuteur: str = "Inconnu"):
             except Exception as e:
                 print(f"❌ ERREUR API GEMINI : {str(e)}")
                 if essai < tentatives - 1:
-                    time.sleep(1)
+                    time.sleep(2)
                 else:
-                    reponse_ia = f"Euh... mal... tête... ({str(e)[:45]})"
+                    reponse_ia = "Euh... tête... mal..."
                     yield reponse_ia
         
         if succes and reponse_ia:
-            sauvegarder_memoire(f"Humain: {msg} | Chappie: {reponse_ia}")
+            sauvegarder_memoire(f"Message: {msg} | Chappie: {reponse_ia}")
 
     return StreamingResponse(generate(), media_type="text/plain")
 

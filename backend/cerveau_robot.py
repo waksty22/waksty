@@ -133,7 +133,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         #btnMicro.parle { background: #6c757d; opacity: 0.7; cursor: not-allowed; }
         .profile-box { background: #1e1e1e; padding: 10px; border-radius: 8px; font-size: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
         .profile-row { display: flex; gap: 10px; align-items: center; }
-        .audio-player-container { background: #1e1e1e; padding: 8px; border-radius: 8px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -146,12 +145,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <input type="text" id="nomProfil" placeholder="Ton prénom (ex: Julien)">
             <button onclick="enregistrerProfil()" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer ma voix</button>
         </div>
-    </div>
-
-    <!-- Lecteur audio visible pour forcer le déblocage mobile si l'autoplay échoue -->
-    <div class="audio-player-container">
-        <span>🔊 Dernier vocal de Chappie :</span>
-        <audio id="audioChappie" controls playsinline style="height: 35px; width: 220px;"></audio>
     </div>
 
     <div id="chat">
@@ -169,7 +162,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const texteInput = document.getElementById('texteInput');
         const btnEnvoyer = document.getElementById('btnEnvoyer');
         const btnMicro = document.getElementById('btnMicro');
-        const audioChappie = document.getElementById('audioChappie');
         const statutProfil = document.getElementById('statutProfil');
         const nomProfil = document.getElementById('nomProfil');
 
@@ -178,6 +170,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let microVerrouille = false;
         let mediaRecorder = null;
         let audioChunks = [];
+        let currentAudio = null;
 
         async function verifierProfils() {
             try {
@@ -254,23 +247,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!texteNettoye) { reactiverMicroFinDeParole(); return; }
             microVerrouille = true;
 
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+
             try {
-                audioChappie.src = `/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`;
-                audioChappie.load();
+                currentAudio = new Audio(`/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`);
+                currentAudio.playsInline = true;
                 
-                audioChappie.onended = () => {
+                currentAudio.onended = () => {
+                    reactiverMicroFinDeParole();
+                };
+                
+                currentAudio.onerror = (e) => {
+                    console.log("Erreur audio:", e);
                     reactiverMicroFinDeParole();
                 };
 
-                audioChappie.onerror = (e) => {
-                    console.log("Erreur audio element:", e);
-                    reactiverMicroFinDeParole();
-                };
-
-                await audioChappie.play();
+                await currentAudio.play();
             } catch (err) {
-                console.log("Lecture automatique bloquée ou erreur:", err);
-                // Si l'autoplay est bloqué, l'utilisateur pourra cliquer sur play sur le lecteur audio visible juste au-dessus du chat
+                console.log("Exception lecture audio:", err);
                 reactiverMicroFinDeParole();
             }
         }
@@ -286,7 +283,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!txt || microVerrouille) return;
             texteInput.value = '';
             arreterEcouteSecurite();
-            audioChappie.pause();
+            if (currentAudio) currentAudio.pause();
 
             chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;

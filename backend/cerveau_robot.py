@@ -308,7 +308,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
                 }
-                lireAudioChappie(reponseComplete, energieCourante);
+                await lireAudioChappie(reponseComplete, energieCourante);
             } catch (err) {
                 reactiverMicroFinDeParole();
             }

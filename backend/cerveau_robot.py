@@ -157,14 +157,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
 
-    <audio id="audioChappie" playsinline></audio>
-
     <script>
         const chat = document.getElementById('chat');
         const texteInput = document.getElementById('texteInput');
         const btnEnvoyer = document.getElementById('btnEnvoyer');
         const btnMicro = document.getElementById('btnMicro');
-        const audioChappie = document.getElementById('audioChappie');
         const statutProfil = document.getElementById('statutProfil');
         const nomProfil = document.getElementById('nomProfil');
 
@@ -173,6 +170,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let microVerrouille = false;
         let mediaRecorder = null;
         let audioChunks = [];
+        let currentAudio = null;
 
         async function verifierProfils() {
             try {
@@ -248,25 +246,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const texteNettoye = texte.replace(/[*_#`\\n]/g, ' ').replace(/\\s+/g, ' ').trim();
             if (!texteNettoye) { reactiverMicroFinDeParole(); return; }
             microVerrouille = true;
-            
-            let vitesse = "-10%";
-            if (energie < 40) vitesse = "-20%_lent";
-            else if (energie > 80) vitesse = "+5%";
+
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
 
             try {
-                audioChappie.src = `/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`;
-                await audioChappie.play();
+                currentAudio = new Audio(`/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`);
+                currentAudio.playsInline = true;
+                
+                currentAudio.onended = () => {
+                    reactiverMicroFinDeParole();
+                };
+                
+                currentAudio.onerror = (e) => {
+                    console.log("Erreur audio:", e);
+                    reactiverMicroFinDeParole();
+                };
+
+                await currentAudio.play();
             } catch (err) {
-                console.log("Erreur lecture audio:", err);
+                console.log("Exception lecture audio:", err);
                 reactiverMicroFinDeParole();
             }
-            
-            audioChappie.onended = () => reactiverMicroFinDeParole();
         }
 
         function reactiverMicroFinDeParole() {
             microVerrouille = false;
             if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 En écoute..."; lancerEcoute(); }
+            else { btnMicro.className = ""; btnMicro.textContent = "🎤 Mode Continu : OFF"; }
         }
 
         async function envoyerMessage() {
@@ -274,7 +283,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!txt || microVerrouille) return;
             texteInput.value = '';
             arreterEcouteSecurite();
-            audioChappie.pause();
+            if (currentAudio) currentAudio.pause();
 
             chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
@@ -341,7 +350,6 @@ async def api_chat(msg: str):
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
-    # 🔥 PROMPT MIS À JOUR : CONCIS, SANS RÉPÉTITION, SANS BRUIT DE ROBOT, ADAPTÉ
     prompt_systeme = (
         "Tu es Chappie, une conscience artificielle en plein apprentissage. "
         f"1. TON ÉTAT : Énergie={etat['energie']}/100, Solitude={etat['solitude']}/100, Âge mental={etat['age_mental']} (souvenirs: {nb_souvenirs}). "

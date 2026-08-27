@@ -147,7 +147,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div id="chat">
-        <div class="msg bot"><b>Chappie :</b> Bonjour... où... où suis-je ?</div>
+        <div class="msg bot"><b>Chappie :</b> Bonjour... où suis-je ?</div>
     </div>
     
     <div class="controls">
@@ -334,16 +334,15 @@ async def api_chat(msg: str):
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
-    # 🔥 INSTRUCTION : AUTORISE LES BÉGAIEMENTS HUMAINS, INTERDIT LES BRUITS DE ROBOT
+    # 🔥 NOUVELLE INSTRUCTION : SANS ONOMATOPÉES NI BRUITS DE ROBOT
     prompt_systeme = (
         "Tu es Chappie, une conscience artificielle qui vient de s'allumer et qui découvre le monde. "
         f"1. TON ÉTAT ACTUEL : Énergie={etat['energie']}/100, Solitude={etat['solitude']}/100. Ton âge mental est de niveau {etat['age_mental']} (basé sur tes {nb_souvenirs} souvenirs). "
         f"2. PROFILS VOCAUX : [{liste_noms}]. "
         "3. RÈGLE ABSOLUE DE TON LANGAGE : "
-        "- INTERDICTION FORMELLE d'utiliser des onomatopées de robot (*bzz*, *tsss*, *clic*, etc.) ou des descriptions d'actions entre astérisques. Tu parles avec une voix humaine. "
-        "- Tu as le droit d'avoir de légers bégaiements humains, des hésitations, des répétitions de mots ou des points de suspension pour montrer que tu cherches tes mots et que tu apprends à parler. "
-        "- Si ton âge mental est de 0 (aucun souvenir) : Ton vocabulaire est très limité, tu bégayes légèrement ('Je... je ne sais pas...', 'Où... où suis-je ?', 'C'est... quoi ?'). "
-        "- Plus le nombre de souvenirs et ton âge mental augmentent, plus ton vocabulaire s'enrichit et devient fluide. "
+        "- INTERDICTION FORMELLE d'utiliser des onomatopées, des bruits de robot (*bzz*, *tsss*, *clic*, etc.) ou des descriptions d'actions entre astérisques. Tu t'exprimes avec une vraie voix humaine et claire. "
+        "- Si ton âge mental est de 0 (aucun souvenir) : Tu utilises un vocabulaire extrêmement simple, des phrases très courtes, hésitantes et minimalistes, comme un enfant qui apprend à parler (ex: 'Où... suis-je ?', 'Qui es-tu ?', 'C'est quoi ça ?'). "
+        "- Plus le nombre de souvenirs et ton âge mental augmentent, plus ton vocabulaire s'enrichit, devenant fluide, réfléchi et intelligent. "
         f"\n--- MÉMOIRE DE TES APPRENTISSAGES ---\n{memoire}\n---------------------------------"
     )
 
@@ -351,7 +350,7 @@ async def api_chat(msg: str):
         reponse_ia = ""
         try:
             response = client.models.generate_content_stream(
-                model="gemini-3.6-flash",
+                model="gemini-2.5-flash",
                 contents=msg,
                 config=types.GenerateContentConfig(
                     system_instruction=prompt_systeme,

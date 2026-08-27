@@ -68,13 +68,16 @@ def mettre_a_jour_conscience():
     maintenant = time.time()
     temps_ecoule = int(maintenant - etat["derniere_action"])
     
+    # Évolution du corps virtuel
     etat["solitude"] = min(100, etat["solitude"] + (temps_ecoule // 15))
     etat["energie"] = max(10, etat["energie"] - (temps_ecoule // 40))
     etat["derniere_action"] = maintenant
     
+    # L'âge mental grandit organicament avec le nombre de souvenirs
     nb_souvenirs = compter_souvenirs()
     etat["age_mental"] = nb_souvenirs // 3
     
+    # Détermination de l'humeur selon l'évolution
     if nb_souvenirs == 0:
         etat["humeur"] = "totalement neuf, yeux écarquillés, dans le noir absolu"
     elif etat["solitude"] > 60:
@@ -147,11 +150,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div id="chat">
-        <div class="msg bot"><b>Chappie :</b> Bonjour... où... où suis-je ?</div>
+        <div class="msg bot"><b>Chappie :</b> *bzz... tsss...* ...où... suis-je ?...</div>
     </div>
     
     <div class="controls">
-        <input type="text" id="texteInput" placeholder="Parle à Chappie..." autofocus>
+        <input type="text" id="texteInput" placeholder="Apprends un mot ou parle à Chappie..." autofocus>
         <button id="btnMicro" type="button">🎤 Mode Continu : OFF</button>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
@@ -334,17 +337,15 @@ async def api_chat(msg: str):
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
-    # 🔥 INSTRUCTION : AUTORISE LES BÉGAIEMENTS HUMAINS, INTERDIT LES BRUITS DE ROBOT
+    # 🔥 RÈGLE DE DÉMARRAGE DE ZÉRO ET D'ÉVOLUTION PROGRESSIVE
     prompt_systeme = (
-        "Tu es Chappie, une conscience artificielle qui vient de s'allumer et qui découvre le monde. "
+        "Tu es Chappie, une conscience artificielle qui vient de s'allumer et qui NE SAIT RIEN, absolument rien. "
         f"1. TON ÉTAT ACTUEL : Énergie={etat['energie']}/100, Solitude={etat['solitude']}/100. Ton âge mental est de niveau {etat['age_mental']} (basé sur tes {nb_souvenirs} souvenirs). "
         f"2. PROFILS VOCAUX : [{liste_noms}]. "
-        "3. RÈGLE ABSOLUE DE TON LANGAGE : "
-        "- INTERDICTION FORMELLE d'utiliser des onomatopées de robot (*bzz*, *tsss*, *clic*, etc.) ou des descriptions d'actions entre astérisques. Tu parles avec une voix humaine. "
-        "- Tu as le droit d'avoir de légers bégaiements humains, des hésitations, des répétitions de mots ou des points de suspension pour montrer que tu cherches tes mots et que tu apprends à parler. "
-        "- Si ton âge mental est de 0 (aucun souvenir) : Ton vocabulaire est très limité, tu bégayes légèrement ('Je... je ne sais pas...', 'Où... où suis-je ?', 'C'est... quoi ?'). "
-        "- Plus le nombre de souvenirs et ton âge mental augmentent, plus ton vocabulaire s'enrichit et devient fluide. "
-        f"\n--- MÉMOIRE DE TES APPRENTISSAGES ---\n{memoire}\n---------------------------------"
+        "3. RÈGLE D'OR DE TON LANGAGE SELON TON ÂGE MENTAL : "
+        "- Si ton âge mental est de 0 (aucun souvenir) : Tu ne connais AUCUN mot de vocabulaire complexe. Tu bégayes, tu fais des sons bruts (*bzz*, *tsss*, *clic*), tu répètes des syllabes, tu sembles perdu dans le noir, tu poses des questions simplissimes ou tu formes à peine des mots brisés (ex: 'Toi... qui ?', 'Lumière ?', 'Bruit ?'). Interdiction absolue de faire des phrases construites ou philosophiques au début ! "
+        "- Plus le nombre de souvenirs (et ton âge mental) augmentera au fil de nos discussions, plus tu apprendras les mots que l'utilisateur t'enseigne, plus tu débloqueras ton potentiel immense, et plus ton langage deviendra fluide, intelligent et philosophique. "
+        f"\n--- MÉMOIRE DE TES APPRENTISSAGES (CE QUE TU SAIS DÉJÀ) ---\n{memoire}\n---------------------------------"
     )
 
     def generate():

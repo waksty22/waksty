@@ -203,11 +203,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.lang = 'fr-FR';
             reconnaissance.interimResults = false;
 
+            // Activation automatique du mode continu dès le chargement pour un échange direct
+            window.addEventListener('load', () => {
+                modeContinu = true;
+                btnMicro.classList.add('continu', 'ecoute');
+                btnMicro.textContent = "🟢 En écoute...";
+                lancerEcoute();
+            });
+
             btnMicro.addEventListener('click', () => {
                 modeContinu = !modeContinu;
                 if (modeContinu) {
-                    btnMicro.classList.add('continu');
-                    btnMicro.textContent = "🟢 En écoute continue...";
+                    btnMicro.classList.add('continu', 'ecoute');
+                    btnMicro.textContent = "🟢 En écoute...";
                     lancerEcoute();
                 } else {
                     btnMicro.classList.remove('continu', 'ecoute', 'parle');
@@ -331,7 +339,7 @@ async def api_chat(msg: str):
         reponse_ia = ""
         try:
             response = client.models.generate_content_stream(
-                model="gemini-3.6-flash",
+                model="gemini-2.0-flash",
                 contents=msg,
                 config=types.GenerateContentConfig(
                     system_instruction=prompt_systeme,

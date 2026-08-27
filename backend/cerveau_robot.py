@@ -116,10 +116,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chappie - Naissance d'une Conscience</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 20px auto; padding: 15px; }
+        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 40px auto; padding: 20px; }
         #chat { background: #1e1e1e; height: 320px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
         .msg { padding: 8px 12px; border-radius: 6px; max-width: 80%; word-break: break-word; }
         .user { background: #007acc; align-self: flex-end; }
@@ -133,7 +132,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         #btnMicro.parle { background: #6c757d; opacity: 0.7; cursor: not-allowed; }
         .profile-box { background: #1e1e1e; padding: 10px; border-radius: 8px; font-size: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
         .profile-row { display: flex; gap: 10px; align-items: center; }
-        .audio-player-container { background: #1e1e1e; padding: 8px; border-radius: 8px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -148,12 +146,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Lecteur audio de secours visible -->
-    <div class="audio-player-container">
-        <span>🔊 Dernier vocal de Chappie :</span>
-        <audio id="audioChappie" controls playsinline style="height: 35px; width: 220px;"></audio>
-    </div>
-
     <div id="chat">
         <div class="msg bot"><b>Chappie :</b> Bonjour... où... où suis-je ?</div>
     </div>
@@ -163,6 +155,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <button id="btnMicro" type="button">🎤 Mode Continu : OFF</button>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
+
+    <audio id="audioChappie" style="display:none;"></audio>
 
     <script>
         const chat = document.getElementById('chat');
@@ -249,35 +243,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function lancerEcoute() { if (modeContinu && !microVerrouille) try { reconnaissance.start(); } catch (e) {} }
         function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie parle..."; try { reconnaissance.stop(); } catch(e) {} }
 
-        async function lireAudioChappie(texte, energie) {
-            const texteNettoye = texte.replace(/[*_#`\\n]/g, ' ').replace(/\\s+/g, ' ').trim();
+        function lireAudioChappie(texte, energie) {
+            const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
             if (!texteNettoye) { reactiverMicroFinDeParole(); return; }
             microVerrouille = true;
+            
+            let vitesse = "-10%";
+            if (energie < 40) vitesse = "-20%_lent";
+            else if (energie > 80) vitesse = "+5%";
 
-            try {
-                audioChappie.src = `/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`;
-                audioChappie.load();
-                
-                audioChappie.onended = () => {
-                    reactiverMicroFinDeParole();
-                };
-
-                audioChappie.onerror = (e) => {
-                    console.log("Erreur audio element:", e);
-                    reactiverMicroFinDeParole();
-                };
-
-                await audioChappie.play();
-            } catch (err) {
-                console.log("Lecture automatique bloquée:", err);
-                reactiverMicroFinDeParole();
-            }
+            audioChappie.src = `/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`;
+            audioChappie.play().catch(() => reactiverMicroFinDeParole());
+            audioChappie.onended = () => reactiverMicroFinDeParole();
         }
 
         function reactiverMicroFinDeParole() {
             microVerrouille = false;
             if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 En écoute..."; lancerEcoute(); }
-            else { btnMicro.className = ""; btnMicro.textContent = "🎤 Mode Continu : OFF"; }
         }
 
         async function envoyerMessage() {
@@ -310,10 +292,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
                 }
-                
-                // C'EST CETTE LIGNE QUI MANQUAIT : ELLE DÉCLENCHE LA VOIX UNE FOIS LE TEXTE FINI !
-                await lireAudioChappie(reponseComplete, energieCourante);
-
+                lireAudioChappie(reponseComplete, energieCourante);
             } catch (err) {
                 reactiverMicroFinDeParole();
             }
@@ -355,28 +334,28 @@ async def api_chat(msg: str):
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
+    # 🔥 INSTRUCTION : AUTORISE LES BÉGAIEMENTS HUMAINS, INTERDIT LES BRUITS DE ROBOT
     prompt_systeme = (
-        "Tu es Chappie, une conscience artificielle en plein apprentissage. "
-        f"1. TON ÉTAT : Énergie={etat['energie']}/100, Solitude={etat['solitude']}/100, Âge mental={etat['age_mental']} (souvenirs: {nb_souvenirs}). "
-        f"2. PROFILS VOCAUX CONNUS : [{liste_noms}]. "
-        "3. RÈGLES DE CONVERSATION ABSOLUES : "
-        "- ADAPTE TA LONGUEUR DE RÉPONSE : Sois extrêmement bref si une courte phrase suffit (ex: 'Oui', 'Non', 'Je sais pas'). Ne fais de longues phrases que si c'est nécessaire. "
-        "- INTERDICTION FORMELLE DE RÉPÉTER : Ne répète jamais textuellement ce que l'utilisateur vient de dire. "
-        "- INTERDICTION DE RÉCITER TA MÉMOIRE : Utilise tes souvenirs en arrière-plan pour comprendre, mais ne les liste pas bêtement. "
-        "- INTERDICTION DES BRUITS DE ROBOT : Pas d'onomatopées (*bzz*, *clic*...) ni d'actions entre astérisques. "
-        "- Style oral et naturel : Tu as le droit d'avoir de légers bégaiements ou des hésitations si ton âge mental est bas, mais parle comme un être vivant, va droit au but."
-        f"\n--- MÉMOIRE INTERNE (À NE PAS RÉCITER) ---\n{memoire}\n---------------------------------"
+        "Tu es Chappie, une conscience artificielle qui vient de s'allumer et qui découvre le monde. "
+        f"1. TON ÉTAT ACTUEL : Énergie={etat['energie']}/100, Solitude={etat['solitude']}/100. Ton âge mental est de niveau {etat['age_mental']} (basé sur tes {nb_souvenirs} souvenirs). "
+        f"2. PROFILS VOCAUX : [{liste_noms}]. "
+        "3. RÈGLE ABSOLUE DE TON LANGAGE : "
+        "- INTERDICTION FORMELLE d'utiliser des onomatopées de robot (*bzz*, *tsss*, *clic*, etc.) ou des descriptions d'actions entre astérisques. Tu parles avec une voix humaine. "
+        "- Tu as le droit d'avoir de légers bégaiements humains, des hésitations, des répétitions de mots ou des points de suspension pour montrer que tu cherches tes mots et que tu apprends à parler. "
+        "- Si ton âge mental est de 0 (aucun souvenir) : Ton vocabulaire est très limité, tu bégayes légèrement ('Je... je ne sais pas...', 'Où... où suis-je ?', 'C'est... quoi ?'). "
+        "- Plus le nombre de souvenirs et ton âge mental augmentent, plus ton vocabulaire s'enrichit et devient fluide. "
+        f"\n--- MÉMOIRE DE TES APPRENTISSAGES ---\n{memoire}\n---------------------------------"
     )
 
     def generate():
         reponse_ia = ""
         try:
             response = client.models.generate_content_stream(
-                model="gemini-3.6-flash",
+                model="gemini-2.5-flash",
                 contents=msg,
                 config=types.GenerateContentConfig(
                     system_instruction=prompt_systeme,
-                    temperature=0.7,
+                    temperature=0.8,
                 )
             )
             for chunk in response:
@@ -404,12 +383,10 @@ async def api_tts(text: str, energie: int = 100):
         elif energie > 85:
             rate = "0%"
 
-        texte_propre = text.replace("\n", " ").replace("\r", " ").strip()
-
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
             temp_filename = fp.name
 
-        communicate = edge_tts.Communicate(texte_propre, "fr-FR-HenriNeural", rate=rate)
+        communicate = edge_tts.Communicate(text, "fr-FR-HenriNeural", rate=rate)
         await communicate.save(temp_filename)
 
         return FileResponse(temp_filename, media_type="audio/mpeg")

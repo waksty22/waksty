@@ -339,7 +339,7 @@ async def api_chat(msg: str):
         reponse_ia = ""
         try:
             response = client.models.generate_content_stream(
-                model="gemini-2.0-flash",
+                model="gemini-3.6-flash",
                 contents=msg,
                 config=types.GenerateContentConfig(
                     system_instruction=prompt_systeme,

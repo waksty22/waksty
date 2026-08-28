@@ -143,7 +143,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
 
-    <audio id="audioChappie"></audio>
+    <audio id="audioChappie" autoplay></audio>
 
     <script>
         const chat = document.getElementById('chat');
@@ -390,6 +390,7 @@ async def api_chat(msg: str):
                 if chunk.text:
                     reponse_ia += chunk.text
                     yield chunk.text
+                print(f"DEBUG CHUNK: {repr(chunk.text)}")
         except Exception as e:
             erreur_exacte = str(e)
             print(f"❌ ERREUR EXACTE API GEMINI : {erreur_exacte}")
@@ -417,6 +418,7 @@ async def api_tts(text: str, energie: int = 100):
 
         return FileResponse(temp_filename, media_type="audio/mpeg")
     except Exception as e:
+        print(f"❌ Erreur TTS : {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

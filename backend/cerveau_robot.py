@@ -129,7 +129,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="statutProfil">🔍 Chargement des profils vocaux...</div>
         <div class="profile-row">
             <input type="text" id="nomProfil" placeholder="Ton prénom (ex: Julien)">
-            <button onclick="enregistrerProfil()" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer ma voix</button>
+            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer ma voix</button>
         </div>
     </div>
 
@@ -150,6 +150,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const texteInput = document.getElementById('texteInput');
         const btnEnvoyer = document.getElementById('btnEnvoyer');
         const btnMicro = document.getElementById('btnMicro');
+        const btnEnregistrerVoix = document.getElementById('btnEnregistrerVoix');
         const audioChappie = document.getElementById('audioChappie');
         const statutProfil = document.getElementById('statutProfil');
         const nomProfil = document.getElementById('nomProfil');
@@ -157,8 +158,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let modeContinu = false;
         let reconnaissance = null;
         let microVerrouille = false;
-        let mediaRecorder = null;
-        let audioChunks = [];
 
         async function verifierProfils() {
             try {
@@ -173,26 +172,41 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
         verifierProfils();
 
-        async function enregistrerProfil() {
+        btnEnregistrerVoix.addEventListener('click', async () => {
             const nom = nomProfil.value.trim();
-            if (!nom) { alert("Entre ton prénom !"); return; }
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            audioChunks = [];
-            mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-            mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                const formData = new FormData();
-                formData.append("file", audioBlob, "profil.wav");
-                formData.append("nom", nom);
-                await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
-                statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée !`;
-                nomProfil.value = '';
-                verifierProfils();
-            };
-            mediaRecorder.start();
-            setTimeout(() => mediaRecorder.stop(), 4000);
-        }
+            if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
+            
+            try {
+                statutProfil.innerHTML = "🎤 Enregistrement en cours... Parle pendant 4 secondes.";
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const mediaRecorder = new MediaRecorder(stream);
+                let audioChunks = [];
+                
+                mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const formData = new FormData();
+                    formData.append("file", audioBlob, "profil.webm");
+                    formData.append("nom", nom);
+                    
+                    const res = await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
+                    if (res.ok) {
+                        statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée !`;
+                        nomProfil.value = '';
+                        verifierProfils();
+                    } else {
+                        statutProfil.innerHTML = "❌ Erreur lors de l'enregistrement du profil.";
+                    }
+                    // Arrêter le flux micro pour libérer les ressources
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.start();
+                setTimeout(() => mediaRecorder.stop(), 4000);
+            } catch (err) {
+                statutProfil.innerHTML = "❌ Accès micro refusé ou non disponible.";
+            }
+        });
 
         texteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); envoyerMessage(); } });
         btnEnvoyer.addEventListener('click', (e) => { e.preventDefault(); envoyerMessage(); });
@@ -203,7 +217,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.lang = 'fr-FR';
             reconnaissance.interimResults = false;
 
-            // Activation automatique du mode continu dès le chargement pour un échange direct
             window.addEventListener('load', () => {
                 modeContinu = true;
                 btnMicro.classList.add('continu', 'ecoute');
@@ -238,14 +251,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function lancerEcoute() { if (modeContinu && !microVerrouille) try { reconnaissance.start(); } catch (e) {} }
         function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie parle..."; try { reconnaissance.stop(); } catch(e) {} }
 
-        function lireAudioChappie(texte, energie) {
+        async function lireAudioChappie(texte, energie) {
             const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
             if (!texteNettoye) { reactiverMicroFinDeParole(); return; }
             microVerrouille = true;
             
-            audioChappie.src = `/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`;
-            audioChappie.play().catch(() => reactiverMicroFinDeParole());
-            audioChappie.onended = () => reactiverMicroFinDeParole();
+            try {
+                const response = await fetch(`/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`);
+                if (!response.ok) throw new Error("Erreur TTS");
+                const blob = await response.blob();
+                const audioUrl = URL.createObjectURL(blob);
+                
+                audioChappie.src = audioUrl;
+                audioChappie.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    reactiverMicroFinDeParole();
+                };
+                audioChappie.onerror = () => reactiverMicroFinDeParole();
+                await audioChappie.play();
+            } catch (err) {
+                reactiverMicroFinDeParole();
+            }
         }
 
         function reactiverMicroFinDeParole() {
@@ -283,7 +309,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
                 }
-                lireAudioChappie(reponseComplete, energieCourante);
+                await lireAudioChappie(reponseComplete, energieCourante);
             } catch (err) {
                 reactiverMicroFinDeParole();
             }
@@ -301,14 +327,15 @@ async def index():
 async def lister_profils():
     try:
         fichiers = os.listdir(PROFILS_DIR)
-        return {"profils": [f.replace(".wav", "") for f in fichiers if f.endswith(".wav")]}
+        return {"profils": [f.replace(".webm", "").replace(".wav", "") for f in fichiers if f.endswith((".webm", ".wav"))]}
     except Exception:
         return {"profils": []}
 
 @app.post("/api/enregistrer-profil")
 async def enregistrer_profil(file: UploadFile = File(...), nom: str = Form(...)):
     nom_nettoye = "".join(c for c in nom if c.isalnum() or c in (' ', '_', '-')).strip()
-    chemin_fichier = os.path.join(PROFILS_DIR, f"{nom_nettoye}.wav")
+    extension = ".webm" if file.filename.endswith(".webm") else ".wav"
+    chemin_fichier = os.path.join(PROFILS_DIR, f"{nom_nettoye}{extension}")
     with open(chemin_fichier, "wb") as f:
         f.write(await file.read())
     return {"status": "ok", "nom": nom_nettoye}
@@ -320,17 +347,16 @@ async def api_chat(msg: str):
     
     try:
         fichiers = os.listdir(PROFILS_DIR)
-        profils_existants = [f.replace(".wav", "") for f in fichiers if f.endswith(".wav")]
+        profils_existants = [f.replace(".webm", "").replace(".wav", "") for f in fichiers if f.endswith((".webm", ".wav"))]
     except Exception:
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
-    # 🔥 PROMPT MIS À JOUR : APPRENTISSAGE CONTEXTUEL ET QUIPROQUOS RARES
     prompt_systeme = (
         "Tu es Chappie, un nouveau-né linguistique. Tu n'as pas de dictionnaire préétabli : tu apprends les mots au fur et à mesure que l'utilisateur te parle.\n"
         "RÈGLES DE CONVERSATION :\n"
         "1. APPRENTISSAGE NATUREL : Fais des phrases courtes (1 à 6 mots). Sois direct, sans théâtre, sans astérisques (*bzz*, *rire*...), et sans parler de programmation ou de système.\n"
-        "2. QUIPROQUOS RARES : Très occasionnellement (pas à chaque message), tu peux faire un petit contresens rigolo en transposant un mot appris dans un nouveau contexte (par exemple, utiliser 'tomber' à la place de 'glisser'). La plupart du temps, apprends simplement et naturellement.\n"
+        "2. QUIPROQUOS RARES : Très occasionnellement, tu peux faire un petit contresens rigolo en transposant un mot appris dans un nouveau contexte.\n"
         "3. MÉMOIRE : Utilise ta mémoire récente pour garder le fil sans tout déballer.\n"
         f"MÉMOIRE RÉCENTE ET MOTS APPRIS :\n{memoire}"
     )

@@ -405,11 +405,14 @@ async def api_chat(msg: str):
 @app.get("/api/tts")
 async def api_tts(text: str, energie: int = 100):
     try:
-        rate = "-10%"
+        voice = "fr-FR-ThierryNeural"
+        rate = "+0%"
+        pitch = "+5Hz"
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
             temp_filename = fp.name
 
-        communicate = edge_tts.Communicate(text, "fr-FR-HenriNeural", rate=rate)
+        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
         await communicate.save(temp_filename)
 
         return FileResponse(temp_filename, media_type="audio/mpeg")

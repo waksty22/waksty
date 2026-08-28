@@ -390,7 +390,6 @@ async def api_chat(msg: str):
                 if chunk.text:
                     reponse_ia += chunk.text
                     yield chunk.text
-                print(f"DEBUG CHUNK: {repr(chunk.text)}")
         except Exception as e:
             erreur_exacte = str(e)
             print(f"❌ ERREUR EXACTE API GEMINI : {erreur_exacte}")
@@ -406,9 +405,9 @@ async def api_chat(msg: str):
 @app.get("/api/tts")
 async def api_tts(text: str, energie: int = 100):
     try:
-        voice = "fr-FR-ThierryNeural"
+        voice = "fr-FR-HenriNeural"
         rate = "+0%"
-        pitch = "+5Hz"
+        pitch = "+0Hz"
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
             temp_filename = fp.name

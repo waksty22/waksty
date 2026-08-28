@@ -143,7 +143,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
 
-    <audio id="audioChappie" style="display:none;"></audio>
+    <audio id="audioChappie"></audio>
 
     <script>
         const chat = document.getElementById('chat');
@@ -197,7 +197,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     } else {
                         statutProfil.innerHTML = "❌ Erreur lors de l'enregistrement du profil.";
                     }
-                    // Arrêter le flux micro pour libérer les ressources
                     stream.getTracks().forEach(track => track.stop());
                 };
                 
@@ -259,17 +258,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             try {
                 const response = await fetch(`/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`);
                 if (!response.ok) throw new Error("Erreur TTS");
+                
                 const blob = await response.blob();
                 const audioUrl = URL.createObjectURL(blob);
                 
                 audioChappie.src = audioUrl;
+                audioChappie.load();
+                
                 audioChappie.onended = () => {
                     URL.revokeObjectURL(audioUrl);
                     reactiverMicroFinDeParole();
                 };
-                audioChappie.onerror = () => reactiverMicroFinDeParole();
-                await audioChappie.play();
+                
+                audioChappie.onerror = (e) => {
+                    console.error("Erreur lecture audio:", e);
+                    reactiverMicroFinDeParole();
+                };
+
+                const playPromise = audioChappie.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.warn("Autoplay bloqué par le navigateur :", error);
+                        reactiverMicroFinDeParole();
+                    });
+                }
             } catch (err) {
+                console.error("Erreur TTS catch:", err);
                 reactiverMicroFinDeParole();
             }
         }

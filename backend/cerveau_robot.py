@@ -68,7 +68,7 @@ def identifier_locuteur(chemin_audio_recu):
                 meilleure_distance = distance
                 nom_trouve = nom_profil
 
-    # Seuil de tolérance (ajustable si besoin selon le micro)
+    # Seuil de tolérance élargi
     if meilleure_distance < 130.0:
         return nom_trouve
     
@@ -342,7 +342,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
 
-            // Capture un court instant audio de la phrase pour que le serveur identifie la voix
+            // Capture 4 secondes d'audio pour que le serveur identifie la voix avec précision
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const mediaRecorder = new MediaRecorder(stream);
@@ -358,7 +358,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     traiterReponseStream(res);
                 };
                 mediaRecorder.start();
-                setTimeout(() => mediaRecorder.stop(), 2500);
+                setTimeout(() => mediaRecorder.stop(), 4000);
             } catch(e) {
                 envoyerMessageFallback(txt);
             }
@@ -436,12 +436,8 @@ async def api_chat(msg: str = Form(...), file: UploadFile = File(None)):
         # Reconnaissance automatique de la voix
         utilisateur = identifier_locuteur(temp_filename)
         
-        # SI LA VOIX EST INCONNUE : On sauvegarde automatiquement cet audio temporaire
-        # comme nouveau profil "Inconnu_TIMESTAMP" ou on peut l'archiver pour que tu puisses l'associer
         if utilisateur == "Inconnu":
             print("⚠️ Voix inconnue détectée.")
-            # Optionnel: on garde une trace de l'audio si tu veux l'analyser, 
-            # mais l'IA va surtout lui demander son prénom dans la conversation.
 
         try:
             os.remove(temp_filename)
@@ -458,7 +454,6 @@ async def api_chat(msg: str = Form(...), file: UploadFile = File(None)):
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
-    # Le prompt indique à Chappie s'il connait la personne ou si c'est un inconnu
     prompt_systeme = (
         f"Tu es Chappie, un nouveau-né linguistique. La personne qui te parle est identifiée vocalement comme : {utilisateur} "
         f"(voix enregistrées dans ta mémoire : {liste_noms}).\n"

@@ -103,23 +103,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chappie - Nouveau-né</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 10px auto; padding: 10px; box-sizing: border-box; }
-        #chat { background: #1e1e1e; height: 300px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
+        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 40px auto; padding: 20px; }
+        #chat { background: #1e1e1e; height: 320px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
         .msg { padding: 8px 12px; border-radius: 6px; max-width: 80%; word-break: break-word; }
         .user { background: #007acc; align-self: flex-end; }
         .bot { background: #333; align-self: flex-start; }
-        .controls { display: flex; gap: 8px; margin-bottom: 10px; }
-        input[type="text"] { flex: 1; padding: 12px; border-radius: 5px; border: none; background: #2a2a2a; color: #fff; font-size: 16px; }
-        button { padding: 12px 15px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 15px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+        .controls { display: flex; gap: 10px; margin-bottom: 10px; }
+        input { flex: 1; padding: 10px; border-radius: 5px; border: none; background: #2a2a2a; color: #fff; font-size: 16px; }
+        button { padding: 10px 20px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 16px; }
         #btnMicro { background: #dc3545; }
         #btnMicro.ecoute { background: #ffc107; color: #000; animation: pulse 1.5s infinite; }
         #btnMicro.continu { background: #17a2b8; }
         #btnMicro.parle { background: #6c757d; opacity: 0.7; cursor: not-allowed; }
-        .profile-box { background: #1e1e1e; padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
-        .profile-row { display: flex; gap: 8px; align-items: center; }
+        .profile-box { background: #1e1e1e; padding: 10px; border-radius: 8px; font-size: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+        .profile-row { display: flex; gap: 10px; align-items: center; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -130,7 +129,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="statutProfil">🔍 Chargement des profils vocaux...</div>
         <div class="profile-row">
             <input type="text" id="nomProfil" placeholder="Ton prénom (ex: Julien)">
-            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b;">Enregistrer</button>
+            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer ma voix</button>
         </div>
     </div>
 
@@ -139,8 +138,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
     
     <div class="controls">
-        <input type="text" id="texteInput" placeholder="Parle à Chappie...">
-        <button id="btnMicro" type="button">🎤 OFF</button>
+        <input type="text" id="texteInput" placeholder="Parle à Chappie..." autofocus>
+        <button id="btnMicro" type="button">🎤 Mode Continu : OFF</button>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
 
@@ -159,8 +158,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let modeContinu = false;
         let reconnaissance = null;
         let microVerrouille = false;
-        let utilisateurActif = "Inconnu";
 
+        // File d'attente et gestionnaire audio fluide
         let fileAudio = [];
         let enTrainDeLire = false;
 
@@ -168,23 +167,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             try {
                 const res = await fetch('/api/lister-profils');
                 const data = await res.json();
-                if (data.profils && data.profils.length === 0) {
+                if (data.profils.length === 0) {
                     statutProfil.innerHTML = "⚠️ Aucun profil vocal. Enregistre ta voix.";
                 } else {
                     statutProfil.innerHTML = `✅ Profils connus : ${data.profils.join(', ')}`;
                 }
-            } catch(e) {
-                statutProfil.innerHTML = "⚠️ Erreur chargement profils.";
-            }
+            } catch(e) {}
         }
         verifierProfils();
 
-        async function enregistrerVoixAction() {
+        btnEnregistrerVoix.addEventListener('click', async () => {
             const nom = nomProfil.value.trim();
             if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
             
             try {
-                statutProfil.innerHTML = "🎤 Enregistrement... Parle 4 secondes.";
+                statutProfil.innerHTML = "🎤 Enregistrement en cours... Parle pendant 4 secondes.";
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const mediaRecorder = new MediaRecorder(stream);
                 let audioChunks = [];
@@ -199,11 +196,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     const res = await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
                     if (res.ok) {
                         statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée !`;
-                        utilisateurActif = nom;
                         nomProfil.value = '';
                         verifierProfils();
                     } else {
-                        statutProfil.innerHTML = "❌ Erreur sauvegarde profil.";
+                        statutProfil.innerHTML = "❌ Erreur lors de l'enregistrement du profil.";
                     }
                     stream.getTracks().forEach(track => track.stop());
                 };
@@ -211,18 +207,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 mediaRecorder.start();
                 setTimeout(() => mediaRecorder.stop(), 4000);
             } catch (err) {
-                statutProfil.innerHTML = "❌ Accès micro refusé.";
+                statutProfil.innerHTML = "❌ Accès micro refusé ou non disponible.";
             }
-        }
-
-        // Écouteurs ultra-compatibles mobile (clic et touchstart)
-        btnEnregistrerVoix.addEventListener('click', enregistrerVoixAction);
-        btnEnregistrerVoix.addEventListener('touchstart', (e) => { e.preventDefault(); enregistrerVoixAction(); });
+        });
 
         texteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); envoyerMessage(); } });
-        
         btnEnvoyer.addEventListener('click', (e) => { e.preventDefault(); envoyerMessage(); });
-        btnEnvoyer.addEventListener('touchstart', (e) => { e.preventDefault(); envoyerMessage(); });
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
@@ -230,21 +220,25 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.lang = 'fr-FR';
             reconnaissance.interimResults = false;
 
-            const toggleMicro = () => {
+            window.addEventListener('load', () => {
+                modeContinu = true;
+                btnMicro.classList.add('continu', 'ecoute');
+                btnMicro.textContent = "🟢 En écoute...";
+                lancerEcoute();
+            });
+
+            btnMicro.addEventListener('click', () => {
                 modeContinu = !modeContinu;
                 if (modeContinu) {
                     btnMicro.classList.add('continu', 'ecoute');
-                    btnMicro.textContent = "🟢 Écoute...";
+                    btnMicro.textContent = "🟢 En écoute...";
                     lancerEcoute();
                 } else {
                     btnMicro.classList.remove('continu', 'ecoute', 'parle');
-                    btnMicro.textContent = "🎤 OFF";
+                    btnMicro.textContent = "🎤 Mode Continu : OFF";
                     try { reconnaissance.stop(); } catch(e) {}
                 }
-            };
-
-            btnMicro.addEventListener('click', toggleMicro);
-            btnMicro.addEventListener('touchstart', (e) => { e.preventDefault(); toggleMicro(); });
+            });
 
             reconnaissance.addEventListener('result', (e) => {
                 if (microVerrouille) return;
@@ -255,12 +249,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.addEventListener('end', () => {
                 if (modeContinu && !microVerrouille) setTimeout(lancerEcoute, 500);
             });
-        } else {
-            btnMicro.style.display = 'none';
         }
 
-        function lancerEcoute() { if (modeContinu && !microVerrouille && reconnaissance) try { reconnaissance.start(); } catch (e) {} }
-        function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie..."; if (reconnaissance) try { reconnaissance.stop(); } catch(e) {} }
+        function lancerEcoute() { if (modeContinu && !microVerrouille) try { reconnaissance.start(); } catch (e) {} }
+        function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie parle..."; try { reconnaissance.stop(); } catch(e) {} }
 
         async function ajouterEtJouerAudio(texte, energie) {
             const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
@@ -311,8 +303,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function reactiverMicroFinDeParole() {
             microVerrouille = false;
-            if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 Écoute..."; lancerEcoute(); }
-            else { btnMicro.textContent = "🎤 OFF"; }
+            if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 En écoute..."; lancerEcoute(); }
         }
 
         async function envoyerMessage() {
@@ -324,11 +315,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             fileAudio = [];
             enTrainDeLire = false;
 
-            chat.innerHTML += `<div class="msg user"><b>Moi (${utilisateurActif}) :</b> ${txt}</div>`;
+            chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
 
             try {
-                const res = await fetch(`/api/chat?msg=${encodeURIComponent(txt)}&utilisateur=${encodeURIComponent(utilisateurActif)}`);
+                const res = await fetch('/api/chat?msg=' + encodeURIComponent(txt));
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let reponseComplete = "";
@@ -350,11 +341,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
 
+                    // Découpage dynamique par segments de ponctuation pour lancer le TTS en avance
                     if (/[.!?;\n]/.test(bufferPhrase)) {
                         ajouterEtJouerAudio(bufferPhrase, energieCourante);
                         bufferPhrase = "";
                     }
                 }
+                // S'il reste du texte non envoyé dans le buffer
                 if (bufferPhrase.trim()) {
                     ajouterEtJouerAudio(bufferPhrase, energieCourante);
                 }
@@ -389,7 +382,7 @@ async def enregistrer_profil(file: UploadFile = File(...), nom: str = Form(...))
     return {"status": "ok", "nom": nom_nettoye}
 
 @app.get("/api/chat")
-async def api_chat(msg: str, utilisateur: str = "Inconnu"):
+async def api_chat(msg: str):
     etat, temps_ecoule, nb_souvenirs = mettre_a_jour_conscience()
     memoire = charger_memoire()
     
@@ -401,13 +394,11 @@ async def api_chat(msg: str, utilisateur: str = "Inconnu"):
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
     prompt_systeme = (
-        f"Tu es Chappie, un nouveau-né linguistique. Tu parles actuellement avec {utilisateur} (profils connus dans ta mémoire : {liste_noms}).\n"
-        "Tu n'as pas de dictionnaire préétabli : tu apprends les mots au fur et à mesure.\n"
+        "Tu es Chappie, un nouveau-né linguistique. Tu n'as pas de dictionnaire préétabli : tu apprends les mots au fur et à mesure que l'utilisateur te parle.\n"
         "RÈGLES DE CONVERSATION :\n"
         "1. APPRENTISSAGE NATUREL : Fais des phrases courtes (1 à 6 mots). Sois direct, sans théâtre, sans astérisques (*bzz*, *rire*...), et sans parler de programmation ou de système.\n"
-        "2. IDENTIFICATION : Si tu ne connais pas la personne (si elle est 'Inconnu'), tu peux lui demander son prénom pour apprendre à la reconnaître.\n"
-        "3. QUIPROQUOS RARES : Très occasionnellement, tu peux faire un petit contresens rigolo en transposant un mot appris dans un nouveau contexte.\n"
-        "4. MÉMOIRE : Utilise ta mémoire récente pour garder le fil sans tout déballer.\n"
+        "2. QUIPROQUOS RARES : Très occasionnellement, tu peux faire un petit contresens rigolo en transposant un mot appris dans un nouveau contexte.\n"
+        "3. MÉMOIRE : Utilise ta mémoire récente pour garder le fil sans tout déballer.\n"
         f"MÉMOIRE RÉCENTE ET MOTS APPRIS :\n{memoire}"
     )
 
@@ -433,8 +424,8 @@ async def api_chat(msg: str, utilisateur: str = "Inconnu"):
             yield reponse_ia
         
         if reponse_ia and not reponse_ia.startswith("Erreur technique"):
-            sauvegarder_memoire(f"[{utilisateur}] Moi: {msg} | Chappie: {reponse_ia}")
-            ecrire_journal_intime(f"Échange avec {utilisateur} : {msg} -> {reponse_ia}")
+            sauvegarder_memoire(f"Moi: {msg} | Chappie: {reponse_ia}")
+            ecrire_journal_intime(f"Échange : {msg} -> {reponse_ia}")
 
     return StreamingResponse(generate(), media_type="text/plain")
 

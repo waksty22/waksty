@@ -143,7 +143,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
 
-    <audio id="audioChappie"></audio>
+    <audio id="audioChappie" autoplay></audio>
 
     <script>
         const chat = document.getElementById('chat');
@@ -158,10 +158,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let modeContinu = false;
         let reconnaissance = null;
         let microVerrouille = false;
-
-        // File d'attente et gestionnaire audio fluide
-        let fileAudio = [];
-        let enTrainDeLire = false;
 
         async function verifierProfils() {
             try {
@@ -254,51 +250,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function lancerEcoute() { if (modeContinu && !microVerrouille) try { reconnaissance.start(); } catch (e) {} }
         function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie parle..."; try { reconnaissance.stop(); } catch(e) {} }
 
-        async function ajouterEtJouerAudio(texte, energie) {
+        async function lireAudioChappie(texte, energie) {
             const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
-            if (!texteNettoye) return;
-
+            if (!texteNettoye) { reactiverMicroFinDeParole(); return; }
+            microVerrouille = true;
+            
             try {
                 const response = await fetch(`/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`);
-                if (!response.ok) return;
+                if (!response.ok) throw new Error("Erreur TTS");
                 
                 const blob = await response.blob();
                 const audioUrl = URL.createObjectURL(blob);
                 
-                fileAudio.push(audioUrl);
-                jouerProchainAudio();
-            } catch (err) {
-                console.error("Erreur TTS:", err);
-            }
-        }
-
-        function jouerProchainAudio() {
-            if (enTrainDeLire || fileAudio.length === 0) return;
-            
-            enTrainDeLire = true;
-            const url = fileAudio.shift();
-            audioChappie.src = url;
-            audioChappie.load();
-            
-            audioChappie.onended = () => {
-                URL.revokeObjectURL(url);
-                enTrainDeLire = false;
-                if (fileAudio.length > 0) {
-                    jouerProchainAudio();
-                } else {
+                audioChappie.src = audioUrl;
+                audioChappie.load();
+                
+                audioChappie.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
                     reactiverMicroFinDeParole();
-                }
-            };
-            
-            audioChappie.onerror = () => {
-                enTrainDeLire = false;
-                jouerProchainAudio();
-            };
+                };
+                
+                audioChappie.onerror = (e) => {
+                    console.error("Erreur lecture audio:", e);
+                    reactiverMicroFinDeParole();
+                };
 
-            audioChappie.play().catch(() => {
-                enTrainDeLire = false;
-                jouerProchainAudio();
-            });
+                const playPromise = audioChappie.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.warn("Autoplay bloqué par le navigateur :", error);
+                        reactiverMicroFinDeParole();
+                    });
+                }
+            } catch (err) {
+                console.error("Erreur TTS catch:", err);
+                reactiverMicroFinDeParole();
+            }
         }
 
         function reactiverMicroFinDeParole() {
@@ -312,8 +299,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             texteInput.value = '';
             arreterEcouteSecurite();
             audioChappie.pause();
-            fileAudio = [];
-            enTrainDeLire = false;
 
             chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
@@ -323,7 +308,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let reponseComplete = "";
-                let bufferPhrase = "";
                 let energieCourante = 100;
 
                 const botDiv = document.createElement('div');
@@ -335,22 +319,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
-                    const chunkText = decoder.decode(value, { stream: true });
-                    reponseComplete += chunkText;
-                    bufferPhrase += chunkText;
+                    reponseComplete += decoder.decode(value, { stream: true });
                     spanContenu.textContent = reponseComplete;
                     chat.scrollTop = chat.scrollHeight;
-
-                    // Découpage dynamique par segments de ponctuation pour lancer le TTS en avance
-                    if (/[.!?;\n]/.test(bufferPhrase)) {
-                        ajouterEtJouerAudio(bufferPhrase, energieCourante);
-                        bufferPhrase = "";
-                    }
                 }
-                // S'il reste du texte non envoyé dans le buffer
-                if (bufferPhrase.trim()) {
-                    ajouterEtJouerAudio(bufferPhrase, energieCourante);
-                }
+                await lireAudioChappie(reponseComplete, energieCourante);
             } catch (err) {
                 reactiverMicroFinDeParole();
             }
@@ -433,11 +406,13 @@ async def api_chat(msg: str):
 async def api_tts(text: str, energie: int = 100):
     try:
         voice = "fr-FR-HenriNeural"
+        rate = "+0%"
+        pitch = "+0Hz"
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
             temp_filename = fp.name
 
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
         await communicate.save(temp_filename)
 
         return FileResponse(temp_filename, media_type="audio/mpeg")

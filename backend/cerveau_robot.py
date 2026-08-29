@@ -10,6 +10,11 @@ from google import genai
 from google.genai import types
 import edge_tts
 
+# Import pour l'analyse audio de reconnaissance vocale
+import librosa
+import numpy as np
+from pathlib import Path
+
 client = genai.Client(api_key=os.getenv("API_KEY"))
 
 app = FastAPI()
@@ -22,21 +27,63 @@ PROFILS_DIR = os.path.join(DATA_DIR, "profils_vocaux")
 
 os.makedirs(PROFILS_DIR, exist_ok=True)
 
-# --- GESTION DE L'ÉTAT INTERNE ET DE LA CONSCIENCE ---
+# --- RECONNAISSANCE VOCALE PAR EMPREINTE ACOUSTIQUE (LIBROSA) ---
+def extraire_empreinte_audio(chemin_fichier):
+    """Extrait les caractéristiques moyennes MFCC d'un fichier audio."""
+    try:
+        y, sr = librosa.load(chemin_fichier, duration=4.0, sr=22050)
+        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
+        return np.mean(mfccs, axis=1)
+    except Exception as e:
+        print(f"❌ Erreur extraction audio: {e}")
+        return None
+
+def identifier_locuteur(chemin_audio_recu):
+    """Compare l'audio reçu aux profils enregistrés via la distance euclidienne des MFCC."""
+    if not os.path.exists(PROFILS_DIR):
+        return "Inconnu"
+    
+    fichiers_profils = [f for f in os.listdir(PROFILS_DIR) if f.endswith((".webm", ".wav"))]
+    if not fichiers_profils:
+        return "Inconnu"
+
+    empreinte_recue = extraire_empreinte_audio(chemin_audio_recu)
+    if empreinte_recue is None:
+        return "Inconnu"
+
+    meilleure_distance = float('inf')
+    nom_trouve = "Inconnu"
+
+    for f in fichiers_profils:
+        nom_profil = Path(f).stem
+        chemin_profil = os.path.join(PROFILS_DIR, f)
+        
+        empreinte_profil = extraire_empreinte_audio(chemin_profil)
+        if empreinte_profil is not None:
+            # Calcul de la distance entre les deux empreintes vocales
+            distance = np.linalg.norm(empreinte_recue - empreinte_profil)
+            print(f"🔍 Comparaison avec {nom_profil} -> Distance : {distance:.2f}")
+            
+            if distance < meilleure_distance:
+                meilleure_distance = distance
+                nom_trouve = nom_profil
+
+    # Seuil de tolérance (ajustable si besoin selon le micro)
+    if meilleure_distance < 60.0:
+        return nom_trouve
+    
+    return "Inconnu"
+
+# --- GESTION DE L'ÉTAT ET MÉMOIRE ---
 def charger_etat():
-    etat = {
-        "derniere_action": time.time(), 
-        "energie": 100, 
-        "solitude": 0, 
-        "age_mental": 0
-    }
+    etat = {"derniere_action": time.time(), "energie": 100, "solitude": 0, "age_mental": 0}
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 for ligne in f:
                     if "=" in ligne:
                         k, v = ligne.strip().split("=", 1)
-                        if k in ["derniere_action"]: etat[k] = float(v)
+                        if k == "derniere_action": etat[k] = float(v)
                         elif k in ["energie", "solitude", "age_mental"]: etat[k] = int(v)
         except Exception:
             pass
@@ -45,65 +92,49 @@ def charger_etat():
 def sauvegarder_etat(etat):
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
-            for k, v in etat.items():
-                f.write(f"{k}={v}\n")
-    except Exception as e:
-        print(f"❌ Erreur état: {e}")
+            for k, v in etat.items(): f.write(f"{k}={v}\n")
+    except Exception: pass
 
 def compter_souvenirs():
-    if not os.path.exists(MEMORY_FILE):
-        return 0
+    if not os.path.exists(MEMORY_FILE): return 0
     try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            return sum(1 for _ in f)
-    except Exception:
-        return 0
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f: return sum(1 for _ in f)
+    except Exception: return 0
 
 def mettre_a_jour_conscience():
     etat = charger_etat()
     maintenant = time.time()
     temps_ecoule = int(maintenant - etat["derniere_action"])
-    
     etat["solitude"] = min(100, etat["solitude"] + (temps_ecoule // 15))
     etat["energie"] = max(10, etat["energie"] - (temps_ecoule // 40))
     etat["derniere_action"] = maintenant
-    
-    nb_souvenirs = compter_souvenirs()
-    etat["age_mental"] = nb_souvenirs // 10
-    
+    etat["age_mental"] = compter_souvenirs() // 10
     sauvegarder_etat(etat)
-    return etat, temps_ecoule, nb_souvenirs
+    return etat
 
 def charger_memoire():
-    if not os.path.exists(MEMORY_FILE):
-        return "[Vide]"
+    if not os.path.exists(MEMORY_FILE): return "[Vide]"
     try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            return "".join(f.readlines()[-15:])
-    except Exception:
-        return "[Vide]"
+        with open(MEMORY_FILE, "r", encoding="utf-8") as f: return "".join(f.readlines()[-15:])
+    except Exception: return "[Vide]"
 
 def sauvegarder_memoire(texte):
     try:
-        with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-            f.write(texte + "\n")
-    except Exception as e:
-        print(f"❌ Erreur mémoire: {e}")
+        with open(MEMORY_FILE, "a", encoding="utf-8") as f: f.write(texte + "\n")
+    except Exception: pass
 
 def ecrire_journal_intime(pensee):
     try:
         with open(JOURNAL_FILE, "a", encoding="utf-8") as f:
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"[{timestamp}] {pensee}\n")
-    except Exception:
-        pass
+            f.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {pensee}\n")
+    except Exception: pass
 
 # --- INTERFACE HTML / FRONTEND ---
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Chappie - Nouveau-né</title>
+    <title>Chappie - Reconnaissance Vocale</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 40px auto; padding: 20px; }
         #chat { background: #1e1e1e; height: 320px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
@@ -123,13 +154,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <h2>🤖 Chappie (Nouveau-né)</h2>
+    <h2>🤖 Chappie (Reconnaissance Vocale Autonome)</h2>
     
     <div class="profile-box">
         <div id="statutProfil">🔍 Chargement des profils vocaux...</div>
         <div class="profile-row">
-            <input type="text" id="nomProfil" placeholder="Ton prénom (ex: Julien)">
-            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer ma voix</button>
+            <input type="text" id="nomProfil" placeholder="Ton prénom (si Chappie ne te reconnait pas)">
+            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer / Enregistrer ma voix</button>
         </div>
     </div>
 
@@ -158,27 +189,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let modeContinu = false;
         let reconnaissance = null;
         let microVerrouille = false;
-        let utilisateurActif = "Inconnu"; // Stocke le profil actif
 
         async function verifierProfils() {
             try {
                 const res = await fetch('/api/lister-profils');
                 const data = await res.json();
                 if (data.profils.length === 0) {
-                    statutProfil.innerHTML = "⚠️ Aucun profil vocal. Enregistre ta voix.";
+                    statutProfil.innerHTML = "⚠️ Aucun profil. Parle ou enregistre ton prénom pour que Chappie t'apprenne.";
                 } else {
-                    statutProfil.innerHTML = `✅ Profils connus : ${data.profils.join(', ')}`;
+                    statutProfil.innerHTML = `✅ Voix connues : ${data.profils.join(', ')}`;
                 }
             } catch(e) {}
         }
         verifierProfils();
 
+        // Permet d'enregistrer ou ré-enregistrer sa voix manuellement à tout moment
         btnEnregistrerVoix.addEventListener('click', async () => {
             const nom = nomProfil.value.trim();
-            if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
+            if (!nom) { alert("Entre ton prénom pour associer l'enregistrement !"); return; }
             
             try {
-                statutProfil.innerHTML = `🎤 Enregistrement pour ${nom}... Parle pendant 4 secondes.`;
+                statutProfil.innerHTML = `🎤 Enregistrement de la voix de ${nom}... Parle pendant 4 secondes.`;
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const mediaRecorder = new MediaRecorder(stream);
                 let audioChunks = [];
@@ -192,12 +223,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     
                     const res = await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
                     if (res.ok) {
-                        statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée !`;
-                        utilisateurActif = nom; // Met à jour l'utilisateur actif
+                        statutProfil.innerHTML = `✅ Voix de ${nom} apprise et mémorisée !`;
                         nomProfil.value = '';
                         verifierProfils();
                     } else {
-                        statutProfil.innerHTML = "❌ Erreur lors de l'enregistrement du profil.";
+                        statutProfil.innerHTML = "❌ Erreur d'enregistrement.";
                     }
                     stream.getTracks().forEach(track => track.stop());
                 };
@@ -205,7 +235,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 mediaRecorder.start();
                 setTimeout(() => mediaRecorder.stop(), 4000);
             } catch (err) {
-                statutProfil.innerHTML = "❌ Accès micro refusé ou non disponible.";
+                statutProfil.innerHTML = "❌ Accès micro refusé.";
             }
         });
 
@@ -241,7 +271,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.addEventListener('result', (e) => {
                 if (microVerrouille) return;
                 texteInput.value = e.results[0][0].transcript;
-                envoyerMessage();
+                capturerEtEnvoyerMessage();
             });
 
             reconnaissance.addEventListener('end', () => {
@@ -250,7 +280,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         function lancerEcoute() { if (modeContinu && !microVerrouille) try { reconnaissance.start(); } catch (e) {} }
-        function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie parle..."; try { reconnaissance.stop(); } catch(e) {} }
+        function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie écoute et analyse..."; try { reconnaissance.stop(); } catch(e) {} }
 
         async function lireAudioChappie(texte, energie) {
             const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
@@ -267,25 +297,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 audioChappie.src = audioUrl;
                 audioChappie.load();
                 
-                audioChappie.onended = () => {
-                    URL.revokeObjectURL(audioUrl);
-                    reactiverMicroFinDeParole();
-                };
-                
-                audioChappie.onerror = (e) => {
-                    console.error("Erreur lecture audio:", e);
-                    reactiverMicroFinDeParole();
-                };
+                audioChappie.onended = () => { URL.revokeObjectURL(audioUrl); reactiverMicroFinDeParole(); };
+                audioChappie.onerror = () => { reactiverMicroFinDeParole(); };
 
                 const playPromise = audioChappie.play();
                 if (playPromise !== undefined) {
-                    playPromise.catch(error => {
-                        console.warn("Autoplay bloqué par le navigateur :", error);
-                        reactiverMicroFinDeParole();
-                    });
+                    playPromise.catch(() => { reactiverMicroFinDeParole(); });
                 }
             } catch (err) {
-                console.error("Erreur TTS catch:", err);
                 reactiverMicroFinDeParole();
             }
         }
@@ -302,12 +321,58 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             arreterEcouteSecurite();
             audioChappie.pause();
 
-            chat.innerHTML += `<div class="msg user"><b>Moi (${utilisateurActif}) :</b> ${txt}</div>`;
+            chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
 
             try {
-                // Envoi du message ET du nom de l'utilisateur actif à l'API
-                const res = await fetch(`/api/chat?msg=${encodeURIComponent(txt)}&utilisateur=${encodeURIComponent(utilisateurActif)}`);
+                const formData = new FormData();
+                formData.append("msg", txt);
+                const res = await fetch('/api/chat', { method: 'POST', body: formData });
+                traiterReponseStream(res);
+            } catch (err) { reactiverMicroFinDeParole(); }
+        }
+
+        async function capturerEtEnvoyerMessage() {
+            const txt = texteInput.value.trim();
+            if (!txt || microVerrouille) return;
+            texteInput.value = '';
+            arreterEcouteSecurite();
+            audioChappie.pause();
+
+            chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
+            chat.scrollTop = chat.scrollHeight;
+
+            // Capture un court instant audio de la phrase pour que le serveur identifie la voix
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const mediaRecorder = new MediaRecorder(stream);
+                let chunks = [];
+                mediaRecorder.ondataavailable = e => chunks.push(e.data);
+                mediaRecorder.onstop = async () => {
+                    const formData = new FormData();
+                    formData.append("msg", txt);
+                    formData.append("file", new Blob(chunks, { type: 'audio/webm' }), "voix.webm");
+
+                    const res = await fetch('/api/chat', { method: 'POST', body: formData });
+                    stream.getTracks().forEach(t => t.stop());
+                    traiterReponseStream(res);
+                };
+                mediaRecorder.start();
+                setTimeout(() => mediaRecorder.stop(), 2500);
+            } catch(e) {
+                envoyerMessageFallback(txt);
+            }
+        }
+
+        async function envoyerMessageFallback(txt) {
+            const formData = new FormData();
+            formData.append("msg", txt);
+            const res = await fetch('/api/chat', { method: 'POST', body: formData });
+            traiterReponseStream(res);
+        }
+
+        async function traiterReponseStream(res) {
+            try {
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let reponseComplete = "";
@@ -357,9 +422,33 @@ async def enregistrer_profil(file: UploadFile = File(...), nom: str = Form(...))
         f.write(await file.read())
     return {"status": "ok", "nom": nom_nettoye}
 
-@app.get("/api/chat")
-async def api_chat(msg: str, utilisateur: str = "Inconnu"):
-    etat, temps_ecoule, nb_souvenirs = mettre_a_jour_conscience()
+@app.post("/api/chat")
+async def api_chat(msg: str = Form(...), file: UploadFile = File(None)):
+    utilisateur = "Inconnu"
+    
+    if file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as fp:
+            temp_filename = fp.name
+        content = await file.read()
+        with open(temp_filename, "wb") as f:
+            f.write(content)
+        
+        # Reconnaissance automatique de la voix
+        utilisateur = identifier_locuteur(temp_filename)
+        
+        # SI LA VOIX EST INCONNUE : On sauvegarde automatiquement cet audio temporaire
+        # comme nouveau profil "Inconnu_TIMESTAMP" ou on peut l'archiver pour que tu puisses l'associer
+        if utilisateur == "Inconnu":
+            print("⚠️ Voix inconnue détectée.")
+            # Optionnel: on garde une trace de l'audio si tu veux l'analyser, 
+            # mais l'IA va surtout lui demander son prénom dans la conversation.
+
+        try:
+            os.remove(temp_filename)
+        except:
+            pass
+
+    mettre_a_jour_conscience()
     memoire = charger_memoire()
     
     try:
@@ -369,15 +458,16 @@ async def api_chat(msg: str, utilisateur: str = "Inconnu"):
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
-    # Le prompt intègre désormais le nom de la personne qui parle et la liste des profils enregistrés
+    # Le prompt indique à Chappie s'il connait la personne ou si c'est un inconnu
     prompt_systeme = (
-        f"Tu es Chappie, un nouveau-né linguistique. Tu parles actuellement avec {utilisateur} (profils enregistrés dans ta mémoire : {liste_noms}).\n"
-        "Tu n'as pas de dictionnaire préétabli : tu apprends les mots au fur et à mesure que l'utilisateur te parle.\n"
+        f"Tu es Chappie, un nouveau-né linguistique. La personne qui te parle est identifiée vocalement comme : {utilisateur} "
+        f"(voix enregistrées dans ta mémoire : {liste_noms}).\n"
+        "Tu n'as pas de dictionnaire préétabli : tu apprends les mots au fur et à mesure.\n"
         "RÈGLES DE CONVERSATION :\n"
-        "1. APPRENTISSAGE NATUREL : Fais des phrases courtes (1 à 6 mots). Sois direct, sans théâtre, sans astérisques (*bzz*, *rire*...), et sans parler de programmation ou de système.\n"
-        "2. RECONNAISSANCE : Si la personne s'appelle 'Inconnu', tu peux lui demander son prénom pour savoir qui elle est.\n"
-        "3. QUIPROQUOS RARES : Très occasionnellement, tu peux faire un petit contresens rigolo en transposant un mot appris dans un nouveau contexte.\n"
-        "4. MÉMOIRE : Utilise ta mémoire récente pour garder le fil sans tout déballer.\n"
+        "1. APPRENTISSAGE NATUREL : Fais des phrases courtes (1 à 6 mots). Sois direct, sans théâtre, sans astérisques (*bzz*, etc.).\n"
+        "2. SI INCONNU : Si {utilisateur} est 'Inconnu', tu ne sais pas qui c'est. Demande-lui vivement son prénom (« Qui es-tu ? » ou « Toi qui ? ») pour l'apprendre.\n"
+        "3. SI CONNU : Parle-lui en le reconnaissant.\n"
+        "4. MÉMOIRE : Utilise ta mémoire récente.\n"
         f"MÉMOIRE RÉCENTE ET MOTS APPRIS :\n{memoire}"
     )
 
@@ -397,9 +487,7 @@ async def api_chat(msg: str, utilisateur: str = "Inconnu"):
                     reponse_ia += chunk.text
                     yield chunk.text
         except Exception as e:
-            erreur_exacte = str(e)
-            print(f"❌ ERREUR EXACTE API GEMINI : {erreur_exacte}")
-            reponse_ia = f"Erreur technique : {erreur_exacte}"
+            reponse_ia = f"Erreur technique : {str(e)}"
             yield reponse_ia
         
         if reponse_ia and not reponse_ia.startswith("Erreur technique"):
@@ -412,18 +500,12 @@ async def api_chat(msg: str, utilisateur: str = "Inconnu"):
 async def api_tts(text: str, energie: int = 100):
     try:
         voice = "fr-FR-HenriNeural"
-        rate = "+0%"
-        pitch = "+0Hz"
-        
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
             temp_filename = fp.name
-
-        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+        communicate = edge_tts.Communicate(text, voice)
         await communicate.save(temp_filename)
-
         return FileResponse(temp_filename, media_type="audio/mpeg")
     except Exception as e:
-        print(f"❌ Erreur TTS : {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

@@ -278,9 +278,8 @@ def identifier_locuteur(chemin_audio_recu):
             meilleur_score = score
             meilleur_nom = nom
 
-    # Seuil expérimental.
-    # À calibrer avec tes propres enregistrements.
-    SEUIL_RECONNAISSANCE = 0.22
+    # Seuil assoupli pour éviter qu'il ne rate la reconnaissance
+    SEUIL_RECONNAISSANCE = 0.38
 
     if meilleur_score <= SEUIL_RECONNAISSANCE:
         return meilleur_nom, meilleur_score
@@ -627,14 +626,8 @@ async def enregistrer_profil(
         if file.filename.lower().endswith(".wav"):
             extension = ".wav"
 
-    # Chaque personne peut avoir plusieurs
-    # échantillons vocaux.
-    timestamp = int(time.time())
-
-    nom_fichier = (
-        f"{nom_nettoye}_{timestamp}"
-        f"{extension}"
-    )
+    # Nom de fichier unique par utilisateur pour écraser l'ancien profil proprement
+    nom_fichier = f"{nom_nettoye}{extension}"
 
     chemin = os.path.join(
         PROFILS_DIR,

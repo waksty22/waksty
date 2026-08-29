@@ -106,14 +106,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chappie - Nouveau-né</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 20px auto; padding: 10px; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 10px auto; padding: 10px; box-sizing: border-box; }
         #chat { background: #1e1e1e; height: 300px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
         .msg { padding: 8px 12px; border-radius: 6px; max-width: 80%; word-break: break-word; }
         .user { background: #007acc; align-self: flex-end; }
         .bot { background: #333; align-self: flex-start; }
         .controls { display: flex; gap: 8px; margin-bottom: 10px; }
         input[type="text"] { flex: 1; padding: 12px; border-radius: 5px; border: none; background: #2a2a2a; color: #fff; font-size: 16px; }
-        button { padding: 12px 15px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 15px; }
+        button { padding: 12px 15px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 15px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
         #btnMicro { background: #dc3545; }
         #btnMicro.ecoute { background: #ffc107; color: #000; animation: pulse 1.5s infinite; }
         #btnMicro.continu { background: #17a2b8; }
@@ -130,7 +130,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="statutProfil">🔍 Chargement des profils vocaux...</div>
         <div class="profile-row">
             <input type="text" id="nomProfil" placeholder="Ton prénom (ex: Julien)">
-            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b;">Enregistrer ma voix</button>
+            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b;">Enregistrer</button>
         </div>
     </div>
 
@@ -179,7 +179,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
         verifierProfils();
 
-        btnEnregistrerVoix.addEventListener('click', async () => {
+        async function enregistrerVoixAction() {
             const nom = nomProfil.value.trim();
             if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
             
@@ -213,10 +213,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } catch (err) {
                 statutProfil.innerHTML = "❌ Accès micro refusé.";
             }
-        });
+        }
+
+        // Écouteurs ultra-compatibles mobile (clic et touchstart)
+        btnEnregistrerVoix.addEventListener('click', enregistrerVoixAction);
+        btnEnregistrerVoix.addEventListener('touchstart', (e) => { e.preventDefault(); enregistrerVoixAction(); });
 
         texteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); envoyerMessage(); } });
+        
         btnEnvoyer.addEventListener('click', (e) => { e.preventDefault(); envoyerMessage(); });
+        btnEnvoyer.addEventListener('touchstart', (e) => { e.preventDefault(); envoyerMessage(); });
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
@@ -224,7 +230,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.lang = 'fr-FR';
             reconnaissance.interimResults = false;
 
-            btnMicro.addEventListener('click', () => {
+            const toggleMicro = () => {
                 modeContinu = !modeContinu;
                 if (modeContinu) {
                     btnMicro.classList.add('continu', 'ecoute');
@@ -235,7 +241,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     btnMicro.textContent = "🎤 OFF";
                     try { reconnaissance.stop(); } catch(e) {}
                 }
-            });
+            };
+
+            btnMicro.addEventListener('click', toggleMicro);
+            btnMicro.addEventListener('touchstart', (e) => { e.preventDefault(); toggleMicro(); });
 
             reconnaissance.addEventListener('result', (e) => {
                 if (microVerrouille) return;

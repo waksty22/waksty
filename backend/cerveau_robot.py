@@ -103,22 +103,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chappie - Nouveau-né</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 40px auto; padding: 20px; }
-        #chat { background: #1e1e1e; height: 320px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
+        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 20px auto; padding: 10px; box-sizing: border-box; }
+        #chat { background: #1e1e1e; height: 300px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
         .msg { padding: 8px 12px; border-radius: 6px; max-width: 80%; word-break: break-word; }
         .user { background: #007acc; align-self: flex-end; }
         .bot { background: #333; align-self: flex-start; }
-        .controls { display: flex; gap: 10px; margin-bottom: 10px; }
-        input { flex: 1; padding: 10px; border-radius: 5px; border: none; background: #2a2a2a; color: #fff; font-size: 16px; }
-        button { padding: 10px 20px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 16px; }
+        .controls { display: flex; gap: 8px; margin-bottom: 10px; }
+        input[type="text"] { flex: 1; padding: 12px; border-radius: 5px; border: none; background: #2a2a2a; color: #fff; font-size: 16px; }
+        button { padding: 12px 15px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 15px; }
         #btnMicro { background: #dc3545; }
         #btnMicro.ecoute { background: #ffc107; color: #000; animation: pulse 1.5s infinite; }
         #btnMicro.continu { background: #17a2b8; }
         #btnMicro.parle { background: #6c757d; opacity: 0.7; cursor: not-allowed; }
-        .profile-box { background: #1e1e1e; padding: 10px; border-radius: 8px; font-size: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
-        .profile-row { display: flex; gap: 10px; align-items: center; }
+        .profile-box { background: #1e1e1e; padding: 12px; border-radius: 8px; font-size: 14px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
+        .profile-row { display: flex; gap: 8px; align-items: center; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
@@ -129,7 +130,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="statutProfil">🔍 Chargement des profils vocaux...</div>
         <div class="profile-row">
             <input type="text" id="nomProfil" placeholder="Ton prénom (ex: Julien)">
-            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b; padding: 8px 15px; font-size: 14px;">Enregistrer ma voix</button>
+            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b;">Enregistrer ma voix</button>
         </div>
     </div>
 
@@ -138,8 +139,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
     
     <div class="controls">
-        <input type="text" id="texteInput" placeholder="Parle à Chappie..." autofocus>
-        <button id="btnMicro" type="button">🎤 Mode Continu : OFF</button>
+        <input type="text" id="texteInput" placeholder="Parle à Chappie...">
+        <button id="btnMicro" type="button">🎤 OFF</button>
         <button id="btnEnvoyer" type="button">Envoyer</button>
     </div>
 
@@ -158,11 +159,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let modeContinu = false;
         let reconnaissance = null;
         let microVerrouille = false;
-
-        // Variable globale pour stocker l'interlocuteur identifié ou déclaré
         let utilisateurActif = "Inconnu";
 
-        // File d'attente et gestionnaire audio fluide
         let fileAudio = [];
         let enTrainDeLire = false;
 
@@ -170,12 +168,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             try {
                 const res = await fetch('/api/lister-profils');
                 const data = await res.json();
-                if (data.profils.length === 0) {
+                if (data.profils && data.profils.length === 0) {
                     statutProfil.innerHTML = "⚠️ Aucun profil vocal. Enregistre ta voix.";
                 } else {
                     statutProfil.innerHTML = `✅ Profils connus : ${data.profils.join(', ')}`;
                 }
-            } catch(e) {}
+            } catch(e) {
+                statutProfil.innerHTML = "⚠️ Erreur chargement profils.";
+            }
         }
         verifierProfils();
 
@@ -184,7 +184,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
             
             try {
-                statutProfil.innerHTML = "🎤 Enregistrement en cours... Parle pendant 4 secondes.";
+                statutProfil.innerHTML = "🎤 Enregistrement... Parle 4 secondes.";
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const mediaRecorder = new MediaRecorder(stream);
                 let audioChunks = [];
@@ -203,7 +203,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         nomProfil.value = '';
                         verifierProfils();
                     } else {
-                        statutProfil.innerHTML = "❌ Erreur lors de l'enregistrement du profil.";
+                        statutProfil.innerHTML = "❌ Erreur sauvegarde profil.";
                     }
                     stream.getTracks().forEach(track => track.stop());
                 };
@@ -211,7 +211,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 mediaRecorder.start();
                 setTimeout(() => mediaRecorder.stop(), 4000);
             } catch (err) {
-                statutProfil.innerHTML = "❌ Accès micro refusé ou non disponible.";
+                statutProfil.innerHTML = "❌ Accès micro refusé.";
             }
         });
 
@@ -224,22 +224,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.lang = 'fr-FR';
             reconnaissance.interimResults = false;
 
-            window.addEventListener('load', () => {
-                modeContinu = true;
-                btnMicro.classList.add('continu', 'ecoute');
-                btnMicro.textContent = "🟢 En écoute...";
-                lancerEcoute();
-            });
-
             btnMicro.addEventListener('click', () => {
                 modeContinu = !modeContinu;
                 if (modeContinu) {
                     btnMicro.classList.add('continu', 'ecoute');
-                    btnMicro.textContent = "🟢 En écoute...";
+                    btnMicro.textContent = "🟢 Écoute...";
                     lancerEcoute();
                 } else {
                     btnMicro.classList.remove('continu', 'ecoute', 'parle');
-                    btnMicro.textContent = "🎤 Mode Continu : OFF";
+                    btnMicro.textContent = "🎤 OFF";
                     try { reconnaissance.stop(); } catch(e) {}
                 }
             });
@@ -253,10 +246,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             reconnaissance.addEventListener('end', () => {
                 if (modeContinu && !microVerrouille) setTimeout(lancerEcoute, 500);
             });
+        } else {
+            btnMicro.style.display = 'none';
         }
 
-        function lancerEcoute() { if (modeContinu && !microVerrouille) try { reconnaissance.start(); } catch (e) {} }
-        function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie parle..."; try { reconnaissance.stop(); } catch(e) {} }
+        function lancerEcoute() { if (modeContinu && !microVerrouille && reconnaissance) try { reconnaissance.start(); } catch (e) {} }
+        function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie..."; if (reconnaissance) try { reconnaissance.stop(); } catch(e) {} }
 
         async function ajouterEtJouerAudio(texte, energie) {
             const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
@@ -307,7 +302,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function reactiverMicroFinDeParole() {
             microVerrouille = false;
-            if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 En écoute..."; lancerEcoute(); }
+            if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 Écoute..."; lancerEcoute(); }
+            else { btnMicro.textContent = "🎤 OFF"; }
         }
 
         async function envoyerMessage() {

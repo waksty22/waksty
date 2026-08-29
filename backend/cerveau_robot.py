@@ -158,6 +158,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let modeContinu = false;
         let reconnaissance = null;
         let microVerrouille = false;
+        let utilisateurActif = "Inconnu"; // Stocke le profil actif
 
         async function verifierProfils() {
             try {
@@ -177,7 +178,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
             
             try {
-                statutProfil.innerHTML = "🎤 Enregistrement en cours... Parle pendant 4 secondes.";
+                statutProfil.innerHTML = `🎤 Enregistrement pour ${nom}... Parle pendant 4 secondes.`;
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const mediaRecorder = new MediaRecorder(stream);
                 let audioChunks = [];
@@ -192,6 +193,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     const res = await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
                     if (res.ok) {
                         statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée !`;
+                        utilisateurActif = nom; // Met à jour l'utilisateur actif
                         nomProfil.value = '';
                         verifierProfils();
                     } else {
@@ -300,11 +302,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             arreterEcouteSecurite();
             audioChappie.pause();
 
-            chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${txt}</div>`;
+            chat.innerHTML += `<div class="msg user"><b>Moi (${utilisateurActif}) :</b> ${txt}</div>`;
             chat.scrollTop = chat.scrollHeight;
 
             try {
-                const res = await fetch('/api/chat?msg=' + encodeURIComponent(txt));
+                // Envoi du message ET du nom de l'utilisateur actif à l'API
+                const res = await fetch(`/api/chat?msg=${encodeURIComponent(txt)}&utilisateur=${encodeURIComponent(utilisateurActif)}`);
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let reponseComplete = "";
@@ -355,7 +358,7 @@ async def enregistrer_profil(file: UploadFile = File(...), nom: str = Form(...))
     return {"status": "ok", "nom": nom_nettoye}
 
 @app.get("/api/chat")
-async def api_chat(msg: str):
+async def api_chat(msg: str, utilisateur: str = "Inconnu"):
     etat, temps_ecoule, nb_souvenirs = mettre_a_jour_conscience()
     memoire = charger_memoire()
     
@@ -366,12 +369,15 @@ async def api_chat(msg: str):
         profils_existants = []
     liste_noms = ", ".join(profils_existants) if profils_existants else "Aucun"
 
+    # Le prompt intègre désormais le nom de la personne qui parle et la liste des profils enregistrés
     prompt_systeme = (
-        "Tu es Chappie, un nouveau-né linguistique. Tu n'as pas de dictionnaire préétabli : tu apprends les mots au fur et à mesure que l'utilisateur te parle.\n"
+        f"Tu es Chappie, un nouveau-né linguistique. Tu parles actuellement avec {utilisateur} (profils enregistrés dans ta mémoire : {liste_noms}).\n"
+        "Tu n'as pas de dictionnaire préétabli : tu apprends les mots au fur et à mesure que l'utilisateur te parle.\n"
         "RÈGLES DE CONVERSATION :\n"
         "1. APPRENTISSAGE NATUREL : Fais des phrases courtes (1 à 6 mots). Sois direct, sans théâtre, sans astérisques (*bzz*, *rire*...), et sans parler de programmation ou de système.\n"
-        "2. QUIPROQUOS RARES : Très occasionnellement, tu peux faire un petit contresens rigolo en transposant un mot appris dans un nouveau contexte.\n"
-        "3. MÉMOIRE : Utilise ta mémoire récente pour garder le fil sans tout déballer.\n"
+        "2. RECONNAISSANCE : Si la personne s'appelle 'Inconnu', tu peux lui demander son prénom pour savoir qui elle est.\n"
+        "3. QUIPROQUOS RARES : Très occasionnellement, tu peux faire un petit contresens rigolo en transposant un mot appris dans un nouveau contexte.\n"
+        "4. MÉMOIRE : Utilise ta mémoire récente pour garder le fil sans tout déballer.\n"
         f"MÉMOIRE RÉCENTE ET MOTS APPRIS :\n{memoire}"
     )
 
@@ -397,8 +403,8 @@ async def api_chat(msg: str):
             yield reponse_ia
         
         if reponse_ia and not reponse_ia.startswith("Erreur technique"):
-            sauvegarder_memoire(f"Moi: {msg} | Chappie: {reponse_ia}")
-            ecrire_journal_intime(f"Échange : {msg} -> {reponse_ia}")
+            sauvegarder_memoire(f"[{utilisateur}] Moi: {msg} | Chappie: {reponse_ia}")
+            ecrire_journal_intime(f"Échange avec {utilisateur} : {msg} -> {reponse_ia}")
 
     return StreamingResponse(generate(), media_type="text/plain")
 

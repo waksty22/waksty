@@ -69,7 +69,7 @@ def identifier_locuteur(chemin_audio_recu):
                 nom_trouve = nom_profil
 
     # Seuil de tolérance (ajustable si besoin selon le micro)
-    if meilleure_distance < 90.0:
+    if meilleure_distance < 130.0:
         return nom_trouve
     
     return "Inconnu"

@@ -106,14 +106,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chappie - Nouveau-né</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 10px auto; padding: 10px; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #121212; color: #fff; max-width: 600px; margin: 20px auto; padding: 10px; box-sizing: border-box; }
         #chat { background: #1e1e1e; height: 300px; border-radius: 8px; padding: 15px; overflow-y: scroll; margin-bottom: 15px; display: flex; flex-direction: column; gap: 8px; }
         .msg { padding: 8px 12px; border-radius: 6px; max-width: 80%; word-break: break-word; }
         .user { background: #007acc; align-self: flex-end; }
         .bot { background: #333; align-self: flex-start; }
         .controls { display: flex; gap: 8px; margin-bottom: 10px; }
         input[type="text"] { flex: 1; padding: 12px; border-radius: 5px; border: none; background: #2a2a2a; color: #fff; font-size: 16px; }
-        button { padding: 12px 15px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 15px; -webkit-tap-highlight-color: transparent; }
+        button { padding: 12px 15px; border: none; border-radius: 5px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; font-size: 15px; }
         #btnMicro { background: #dc3545; }
         #btnMicro.ecoute { background: #ffc107; color: #000; animation: pulse 1.5s infinite; }
         #btnMicro.continu { background: #17a2b8; }
@@ -130,7 +130,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="statutProfil">🔍 Chargement des profils vocaux...</div>
         <div class="profile-row">
             <input type="text" id="nomProfil" placeholder="Ton prénom (ex: Julien)">
-            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b;">Enregistrer</button>
+            <button id="btnEnregistrerVoix" type="button" style="background: #ff851b;">Enregistrer ma voix</button>
         </div>
     </div>
 
@@ -147,214 +147,212 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <audio id="audioChappie"></audio>
 
     <script>
-        document.addEventListener("DOMContentLoaded", () => {
-            const chat = document.getElementById('chat');
-            const texteInput = document.getElementById('texteInput');
-            const btnEnvoyer = document.getElementById('btnEnvoyer');
-            const btnMicro = document.getElementById('btnMicro');
-            const btnEnregistrerVoix = document.getElementById('btnEnregistrerVoix');
-            const audioChappie = document.getElementById('audioChappie');
-            const statutProfil = document.getElementById('statutProfil');
-            const nomProfil = document.getElementById('nomProfil');
+        const chat = document.getElementById('chat');
+        const texteInput = document.getElementById('texteInput');
+        const btnEnvoyer = document.getElementById('btnEnvoyer');
+        const btnMicro = document.getElementById('btnMicro');
+        const btnEnregistrerVoix = document.getElementById('btnEnregistrerVoix');
+        const audioChappie = document.getElementById('audioChappie');
+        const statutProfil = document.getElementById('statutProfil');
+        const nomProfil = document.getElementById('nomProfil');
 
-            let modeContinu = false;
-            let reconnaissance = null;
-            let microVerrouille = false;
-            let utilisateurActif = "Inconnu";
+        let modeContinu = false;
+        let reconnaissance = null;
+        let microVerrouille = false;
+        let utilisateurActif = "Inconnu";
 
-            let fileAudio = [];
-            let enTrainDeLire = false;
+        let fileAudio = [];
+        let enTrainDeLire = false;
 
-            async function verifierProfils() {
-                try {
-                    const res = await fetch('/api/lister-profils');
-                    const data = await res.json();
-                    if (data.profils && data.profils.length === 0) {
-                        statutProfil.innerHTML = "⚠️ Aucun profil vocal. Enregistre ta voix.";
+        async function verifierProfils() {
+            try {
+                const res = await fetch('/api/lister-profils');
+                const data = await res.json();
+                if (data.profils && data.profils.length === 0) {
+                    statutProfil.innerHTML = "⚠️ Aucun profil vocal. Enregistre ta voix.";
+                } else {
+                    statutProfil.innerHTML = `✅ Profils connus : ${data.profils.join(', ')}`;
+                }
+            } catch(e) {
+                statutProfil.innerHTML = "⚠️ Erreur chargement profils.";
+            }
+        }
+        verifierProfils();
+
+        btnEnregistrerVoix.addEventListener('click', async () => {
+            const nom = nomProfil.value.trim();
+            if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
+            
+            try {
+                statutProfil.innerHTML = "🎤 Enregistrement... Parle 4 secondes.";
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const mediaRecorder = new MediaRecorder(stream);
+                let audioChunks = [];
+                
+                mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const formData = new FormData();
+                    formData.append("file", audioBlob, "profil.webm");
+                    formData.append("nom", nom);
+                    
+                    const res = await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
+                    if (res.ok) {
+                        statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée !`;
+                        utilisateurActif = nom;
+                        nomProfil.value = '';
+                        verifierProfils();
                     } else {
-                        statutProfil.innerHTML = `✅ Profils connus : ${data.profils.join(', ')}`;
+                        statutProfil.innerHTML = "❌ Erreur sauvegarde profil.";
                     }
-                } catch(e) {
-                    statutProfil.innerHTML = "⚠️ Erreur chargement profils.";
-                }
-            }
-            verifierProfils();
-
-            btnEnregistrerVoix.onclick = async () => {
-                const nom = nomProfil.value.trim();
-                if (!nom) { alert("Entre ton prénom avant d'enregistrer !"); return; }
-                
-                try {
-                    statutProfil.innerHTML = "🎤 Enregistrement... Parle 4 secondes.";
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    const mediaRecorder = new MediaRecorder(stream);
-                    let audioChunks = [];
-                    
-                    mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-                    mediaRecorder.onstop = async () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        const formData = new FormData();
-                        formData.append("file", audioBlob, "profil.webm");
-                        formData.append("nom", nom);
-                        
-                        const res = await fetch('/api/enregistrer-profil', { method: 'POST', body: formData });
-                        if (res.ok) {
-                            statutProfil.innerHTML = `✅ Empreinte de ${nom} enregistrée !`;
-                            utilisateurActif = nom;
-                            nomProfil.value = '';
-                            verifierProfils();
-                        } else {
-                            statutProfil.innerHTML = "❌ Erreur sauvegarde profil.";
-                        }
-                        stream.getTracks().forEach(track => track.stop());
-                    };
-                    
-                    mediaRecorder.start();
-                    setTimeout(() => mediaRecorder.stop(), 4000);
-                } catch (err) {
-                    statutProfil.innerHTML = "❌ Accès micro refusé.";
-                }
-            };
-
-            texteInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); envoyerMessage(); } };
-            btnEnvoyer.onclick = (e) => { e.preventDefault(); envoyerMessage(); };
-
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (SpeechRecognition) {
-                reconnaissance = new SpeechRecognition();
-                reconnaissance.lang = 'fr-FR';
-                reconnaissance.interimResults = false;
-
-                btnMicro.onclick = () => {
-                    modeContinu = !modeContinu;
-                    if (modeContinu) {
-                        btnMicro.classList.add('continu', 'ecoute');
-                        btnMicro.textContent = "🟢 Écoute...";
-                        lancerEcoute();
-                    } else {
-                        btnMicro.classList.remove('continu', 'ecoute', 'parle');
-                        btnMicro.textContent = "🎤 OFF";
-                        try { reconnaissance.stop(); } catch(e) {}
-                    }
-                };
-
-                reconnaissance.onresult = (e) => {
-                    if (microVerrouille) return;
-                    texteInput.value = e.results[0][0].transcript;
-                    envoyerMessage();
-                };
-
-                reconnaissance.onend = () => {
-                    if (modeContinu && !microVerrouille) setTimeout(lancerEcoute, 500);
-                };
-            } else {
-                btnMicro.style.display = 'none';
-            }
-
-            function lancerEcoute() { if (modeContinu && !microVerrouille && reconnaissance) try { reconnaissance.start(); } catch (e) {} }
-            function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie..."; if (reconnaissance) try { reconnaissance.stop(); } catch(e) {} }
-
-            async function ajouterEtJouerAudio(texte, energie) {
-                const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
-                if (!texteNettoye) return;
-
-                try {
-                    const response = await fetch(`/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`);
-                    if (!response.ok) return;
-                    
-                    const blob = await response.blob();
-                    const audioUrl = URL.createObjectURL(blob);
-                    
-                    fileAudio.push(audioUrl);
-                    jouerProchainAudio();
-                } catch (err) {
-                    console.error("Erreur TTS:", err);
-                }
-            }
-
-            function jouerProchainAudio() {
-                if (enTrainDeLire || fileAudio.length === 0) return;
-                
-                enTrainDeLire = true;
-                const url = fileAudio.shift();
-                audioChappie.src = url;
-                audioChappie.load();
-                
-                audioChappie.onended = () => {
-                    URL.revokeObjectURL(url);
-                    enTrainDeLire = false;
-                    if (fileAudio.length > 0) {
-                        jouerProchainAudio();
-                    } else {
-                        reactiverMicroFinDeParole();
-                    }
+                    stream.getTracks().forEach(track => track.stop());
                 };
                 
-                audioChappie.onerror = () => {
-                    enTrainDeLire = false;
-                    jouerProchainAudio();
-                };
-
-                audioChappie.play().catch(() => {
-                    enTrainDeLire = false;
-                    jouerProchainAudio();
-                });
-            }
-
-            function reactiverMicroFinDeParole() {
-                microVerrouille = false;
-                if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 Écoute..."; lancerEcoute(); }
-                else { btnMicro.textContent = "🎤 OFF"; }
-            }
-
-            async function envoyerMessage() {
-                const txt = texteInput.value.trim();
-                if (!txt || microVerrouille) return;
-                texteInput.value = '';
-                arreterEcouteSecurite();
-                audioChappie.pause();
-                fileAudio = [];
-                enTrainDeLire = false;
-
-                chat.innerHTML += `<div class="msg user"><b>Moi (${utilisateurActif}) :</b> ${txt}</div>`;
-                chat.scrollTop = chat.scrollHeight;
-
-                try {
-                    const res = await fetch(`/api/chat?msg=${encodeURIComponent(txt)}&utilisateur=${encodeURIComponent(utilisateurActif)}`);
-                    const reader = res.body.getReader();
-                    const decoder = new TextDecoder();
-                    let reponseComplete = "";
-                    let bufferPhrase = "";
-                    let energieCourante = 100;
-
-                    const botDiv = document.createElement('div');
-                    botDiv.className = 'msg bot';
-                    botDiv.innerHTML = '<b>Chappie :</b> <span class="txt-bot"></span>';
-                    chat.appendChild(botDiv);
-                    const spanContenu = botDiv.querySelector('.txt-bot');
-
-                    while (true) {
-                        const { value, done } = await reader.read();
-                        if (done) break;
-                        const chunkText = decoder.decode(value, { stream: true });
-                        reponseComplete += chunkText;
-                        bufferPhrase += chunkText;
-                        spanContenu.textContent = reponseComplete;
-                        chat.scrollTop = chat.scrollHeight;
-
-                        if (/[.!?;\n]/.test(bufferPhrase)) {
-                            ajouterEtJouerAudio(bufferPhrase, energieCourante);
-                            bufferPhrase = "";
-                        }
-                    }
-                    if (bufferPhrase.trim()) {
-                        ajouterEtJouerAudio(bufferPhrase, energieCourante);
-                    }
-                } catch (err) {
-                    reactiverMicroFinDeParole();
-                }
+                mediaRecorder.start();
+                setTimeout(() => mediaRecorder.stop(), 4000);
+            } catch (err) {
+                statutProfil.innerHTML = "❌ Accès micro refusé.";
             }
         });
+
+        texteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); envoyerMessage(); } });
+        btnEnvoyer.addEventListener('click', (e) => { e.preventDefault(); envoyerMessage(); });
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            reconnaissance = new SpeechRecognition();
+            reconnaissance.lang = 'fr-FR';
+            reconnaissance.interimResults = false;
+
+            btnMicro.addEventListener('click', () => {
+                modeContinu = !modeContinu;
+                if (modeContinu) {
+                    btnMicro.classList.add('continu', 'ecoute');
+                    btnMicro.textContent = "🟢 Écoute...";
+                    lancerEcoute();
+                } else {
+                    btnMicro.classList.remove('continu', 'ecoute', 'parle');
+                    btnMicro.textContent = "🎤 OFF";
+                    try { reconnaissance.stop(); } catch(e) {}
+                }
+            });
+
+            reconnaissance.addEventListener('result', (e) => {
+                if (microVerrouille) return;
+                texteInput.value = e.results[0][0].transcript;
+                envoyerMessage();
+            });
+
+            reconnaissance.addEventListener('end', () => {
+                if (modeContinu && !microVerrouille) setTimeout(lancerEcoute, 500);
+            });
+        } else {
+            btnMicro.style.display = 'none';
+        }
+
+        function lancerEcoute() { if (modeContinu && !microVerrouille && reconnaissance) try { reconnaissance.start(); } catch (e) {} }
+        function arreterEcouteSecurite() { microVerrouille = true; btnMicro.className = "parle"; btnMicro.textContent = "🗣️ Chappie..."; if (reconnaissance) try { reconnaissance.stop(); } catch(e) {} }
+
+        async function ajouterEtJouerAudio(texte, energie) {
+            const texteNettoye = texte.replace(/[*_#`]/g, '').trim();
+            if (!texteNettoye) return;
+
+            try {
+                const response = await fetch(`/api/tts?text=${encodeURIComponent(texteNettoye)}&energie=${energie}`);
+                if (!response.ok) return;
+                
+                const blob = await response.blob();
+                const audioUrl = URL.createObjectURL(blob);
+                
+                fileAudio.push(audioUrl);
+                jouerProchainAudio();
+            } catch (err) {
+                console.error("Erreur TTS:", err);
+            }
+        }
+
+        function jouerProchainAudio() {
+            if (enTrainDeLire || fileAudio.length === 0) return;
+            
+            enTrainDeLire = true;
+            const url = fileAudio.shift();
+            audioChappie.src = url;
+            audioChappie.load();
+            
+            audioChappie.onended = () => {
+                URL.revokeObjectURL(url);
+                enTrainDeLire = false;
+                if (fileAudio.length > 0) {
+                    jouerProchainAudio();
+                } else {
+                    reactiverMicroFinDeParole();
+                }
+            };
+            
+            audioChappie.onerror = () => {
+                enTrainDeLire = false;
+                jouerProchainAudio();
+            };
+
+            audioChappie.play().catch(() => {
+                enTrainDeLire = false;
+                jouerProchainAudio();
+            });
+        }
+
+        function reactiverMicroFinDeParole() {
+            microVerrouille = false;
+            if (modeContinu) { btnMicro.className = "continu ecoute"; btnMicro.textContent = "🟢 Écoute..."; lancerEcoute(); }
+            else { btnMicro.textContent = "🎤 OFF"; }
+        }
+
+        async function envoyerMessage() {
+            const txt = texteInput.value.trim();
+            if (!txt || microVerrouille) return;
+            texteInput.value = '';
+            arreterEcouteSecurite();
+            audioChappie.pause();
+            fileAudio = [];
+            enTrainDeLire = false;
+
+            chat.innerHTML += `<div class="msg user"><b>Moi (${utilisateurActif}) :</b> ${txt}</div>`;
+            chat.scrollTop = chat.scrollHeight;
+
+            try {
+                const res = await fetch(`/api/chat?msg=${encodeURIComponent(txt)}&utilisateur=${encodeURIComponent(utilisateurActif)}`);
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let reponseComplete = "";
+                let bufferPhrase = "";
+                let energieCourante = 100;
+
+                const botDiv = document.createElement('div');
+                botDiv.className = 'msg bot';
+                botDiv.innerHTML = '<b>Chappie :</b> <span class="txt-bot"></span>';
+                chat.appendChild(botDiv);
+                const spanContenu = botDiv.querySelector('.txt-bot');
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    const chunkText = decoder.decode(value, { stream: true });
+                    reponseComplete += chunkText;
+                    bufferPhrase += chunkText;
+                    spanContenu.textContent = reponseComplete;
+                    chat.scrollTop = chat.scrollHeight;
+
+                    if (/[.!?;\n]/.test(bufferPhrase)) {
+                        ajouterEtJouerAudio(bufferPhrase, energieCourante);
+                        bufferPhrase = "";
+                    }
+                }
+                if (bufferPhrase.trim()) {
+                    ajouterEtJouerAudio(bufferPhrase, energieCourante);
+                }
+            } catch (err) {
+                reactiverMicroFinDeParole();
+            }
+        }
     </script>
 </body>
 </html>

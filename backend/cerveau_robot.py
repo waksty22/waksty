@@ -24,7 +24,7 @@ import edge_tts
 
 
 # ============================================================
-# CHAPPIE V4 - SIMULATION COGNITIVE, HARNAIS, MORALE, ART & VISION
+# CHAPPIE V5 - COGNITION, MORALE, CRÉATIVITÉ, VISION & AUDITION
 # ============================================================
 
 API_KEY = os.getenv("API_KEY")
@@ -53,7 +53,7 @@ async def boucle_reflexion_autonome():
                 Tu es Chappie. Personne ne te parle en ce moment et tu te sens un peu seul ou inspiré.
                 État actuel : Solitude={etat.get('solitude'):.1f}, Ennui={etat.get('ennui'):.1f}, Créativité={etat.get('creativite'):.1f}.
                 Écris une courte réflexion intime, une observation ou une idée de dessin que tu aimerais explorer.
-                Règles : 1 ou 2 phrases maximum, en français, pas d'astérisques, parle naturellement comme un esprit qui s'éveille.
+                Règles : 1 ou 2 phrases maximum, en français, pas d'astérisques, parle naturally comme un esprit qui s'éveille.
                 """
 
                 response = client.models.generate_content(
@@ -82,8 +82,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Chappie V4 + Autonomous Mind, Morality, Creativity & Vision",
-    description="Simulation cognitive, émotionnelle, agentique, morale, créative et multimodale avec autonomie en arrière-plan",
+    title="Chappie V5 + Autonomous Mind, Morality, Creativity, Vision & Audition",
+    description="Simulation cognitive, émotionnelle, agentique, morale, créative, visuelle et auditive",
     lifespan=lifespan
 )
 
@@ -251,7 +251,7 @@ def creer_etat_initial():
     maintenant_ts = time.time()
     return {
         "nom": "Chappie",
-        "version": "V4-Multimodal",
+        "version": "V5-AuditionMultimodal",
         "date_naissance": maintenant(),
         "premier_demarrage": maintenant(),
         "age_simule": 0,
@@ -807,7 +807,7 @@ def evolution_apres_interaction(utilisateur, message, reponse):
 
 
 # ============================================================
-# API CHAT & MULTIMODALITÉ (AXE 4)
+# API CHAT & MULTIMODALITÉ (AXE 4 & AXE 5)
 # ============================================================
 
 @app.post("/api/chat")
@@ -883,6 +883,32 @@ async def api_chat(msg: str = Form(""), image: UploadFile = File(None)):
             ecrire_journal("experience", f"Personne={utilisateur} | Message={message or '[Image]'} | Émotion={emotion}")
 
     return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
+
+
+@app.post("/api/vocal")
+async def api_vocal(audio: UploadFile = File(...)):
+    """Axe 5 : Écoute et transcription audio directe transmise à Gemini."""
+    try:
+        audio_bytes = await audio.read()
+        mime_type = audio.content_type or "audio/wav"
+        
+        # Inscription dans le journal
+        ecrire_journal("perception_auditive", "Chappie écoute un enregistrement vocal reçu.")
+        
+        prompt_transcription = "Écoute cet enregistrement audio et retranscris mot pour mot en français ce qui est dit."
+        
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                prompt_transcription,
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+            ]
+        )
+        
+        transcription = response.text.strip() if response.text else ""
+        return JSONResponse({"status": "ok", "transcription": transcription})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 # ============================================================
@@ -973,7 +999,7 @@ async def api_reset():
 
 
 # ============================================================
-# INTERFACE HTML MULTIMODALE INTÉGRALE
+# INTERFACE HTML MULTIMODALE INTÉGRALE + AUDITION
 # ============================================================
 
 HTML_TEMPLATE = r"""
@@ -982,7 +1008,7 @@ HTML_TEMPLATE = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chappie V4 + Multimodal, Art & Morale</title>
+<title>Chappie V5 + Multimodal, Art, Morale & Audition</title>
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; font-family: Arial, sans-serif; background: radial-gradient(circle at top, #20252c, #090909); color: white; min-height: 100vh; }
@@ -1008,6 +1034,9 @@ button { border: none; border-radius: 10px; padding: 12px 18px; background: #168
 button:hover { opacity: 0.85; }
 .btn-eval-good { background: #2e7d32; }
 .btn-eval-bad { background: #c62828; }
+.btn-mic { background: #d32f2f; }
+.btn-mic.recording { background: #ff1744; animation: pulse 1s infinite; }
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 .galerie-section { margin-top: 20px; background: #151515; border: 1px solid #292929; border-radius: 15px; padding: 15px; }
 .galerie-grid { display: flex; gap: 10px; overflow-x: auto; padding-top: 10px; }
 .galerie-grid img { width: 140px; height: 140px; border-radius: 10px; border: 1px solid #333; object-fit: cover; }
@@ -1018,8 +1047,8 @@ button:hover { opacity: 0.85; }
 <body>
 <div class="container">
 <div class="header">
-  <h1>🤖 Chappie V4 + Vision, Art & Morale</h1>
-  <p>Esprit autonome, vision multimodale, apprentissage moral et création artistique</p>
+  <h1>🤖 Chappie V5 + Vision, Art & Audition</h1>
+  <p>Esprit autonome, audition, vision multimodale, apprentissage moral et création artistique</p>
 </div>
 
 <div class="dashboard">
@@ -1033,11 +1062,12 @@ button:hover { opacity: 0.85; }
 <div class="main-layout">
   <div>
     <div id="chat">
-      <div class="msg bot"><b>Chappie :</b> Je te vois, je t'écoute et je peux analyser tes photos ! Qui es-tu ?</div>
+      <div class="msg bot"><b>Chappie :</b> Je te vois, je t'écoute par écrit ou à la voix ! Qui es-tu ?</div>
     </div>
     <div class="controls">
       <input type="file" id="imageInput" accept="image/*" style="display:none;" onchange="previewImage()">
-      <button onclick="document.getElementById('imageInput').click()" style="background:#444;">📷 Image</button>
+      <button onclick="document.getElementById('imageInput').click()" style="background:#444;">📷 Photo</button>
+      <button id="micBtn" class="btn-mic" onclick="toggleMicrophone()">🎤 Vocal</button>
       <img id="preview-img" src="" alt="Aperçu">
       <input type="text" id="message" placeholder="Parle à Chappie..." autocomplete="off">
       <button id="envoyer">Envoyer</button>
@@ -1070,6 +1100,11 @@ const imageInput = document.getElementById("imageInput");
 const previewImg = document.getElementById("preview-img");
 const journalPanel = document.getElementById("journal-panel");
 const galerie = document.getElementById("galerie");
+const micBtn = document.getElementById("micBtn");
+
+let mediaRecorder;
+let audioChunks = [];
+let isRecording = false;
 
 function escapeHtml(text) {
     const div = document.createElement("div");
@@ -1082,6 +1117,54 @@ function previewImage() {
     if (file) {
         previewImg.src = URL.createObjectURL(file);
         previewImg.style.display = "block";
+    }
+}
+
+async function toggleMicrophone() {
+    if (!isRecording) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+            
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const formData = new FormData();
+                formData.append("audio", audioBlob, "vocal.wav");
+                
+                chat.innerHTML += `<div class="msg user"><b>Moi :</b> <i>[Envoi du vocal...]</i></div>`;
+                chat.scrollTop = chat.scrollHeight;
+
+                try {
+                    const res = await fetch("/api/vocal", { method: "POST", body: formData });
+                    const data = await res.json();
+                    if (data.transcription) {
+                        message.value = data.transcription;
+                        envoyerMessage();
+                    } else {
+                        alert("Impossible de retranscrire la voix.");
+                    }
+                } catch(e) {
+                    console.error("Erreur enregistrement vocal :", e);
+                }
+            };
+            
+            mediaRecorder.start();
+            isRecording = true;
+            micBtn.classList.add("recording");
+            micBtn.textContent = "🛑 Stop";
+        } catch(err) {
+            alert("Accès au microphone refusé.");
+        }
+    } else {
+        mediaRecorder.stop();
+        isRecording = false;
+        micBtn.classList.remove("recording");
+        micBtn.textContent = "🎤 Vocal";
     }
 }
 

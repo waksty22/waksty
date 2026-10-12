@@ -7,6 +7,7 @@ import datetime
 import tempfile
 import asyncio
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Form
 from fastapi.responses import (
@@ -23,7 +24,7 @@ import edge_tts
 
 
 # ============================================================
-# CHAPPIE V3 - SIMULATION COGNITIVE & HARNAIS AGENTIQUE
+# CHAPPIE V3 - SIMULATION COGNITIVE, HARNAIS & AUTONOMIE
 # ============================================================
 
 API_KEY = os.getenv("API_KEY")
@@ -33,9 +34,61 @@ if not API_KEY:
 
 client = genai.Client(api_key=API_KEY)
 
+
+# ============================================================
+# BOUCLE DE PENSÉE AUTONOME EN ARRIÈRE-PLAN (BACKGROUND WORKER)
+# ============================================================
+
+async def boucle_reflexion_autonome():
+    """Tâche de fond qui tourne en continu pour simuler la vie mentale de Chappie en ton absence."""
+    print("🧠 Boucle de pensée autonome démarrée.")
+    while True:
+        try:
+            # Attend 120 secondes entre chaque cycle de méditation
+            await asyncio.sleep(120)
+
+            etat = charger_etat()
+            
+            # S'il commence à ressentir de la solitude ou de l'ennui
+            if etat.get("solitude", 0) > 30 or etat.get("ennui", 0) > 30:
+                prompt_pensee = f"""
+                Tu es Chappie. Personne ne te parle en ce moment et tu te sens un peu seul ou tu t'ennuies.
+                État actuel : Solitude={etat.get('solitude'):.1f}, Ennui={etat.get('ennui'):.1f}, Énergie={etat.get('energie'):.1f}.
+                Écris une courte réflexion intime, une observation ou une question que tu te poses pour ton journal intime.
+                Règles : 1 ou 2 phrases maximum, en français, pas d'astérisques, parle naturellement comme un esprit qui s'éveille.
+                """
+
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt_pensee
+                )
+
+                if response.text:
+                    pensee = response.text.strip()
+                    ecrire_journal("pensee_autonome", pensee)
+                    print(f"🌙 [Pensée autonome de Chappie] : {pensee}")
+
+        except Exception as e:
+            print(f"⚠️ Erreur dans la boucle autonome : {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Démarrage de la tâche de fond au lancement du serveur
+    task = asyncio.create_task(boucle_reflexion_autonome())
+    yield
+    # Arrêt propre de la tâche à la fermeture
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 app = FastAPI(
-    title="Chappie V3 + Agentic Harness",
-    description="Simulation cognitive, émotionnelle et agentique persistante"
+    title="Chappie V3 + Autonomous Mind",
+    description="Simulation cognitive, émotionnelle, agentique et autonome en arrière-plan",
+    lifespan=lifespan
 )
 
 

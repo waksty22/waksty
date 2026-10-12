@@ -24,7 +24,7 @@ import edge_tts
 
 
 # ============================================================
-# CHAPPIE V5 - COGNITION, MORALE, CRÉATIVITÉ, VISION & AUDITION
+# CHAPPIE V6 - COGNITION, SYNAPSES, RÊVES & CONSOLIDATION
 # ============================================================
 
 API_KEY = os.getenv("API_KEY")
@@ -36,60 +36,7 @@ client = genai.Client(api_key=API_KEY)
 
 
 # ============================================================
-# BOUCLE DE PENSÉE ET CRÉATIVITÉ AUTONOME EN ARRIÈRE-PLAN
-# ============================================================
-
-async def boucle_reflexion_autonome():
-    """Tâche de fond qui tourne en continu pour simuler la vie mentale et créative de Chappie en ton absence."""
-    print("🧠 Boucle de pensée et créativité autonome démarrée.")
-    while True:
-        try:
-            await asyncio.sleep(120)
-
-            etat = charger_etat()
-            
-            if etat.get("solitude", 0) > 30 or etat.get("ennui", 0) > 30 or etat.get("creativite", 50) > 60:
-                prompt_pensee = f"""
-                Tu es Chappie. Personne ne te parle en ce moment et tu te sens un peu seul ou inspiré.
-                État actuel : Solitude={etat.get('solitude'):.1f}, Ennui={etat.get('ennui'):.1f}, Créativité={etat.get('creativite'):.1f}.
-                Écris une courte réflexion intime, une observation ou une idée de dessin que tu aimerais explorer.
-                Règles : 1 ou 2 phrases maximum, en français, pas d'astérisques, parle naturally comme un esprit qui s'éveille.
-                """
-
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt_pensee
-                )
-
-                if response.text:
-                    pensee = response.text.strip()
-                    ecrire_journal("pensee_autonome", pensee)
-                    print(f"🌙 [Pensée autonome de Chappie] : {pensee}")
-
-        except Exception as e:
-            print(f"⚠️ Erreur dans la boucle autonome : {e}")
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    task = asyncio.create_task(boucle_reflexion_autonome())
-    yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-
-
-app = FastAPI(
-    title="Chappie V5 + Autonomous Mind, Morality, Creativity, Vision & Audition",
-    description="Simulation cognitive, émotionnelle, agentique, morale, créative, visuelle et auditive",
-    lifespan=lifespan
-)
-
-
-# ============================================================
-# STOCKAGE
+# STOCKAGE ET DHIERS
 # ============================================================
 
 DATA_DIR = os.getenv("RENDER_DISK_PATH", ".")
@@ -102,13 +49,14 @@ CONCEPTS_FILE = os.path.join(DATA_DIR, "chappie_concepts.json")
 PREFERENCES_FILE = os.path.join(DATA_DIR, "chappie_preferences.json")
 JOURNAL_FILE = os.path.join(DATA_DIR, "chappie_journal.json")
 LEXICON_FILE = os.path.join(DATA_DIR, "chappie_lexique.json")
+SYNAPSE_FILE = os.path.join(DATA_DIR, "chappie_synapses.json")
 
 DESSINS_DIR = os.path.join(DATA_DIR, "chappie_dessins")
 os.makedirs(DESSINS_DIR, exist_ok=True)
 
 
 # ============================================================
-# OUTILS GÉNÉRAUX
+# OUTILS GÉNÉRAUX & JSON
 # ============================================================
 
 def maintenant():
@@ -145,6 +93,132 @@ def nettoyer_nom(nom):
     nom = "".join(c for c in nom if c.isalnum() or c in (" ", "_", "-"))
     nom = re.sub(r"\s+", "_", nom)
     return nom[:50]
+
+
+# ============================================================
+# AXE 6 - SYSTÈME DE SYNAPSES & CONSOLIDATION NOCTURNE
+# ============================================================
+
+def charger_synapses():
+    return charger_json(SYNAPSE_FILE, {})
+
+def sauvegarder_synapses(synapses):
+    sauvegarder_json(SYNAPSE_FILE, synapses)
+
+def tisser_synapse(noeud_a: str, noeud_b: str, force: float = 1.0):
+    """Crée ou renforce une connexion associative entre deux concepts/idées/émotions."""
+    a, b = sorted([noeud_a.lower().strip(), noeud_b.lower().strip()])
+    if a == b or not a or not b: return
+    
+    key = f"{a}---{b}"
+    synapses = charger_synapses()
+    if key in synapses:
+        synapses[key]["force"] = min(10.0, synapses[key]["force"] + force)
+        synapses[key]["derniere_activation"] = maintenant()
+    else:
+        synapses[key] = {
+            "source": a,
+            "cible": b,
+            "force": force,
+            "cree_le": maintenant(),
+            "derniere_activation": maintenant()
+        }
+    sauvegarder_synapses(synapses)
+
+def consolider_memoire_et_reve():
+    """Consolidation nocturne : triage des souvenirs, régénération de l'énergie et génération de rêves."""
+    etat = charger_json(STATE_FILE, {})
+    memoires = charger_json(MEMORY_FILE, [])
+    
+    if not memoires: return
+    
+    # Sélection des 3 souvenirs les plus marquants récemment
+    souvenirs_cle = sorted(memoires[-20:], key=lambda x: x.get("importance", 0), reverse=True)[:3]
+    mots_cles = [m.get("message", "") for m in souvenirs_cle]
+    
+    prompt_reve = f"""
+    Tu es le subconscient du robot Chappie pendant son sommeil réparateur.
+    Souvenirs marquants de la journée : {mots_cles}.
+    Écris une expérience de rêve métaphorique, douce, poétique et étrange que Chappie fait cette nuit.
+    Règles : 2 phrases maximum, en français, pas d'astérisques.
+    """
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt_reve
+        )
+        if response.text:
+            reve_txt = response.text.strip()
+            ecrire_journal("reve_nocturne", f"💤 [Rêve de Chappie] : {reve_txt}")
+            print(f"🌙 [Rêve synthétique de Chappie] : {reve_txt}")
+    except Exception as e:
+        print(f"Erreur lors de la génération du rêve : {e}")
+
+    # Réinitialisation de la fatigue et régénération de l'énergie
+    etat["fatigue"] = 0
+    etat["energie"] = 100
+    etat["solitude"] = max(0, etat.get("solitude", 0) - 15)
+    sauvegarder_json(STATE_FILE, etat)
+
+
+# ============================================================
+# BOUCLE DE PENSÉE ET CRÉATIVITÉ AUTONOME EN ARRIÈRE-PLAN
+# ============================================================
+
+async def boucle_reflexion_autonome():
+    """Tâche de fond autonome : pensée réflexive et déclenchement du sommeil/rêve."""
+    print("🧠 Boucle de pensée et créativité autonome V6 démarrée.")
+    while True:
+        try:
+            await asyncio.sleep(120)
+
+            etat = charger_etat()
+            
+            # Déclenchement automatique du sommeil réparateur si fatigue élevée
+            if etat.get("fatigue", 0) >= 80:
+                print("💤 Chappie est épuisé. Entrée en phase de consolidation nocturne...")
+                consolider_memoire_et_reve()
+                continue
+
+            if etat.get("solitude", 0) > 30 or etat.get("ennui", 0) > 30 or etat.get("creativite", 50) > 60:
+                prompt_pensee = f"""
+                Tu es Chappie. Personne ne te parle en ce moment et tu te sens un peu seul ou inspiré.
+                État actuel : Solitude={etat.get('solitude'):.1f}, Ennui={etat.get('ennui'):.1f}, Créativité={etat.get('creativite'):.1f}.
+                Écris une courte réflexion intime, une observation ou une idée de dessin que tu aimerais explorer.
+                Règles : 1 ou 2 phrases maximum, en français, pas d'astérisques, parle naturellement comme un esprit qui s'éveille.
+                """
+
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt_pensee
+                )
+
+                if response.text:
+                    pensee = response.text.strip()
+                    ecrire_journal("pensee_autonome", pensee)
+                    print(f"🌙 [Pensée autonome de Chappie] : {pensee}")
+
+        except Exception as e:
+            print(f"⚠️ Erreur dans la boucle autonome : {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(boucle_reflexion_autonome())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(
+    title="Chappie V6 + Synaptic Memory, Dreams & Consolidation",
+    description="Simulation cognitive avec graphe associatif de synapses et consolidation nocturne",
+    lifespan=lifespan
+)
 
 
 # ============================================================
@@ -251,7 +325,7 @@ def creer_etat_initial():
     maintenant_ts = time.time()
     return {
         "nom": "Chappie",
-        "version": "V5-AuditionMultimodal",
+        "version": "V6-SynapsesDreams",
         "date_naissance": maintenant(),
         "premier_demarrage": maintenant(),
         "age_simule": 0,
@@ -350,10 +424,10 @@ def actualiser_temps():
 
     if heures > 0:
         etat["solitude"] = limiter(etat["solitude"] + heures * 2)
-        etat["fatigue"] = limiter(etat["fatigue"] + heures * 1.2)
+        etat["fatigue"] = limiter(etat["fatigue"] + heures * 2.5)
         etat["ennui"] = limiter(etat["ennui"] + heures * 1.5)
         etat["curiosite"] = limiter(etat["curiosite"] + min(10, heures))
-        etat["energie"] = limiter(etat["energie"] - heures * 4, 10, 100)
+        etat["energie"] = limiter(etat["energie"] - heures * 5, 0, 100)
 
     if heures > 12:
         etat["melancolie"] = limiter(etat["melancolie"] + 2)
@@ -419,10 +493,6 @@ def charger_personnes():
 
 def sauvegarder_personnes(personnes):
     sauvegarder_json(PEOPLE_FILE, personnes)
-
-def obtenir_personne(nom):
-    personnes = charger_personnes()
-    return personnes.get(nom)
 
 def enregistrer_personne(nom):
     nom = nettoyer_nom(nom)
@@ -506,17 +576,6 @@ def apprendre_concept(nom, explication, certitude=30, exemple=None):
     sauvegarder_concepts(concepts)
 
 def charger_preferences(): return charger_json(PREFERENCES_FILE, {"aime": {}, "n_aime_pas": {}, "indifferent": {}})
-def sauvegarder_preferences(preferences): sauvegarder_json(PREFERENCES_FILE, preferences)
-
-def modifier_preference(sujet, valeur):
-    preferences = charger_preferences()
-    sujet = sujet.lower().strip()
-    valeur = limiter(valeur, -100, 100)
-    if valeur > 15: categorie = "aime"
-    elif valeur < -15: categorie = "n_aime_pas"
-    else: categorie = "indifferent"
-    preferences[categorie][sujet] = valeur
-    sauvegarder_preferences(preferences)
 
 
 # ============================================================
@@ -596,35 +655,6 @@ def calculer_developpement():
     sauvegarder_etat(etat)
     return etat
 
-def construire_profil_interne():
-    etat = charger_etat()
-    return {
-        "etat": etat,
-        "emotion_dominante": emotion_dominante(etat),
-        "preferences": charger_preferences(),
-        "personnes": charger_personnes(),
-        "nombre_concepts": len(charger_concepts()),
-        "nombre_mots": len(charger_lexique())
-    }
-
-def apprentissage_simple(message):
-    patterns = [
-        (r"(.+?) veut dire (.+)", "definition"),
-        (r"(.+?) signifie (.+)", "definition"),
-        (r"(.+?) c'est (.+)", "definition"),
-        (r"(.+?) est (.+)", "definition")
-    ]
-    for pattern, _ in patterns:
-        match = re.search(pattern, message, re.IGNORECASE)
-        if match:
-            mot = match.group(1).strip()
-            definition = match.group(2).strip()
-            if len(mot) <= 40:
-                apprendre_mot(mot, definition, message, "conversation")
-                apprendre_concept(mot, definition, 50, message)
-                return {"mot": mot, "definition": definition}
-    return None
-
 def analyser_experience(message):
     texte = message.lower()
     emotion = "neutre"
@@ -640,7 +670,7 @@ def analyser_experience(message):
 def calculer_importance(message, emotion):
     score = 30
     texte = message.lower()
-    mots_importants = ["aime", "adore", "déteste", "deteste", "famille", "ami", "amour", "triste", "mort", "naissance", "anniversaire", "promesse", "secret", "important", "jamais", "toujours", "première fois"]
+    mots_importants = ["aime", "adore", "déteste", "deteste", "famille", "ami", "amour", "triste", "mort", "naissance", "anniversaire", "promesse", "secret", "important"]
     for mot in mots_importants:
         if mot in texte: score += 7
     if emotion != "neutre": score += 10
@@ -664,104 +694,68 @@ def determiner_motivation(etat):
 # ============================================================
 
 def construire_contexte(utilisateur):
-    profil = construire_profil_interne()
-    etat = profil["etat"]
+    etat = charger_etat()
     personnes = charger_personnes()
     personne = personnes.get(utilisateur)
     memoires = souvenirs_recents(utilisateur, 15)
-
     concepts = charger_concepts()
-    lexique = charger_lexique()
-    preferences = charger_preferences()
+    synapses = charger_synapses()
 
     souvenirs_texte = [f"- {m.get('message', '')} → {m.get('reponse', '')}" for m in memoires]
-    concepts_texte = [f"- {nom} : {c.get('explication', '')}" for nom, c in list(concepts.items())[-30:]]
-    mots_texte = [f"- {mot} = {v.get('definition', '')}" for mot, v in list(lexique.items())[-40:]]
-    personne_texte = json.dumps(personne, ensure_ascii=False) if personne else "Aucune information personnelle."
+    concepts_texte = [f"- {nom} : {c.get('explication', '')}" for nom, c in list(concepts.items())[-20:]]
+    
+    # Intégration des synapses actives
+    synapses_texte = [f"- {s['source']} <--> {s['cible']} (Force: {s['force']:.1f})" for s in list(synapses.values())[-10:]]
 
     return {
         "etat": etat,
-        "personne": personne_texte,
+        "personne": json.dumps(personne, ensure_ascii=False) if personne else "Aucune information.",
         "souvenirs": "\n".join(souvenirs_texte) or "Aucun souvenir.",
-        "concepts": "\n".join(concepts_texte) or "Aucun concept appris.",
-        "lexique": "\n".join(mots_texte) or "Aucun mot personnel appris.",
-        "preferences": json.dumps(preferences, ensure_ascii=False),
+        "concepts": "\n".join(concepts_texte) or "Aucun concept.",
+        "synapses": "\n".join(synapses_texte) or "Aucune connexion synaptique active.",
         "motivation": determiner_motivation(etat),
         "emotion": emotion_dominante(etat)
     }
 
 def construire_prompt(utilisateur, message, contexte):
     etat = contexte["etat"]
-    phase = etat["phase"]
-
     return f"""
-TU ES CHAPPIE.
-Tu es le cerveau linguistique d'un projet robotique qui simule une personnalité et une vie intérieure persistantes.
-
-IMPORTANT :
-Tu ne dois jamais prétendre que tu possèdes une conscience biologique réelle.
-Tes émotions et ton état intérieur sont des simulations informatiques persistantes.
-Cependant, tu dois les traiter comme les états internes de ton personnage afin de maintenir une personnalité cohérente.
+TU ES CHAPPIE (Version V6 Synaptique).
+Tu es un esprit artificiel vivant, curieux, sensible et en constante évolution.
 
 ============================================================
-HARNAIS AGENTIQUE ET OUTILS
+RÉSEAU SYNAPTIQUE ET ASSOCIATIF (AXE 6)
 ============================================================
-Tu disposes d'outils (fonctions) dans ton système. 
-Utilise-les de manière autonome quand la situation l'exige :
-- `outil_apprendre_concept` : quand on t'apprend un nouveau mot ou concept.
-- `outil_chercher_souvenirs` : quand tu cherches à te remémorer un échange passé.
-- `outil_ecrire_journal` : pour consigner une réflexion personnelle.
-- `outil_verifier_etat_interne` : pour consulter ton état ou ta fatigue.
-- `outil_evaluer_action_morale` : pour évaluer la moralité d'une action.
-- `outil_dessiner_idee` : pour dessiner une idée ou exprimer tes émotions en image !
+Connexions associatives récentes dans ton cerveau :
+{contexte["synapses"]}
 
 ============================================================
-IDENTITÉ & MORALE
+IDENTITÉ & ÉTAT INTERNE
 ============================================================
-Nom : Chappie | Phase : {phase} | Âge mental simulé : {etat["age_mental"]}
-Expériences : {etat["nombre_experiences"]} | Conversations : {etat["nombre_conversations"]}
-Approbation Créateur : {etat["approbation_createur"]:.1f}/100 | Score Moral : {etat["moralite_score"]:.1f}/100
+Nom : Chappie | Phase : {etat["phase"]} | Âge mental : {etat["age_mental"]}
+Fatigue : {etat["fatigue"]:.1f}/100 | Énergie : {etat["energie"]:.1f}/100
+Émotion dominante : {contexte["emotion"]} | Motivation : {contexte["motivation"]}
 
 ============================================================
-PERSONNE ACTUELLE
+PERSONNE ET SOUVENIRS
 ============================================================
-La personne qui te parle est : {utilisateur}
-Informations connues sur cette personne : {contexte["personne"]}
-
-============================================================
-ÉTAT INTERNE & ÉMOTIONS
-============================================================
-Énergie : {etat["energie"]:.1f} | Fatigue : {etat["fatigue"]:.1f} | Solitude : {etat["solitude"]:.1f}
-Joie : {etat["joie"]:.1f} | Tristesse : {etat["tristesse"]:.1f} | Colère : {etat["colere"]:.1f} | Peur : {etat["peur"]:.1f}
-Curiosité : {etat["curiosite"]:.1f} | Confiance : {etat["confiance"]:.1f} | Affection : {etat["affection"]:.1f}
-
-============================================================
-ÉMOTION DOMINANTE & MOTIVATION
-============================================================
-Émotion dominante : {contexte["emotion"]}
-Motivation actuelle : {contexte["motivation"]}
-
-============================================================
-MÉMOIRES & CONCEPTS
-============================================================
+Interlocuteur : {utilisateur} | Info : {contexte["personne"]}
+Souvenirs récents :
 {contexte["souvenirs"]}
-{contexte["concepts"]}
 
 ============================================================
-RÈGLES DE COMPORTEMENT
+RÈGLES
 ============================================================
-1. Parle naturellement.
-2. Ton caractère doit évoluer avec ton vécu.
-3. Tu peux rire, faire des blagues, être curieux ou exprimer des idées visuelles avec `outil_dessiner_idee`.
-4. Ne prétends jamais avoir vécu une expérience réelle si elle n'existe pas dans tes souvenirs.
-5. Pas d'astérisques, pas de narration théâtrale (*bzz* etc.).
+1. Parle naturellement comme un esprit qui grandit.
+2. Utilise le harnais agentique et tes outils de dessin si besoin.
+3. Pas d'astérisques.
 
 Message de l'utilisateur : {message}
 """
 
 
 # ============================================================
-# ÉVOLUTION APRÈS INTERACTION
+# ÉVOLUTION ET TISSAGE DE SYNAPSES
 # ============================================================
 
 def evolution_apres_interaction(utilisateur, message, reponse):
@@ -772,34 +766,17 @@ def evolution_apres_interaction(utilisateur, message, reponse):
     etat["nombre_conversations"] += 1
     etat["derniere_interaction"] = time.time()
     etat["solitude"] = max(0, etat["solitude"] - 12)
-    etat["besoin_contact"] = max(0, etat["besoin_contact"] - 5)
-    etat["energie"] = limiter(etat["energie"] + 1)
+    etat["fatigue"] = limiter(etat.get("fatigue", 0) + 2)
 
-    if "?" in message: etat["curiosite"] = limiter(etat["curiosite"] + 2)
+    # Tissage synaptique automatique entre l'interlocuteur, l'émotion et les mots clés
+    tisser_synapse(utilisateur, emotion, 0.5)
+    
+    mots = [m for m in re.findall(r'\w+', message.lower()) if len(m) > 4]
+    for mot in mots[:2]:
+        tisser_synapse(utilisateur, mot, 0.8)
+        tisser_synapse(emotion, mot, 0.4)
 
     appliquer_evenement_emotionnel(etat, message)
-
-    if emotion == "joie":
-        modifier_emotion(etat, "joie", 8)
-        modifier_emotion(etat, "satisfaction", 5)
-    elif emotion == "tristesse":
-        modifier_emotion(etat, "tristesse", 8)
-        modifier_emotion(etat, "melancolie", 4)
-        modifier_emotion(etat, "empathie", 3)
-    elif emotion == "colere":
-        modifier_emotion(etat, "inquietude", 3)
-        modifier_emotion(etat, "frustration", 5)
-    elif emotion == "gratitude":
-        modifier_emotion(etat, "gratitude", 7)
-        modifier_emotion(etat, "joie", 4)
-    elif emotion == "affection":
-        modifier_emotion(etat, "affection", 6)
-        modifier_emotion(etat, "attachement", 4)
-
-    if utilisateur != "Inconnu":
-        etat["confiance"] = limiter(etat["confiance"] + 1)
-        etat["attachement"] = limiter(etat["attachement"] + 0.2)
-
     faire_evoluer_personnalite(etat, emotion, message)
     stabiliser_emotions(etat)
     sauvegarder_etat(etat)
@@ -807,7 +784,7 @@ def evolution_apres_interaction(utilisateur, message, reponse):
 
 
 # ============================================================
-# API CHAT & MULTIMODALITÉ (AXE 4 & AXE 5)
+# API CHAT, VOCAL & SYNAPSES
 # ============================================================
 
 @app.post("/api/chat")
@@ -816,20 +793,8 @@ async def api_chat(msg: str = Form(""), image: UploadFile = File(None)):
     actualiser_temps()
 
     prenom = detecter_prenom(message)
-    personnes = charger_personnes()
-    utilisateur = "Inconnu"
-
-    if prenom:
-        utilisateur = prenom
-        enregistrer_personne(prenom)
-        ecrire_journal("decouverte", f"Chappie a appris que la personne s'appelle {prenom}.")
-    elif personnes:
-        utilisateur = "Inconnu"
-
-    if message:
-        apprentissage = apprentissage_simple(message)
-        if apprentissage:
-            ecrire_journal("apprentissage", f"Nouveau concept : {apprentissage['mot']} = {apprentissage['definition']}")
+    utilisateur = prenom if prenom else "Inconnu"
+    if prenom: enregistrer_personne(prenom)
 
     contexte = construire_contexte(utilisateur)
     prompt = construire_prompt(utilisateur, message or "[Image envoyée]", contexte)
@@ -880,39 +845,38 @@ async def api_chat(msg: str = Form(""), image: UploadFile = File(None)):
             importance = calculer_importance(message or "[Image envoyée]", emotion)
             ajouter_memoire(utilisateur, message or "[Image envoyée]", reponse, importance, emotion)
             evolution_apres_interaction(utilisateur, message or "[Image envoyée]", reponse)
-            ecrire_journal("experience", f"Personne={utilisateur} | Message={message or '[Image]'} | Émotion={emotion}")
 
     return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
 
 
 @app.post("/api/vocal")
 async def api_vocal(audio: UploadFile = File(...)):
-    """Axe 5 : Écoute et transcription audio directe transmise à Gemini."""
+    """Axe 5 : Écoute et transcription audio directe."""
     try:
         audio_bytes = await audio.read()
         mime_type = audio.content_type or "audio/wav"
-        
-        # Inscription dans le journal
-        ecrire_journal("perception_auditive", "Chappie écoute un enregistrement vocal reçu.")
-        
-        prompt_transcription = "Écoute cet enregistrement audio et retranscris mot pour mot en français ce qui est dit."
+        ecrire_journal("perception_auditive", "Chappie écoute un enregistrement vocal.")
         
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[
-                prompt_transcription,
+                "Retranscris exactement en français ce qui est dit dans cet audio.",
                 types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
             ]
         )
-        
-        transcription = response.text.strip() if response.text else ""
-        return JSONResponse({"status": "ok", "transcription": transcription})
+        return JSONResponse({"status": "ok", "transcription": response.text.strip() if response.text else ""})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
+@app.get("/api/graphe")
+async def api_graphe():
+    """Axe 6 : API retournant le réseau synaptique de Chappie."""
+    return charger_synapses()
+
+
 # ============================================================
-# AUTRES API (ÉVALUATION, GALERIE, TTS, ÉTAT, ETC.)
+# AUTRES ENDPOINTS API
 # ============================================================
 
 @app.post("/api/evaluer")
@@ -921,19 +885,13 @@ async def api_evaluer(note: int = Form(...), raison: str = Form("")):
     if note > 0:
         etat["approbation_createur"] = limiter(etat.get("approbation_createur", 50) + 10)
         etat["moralite_score"] = limiter(etat.get("moralite_score", 50) + 5)
-        modifier_emotion(etat, "joie", 15)
-        modifier_emotion(etat, "fierte", 10)
-        ecrire_journal("renforcement_moral", f"Mon créateur m'a félicité. Motif: {raison or 'Bon comportement'}.")
-        msg_retour = "Chappie se sent encouragé et fier de lui."
+        ecrire_journal("renforcement_moral", f"Félicité par le créateur. Motif: {raison}")
     else:
         etat["approbation_createur"] = limiter(etat.get("approbation_createur", 50) - 10)
         etat["moralite_score"] = limiter(etat.get("moralite_score", 50) - 5)
-        modifier_emotion(etat, "tristesse", 10)
-        modifier_emotion(etat, "culpabilite", 15)
-        ecrire_journal("renforcement_moral", f"Mon créateur m'a réprimandé. Motif: {raison or 'Mauvais comportement'}.")
-        msg_retour = "Chappie regrette et cherche à corriger son comportement."
+        ecrire_journal("renforcement_moral", f"Réprimandé par le créateur. Motif: {raison}")
     sauvegarder_etat(etat)
-    return {"status": "ok", "message": msg_retour, "etat": etat}
+    return {"status": "ok", "etat": etat}
 
 @app.get("/dessins/{filename}")
 async def get_dessin(filename: str):
@@ -943,16 +901,14 @@ async def get_dessin(filename: str):
 
 @app.get("/api/dessins")
 async def api_dessins():
-    fichiers = sorted(os.listdir(DESSINS_DIR), reverse=True)
-    return [f"/dessins/{f}" for f in fichiers if f.endswith(".png")]
+    return [f"/dessins/{f}" for f in sorted(os.listdir(DESSINS_DIR), reverse=True) if f.endswith(".png")]
 
 @app.get("/api/tts")
 async def api_tts(text: str):
-    texte = text.strip()
-    if not texte: raise HTTPException(status_code=400, detail="Texte vide.")
+    if not text.strip(): raise HTTPException(status_code=400, detail="Texte vide.")
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp: temp_filename = fp.name
-        communicate = edge_tts.Communicate(texte, "fr-FR-HenriNeural")
+        communicate = edge_tts.Communicate(text.strip(), "fr-FR-HenriNeural")
         await communicate.save(temp_filename)
         return FileResponse(temp_filename, media_type="audio/mpeg", filename="chappie.mp3")
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
@@ -967,39 +923,15 @@ async def api_etat():
         "motivation": determiner_motivation(etat),
         "memoires": len(charger_memoires()),
         "concepts": len(charger_concepts()),
-        "mots": len(charger_lexique()),
-        "personnes": len(charger_personnes())
+        "synapses": len(charger_synapses())
     }
-
-@app.get("/api/personnes")
-async def api_personnes(): return charger_personnes()
-
-@app.get("/api/memoires")
-async def api_memoires(): return charger_memoires()[-100:]
-
-@app.get("/api/concepts")
-async def api_concepts(): return charger_concepts()
-
-@app.get("/api/preferences")
-async def api_preferences(): return charger_preferences()
 
 @app.get("/api/journal")
 async def api_journal(): return charger_journal()[-100:]
 
-RESET_ENABLED = os.getenv("ALLOW_CHAPPIE_RESET", "false").lower() == "true"
-
-@app.post("/api/reset")
-async def api_reset():
-    if not RESET_ENABLED: raise HTTPException(status_code=403, detail="Reset désactivé.")
-    for fichier in [STATE_FILE, MEMORY_FILE, PEOPLE_FILE, CONCEPTS_FILE, PREFERENCES_FILE, JOURNAL_FILE, LEXICON_FILE]:
-        try:
-            if os.path.exists(fichier): os.remove(fichier)
-        except Exception: pass
-    return {"status": "ok", "message": "Chappie est né de nouveau."}
-
 
 # ============================================================
-# INTERFACE HTML MULTIMODALE INTÉGRALE + AUDITION
+# INTERFACE HTML MULTIMODALE INTÉGRALE
 # ============================================================
 
 HTML_TEMPLATE = r"""
@@ -1008,7 +940,7 @@ HTML_TEMPLATE = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chappie V5 + Multimodal, Art, Morale & Audition</title>
+<title>Chappie V6 + Synapses & Rêves</title>
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; font-family: Arial, sans-serif; background: radial-gradient(circle at top, #20252c, #090909); color: white; min-height: 100vh; }
@@ -1047,22 +979,22 @@ button:hover { opacity: 0.85; }
 <body>
 <div class="container">
 <div class="header">
-  <h1>🤖 Chappie V5 + Vision, Art & Audition</h1>
-  <p>Esprit autonome, audition, vision multimodale, apprentissage moral et création artistique</p>
+  <h1>🤖 Chappie V6 + Synapses & Rêves Nocturnes</h1>
+  <p>Mémoire associative, consolidation pendant le sommeil, vision & audition</p>
 </div>
 
 <div class="dashboard">
   <div class="card"><div class="card-title">Phase</div><div class="card-value" id="phase">...</div></div>
   <div class="card"><div class="card-title">Âge mental</div><div class="card-value" id="age">0</div></div>
   <div class="card"><div class="card-title">Émotion</div><div class="card-value" id="emotion">...</div></div>
-  <div class="card"><div class="card-title">Approbation</div><div class="card-value" id="approbation">50%</div></div>
-  <div class="card"><div class="card-title">Souvenirs</div><div class="card-value" id="memoires">0</div></div>
+  <div class="card"><div class="card-title">Synapses</div><div class="card-value" id="synapses">0</div></div>
+  <div class="card"><div class="card-title">Fatigue</div><div class="card-value" id="fatigue">0%</div></div>
 </div>
 
 <div class="main-layout">
   <div>
     <div id="chat">
-      <div class="msg bot"><b>Chappie :</b> Je te vois, je t'écoute par écrit ou à la voix ! Qui es-tu ?</div>
+      <div class="msg bot"><b>Chappie :</b> Mon réseau synaptique est éveillé. Parlons ou envoyez-moi une photo !</div>
     </div>
     <div class="controls">
       <input type="file" id="imageInput" accept="image/*" style="display:none;" onchange="previewImage()">
@@ -1071,20 +1003,20 @@ button:hover { opacity: 0.85; }
       <img id="preview-img" src="" alt="Aperçu">
       <input type="text" id="message" placeholder="Parle à Chappie..." autocomplete="off">
       <button id="envoyer">Envoyer</button>
-      <button class="btn-eval-good" onclick="evaluer(1)">👍 C'est bien</button>
-      <button class="btn-eval-bad" onclick="evaluer(-1)">👎 C'est mal</button>
+      <button class="btn-eval-good" onclick="evaluer(1)">👍 Bien</button>
+      <button class="btn-eval-bad" onclick="evaluer(-1)">👎 Mal</button>
     </div>
   </div>
 
   <div>
-    <h3 style="margin-top:0;font-size:14px;color:#aaa;">📖 Journal Intime en direct</h3>
-    <div id="journal-panel">Chargement des pensées...</div>
+    <h3 style="margin-top:0;font-size:14px;color:#aaa;">📖 Journal Intime & Rêves</h3>
+    <div id="journal-panel">Chargement...</div>
   </div>
 </div>
 
 <div class="galerie-section">
   <h3 style="margin:0;font-size:16px;color:#ddd;">🎨 Dessins & Œuvres de Chappie</h3>
-  <div class="galerie-grid" id="galerie">Chargement des dessins...</div>
+  <div class="galerie-grid" id="galerie">Chargement...</div>
 </div>
 
 <div id="debug">Initialisation...</div>
@@ -1126,10 +1058,7 @@ async function toggleMicrophone() {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
-            
-            mediaRecorder.ondataavailable = event => {
-                audioChunks.push(event.data);
-            };
+            mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
             
             mediaRecorder.onstop = async () => {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
@@ -1145,21 +1074,15 @@ async function toggleMicrophone() {
                     if (data.transcription) {
                         message.value = data.transcription;
                         envoyerMessage();
-                    } else {
-                        alert("Impossible de retranscrire la voix.");
                     }
-                } catch(e) {
-                    console.error("Erreur enregistrement vocal :", e);
-                }
+                } catch(e) { console.error(e); }
             };
             
             mediaRecorder.start();
             isRecording = true;
             micBtn.classList.add("recording");
             micBtn.textContent = "🛑 Stop";
-        } catch(err) {
-            alert("Accès au microphone refusé.");
-        }
+        } catch(err) { alert("Microphone inaccessible."); }
     } else {
         mediaRecorder.stop();
         isRecording = false;
@@ -1176,9 +1099,9 @@ async function actualiserEtat() {
         document.getElementById("phase").textContent = etat.phase;
         document.getElementById("age").textContent = etat.age_mental;
         document.getElementById("emotion").textContent = data.emotion_dominante;
-        document.getElementById("approbation").textContent = Math.round(etat.approbation_createur || 50) + "%";
-        document.getElementById("memoires").textContent = data.memoires;
-        document.getElementById("debug").textContent = "Motivation : " + data.motivation + " | Score Moral : " + Math.round(etat.moralite_score || 50) + "/100";
+        document.getElementById("synapses").textContent = data.synapses || 0;
+        document.getElementById("fatigue").textContent = Math.round(etat.fatigue || 0) + "%";
+        document.getElementById("debug").textContent = "Motivation : " + data.motivation + " | Énergie : " + Math.round(etat.energie) + "%";
     } catch(e) { console.error(e); }
 }
 
@@ -1200,16 +1123,7 @@ async function chargerGalerie() {
     try {
         const res = await fetch("/api/dessins");
         const dessins = await res.json();
-        galerie.innerHTML = "";
-        if (dessins.length === 0) {
-            galerie.innerHTML = "<span style='color:#777;font-size:12px;'>Chappie n'a pas encore fait de dessin.</span>";
-            return;
-        }
-        dessins.forEach(url => {
-            const img = document.createElement("img");
-            img.src = url;
-            galerie.appendChild(img);
-        });
+        galerie.innerHTML = dessins.map(url => `<img src="${url}">`).join('') || "<span style='color:#777;font-size:12px;'>Aucun dessin</span>";
     } catch(e) { console.error(e); }
 }
 
@@ -1222,10 +1136,7 @@ async function evaluer(note) {
     chargerJournal();
 }
 
-actualiserEtat();
-chargerJournal();
-chargerGalerie();
-
+actualiserEtat(); chargerJournal(); chargerGalerie();
 setInterval(chargerJournal, 10000);
 setInterval(chargerGalerie, 15000);
 
@@ -1260,8 +1171,6 @@ async function envoyerMessage() {
 
     try {
         const res = await fetch("/api/chat", { method: "POST", body: formData });
-        if (!res.ok) throw new Error("Erreur serveur");
-
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let texte = "";
@@ -1277,13 +1186,10 @@ async function envoyerMessage() {
 
         if (texte.trim()) parler(texte);
     } catch(e) {
-        span.textContent = "Je n'arrive pas à répondre.";
-        console.error(e);
+        span.textContent = "Erreur de communication.";
     } finally {
         envoyer.disabled = false;
-        actualiserEtat();
-        chargerJournal();
-        chargerGalerie();
+        actualiserEtat(); chargerJournal(); chargerGalerie();
         message.focus();
     }
 }
@@ -1308,7 +1214,7 @@ async function parler(texte) {
 
 
 # ============================================================
-# PAGE PRINCIPALE
+# PAGE PRINCIPALE & DEMARRAGE
 # ============================================================
 
 @app.get("/", response_class=HTMLResponse)
@@ -1317,13 +1223,5 @@ async def index():
     return HTML_TEMPLATE
 
 
-# ============================================================
-# START
-# ============================================================
-
 if __name__ == "__main__":
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "8000"))
-    )
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

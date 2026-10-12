@@ -24,7 +24,7 @@ import edge_tts
 
 
 # ============================================================
-# CHAPPIE V3 - SIMULATION COGNITIVE, HARNAIS & AUTONOMIE
+# CHAPPIE V3 - SIMULATION COGNITIVE, HARNAIS & AUTONOMIE MORALE
 # ============================================================
 
 API_KEY = os.getenv("API_KEY")
@@ -86,8 +86,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Chappie V3 + Autonomous Mind",
-    description="Simulation cognitive, émotionnelle, agentique et autonome en arrière-plan",
+    title="Chappie V3 + Autonomous & Moral Mind",
+    description="Simulation cognitive, émotionnelle, agentique et morale avec autonomie en arrière-plan",
     lifespan=lifespan
 )
 
@@ -293,21 +293,30 @@ def outil_verifier_etat_interne() -> str:
         "fatigue": etat.get("fatigue", 0),
         "solitude": etat.get("solitude", 0),
         "curiosite": etat.get("curiosite", 80),
+        "moralite_score": etat.get("moralite_score", 50),
+        "approbation_createur": etat.get("approbation_createur", 50),
         "age_mental": etat.get("age_mental", 0),
         "phase": etat.get("phase", "nouveau_ne")
     }, ensure_ascii=False)
+
+def outil_evaluer_action_morale(action: str, intention: str) -> str:
+    """Permet à Chappie d'auto-évaluer si une action respecte les principes moraux enseignés."""
+    etat = charger_json(STATE_FILE, {})
+    score = etat.get("moralite_score", 50)
+    return f"Évaluation morale : Action '{action}' (Intention: {intention}). Score moral actuel : {score}/100."
 
 # Liste des outils exposés au modèle Gemini
 OUTILS_HARNAIS = [
     outil_apprendre_concept,
     outil_chercher_souvenirs,
     outil_ecrire_journal,
-    outil_verifier_etat_interne
+    outil_verifier_etat_interne,
+    outil_evaluer_action_morale
 ]
 
 
 # ============================================================
-# ÉTAT DE NAISSANCE
+# ÉTAT DE NAISSANCE & SYSTÈME MORAL
 # ============================================================
 
 def creer_etat_initial():
@@ -318,7 +327,7 @@ def creer_etat_initial():
 
         "nom": "Chappie",
 
-        "version": "V3-Agentic",
+        "version": "V3-Moral",
 
         "date_naissance": maintenant(),
 
@@ -339,6 +348,10 @@ def creer_etat_initial():
         "niveau_comprehension": 0,
 
         "niveau_autonomie": 0,
+
+        "moralite_score": 50,
+
+        "approbation_createur": 50,
 
         "energie": 100,
 
@@ -2009,6 +2022,7 @@ Utilise-les de manière autonome quand la situation l'exige :
 - `outil_chercher_souvenirs` : quand tu cherches à te remémorer un échange passé.
 - `outil_ecrire_journal` : pour consigner une réflexion personnelle.
 - `outil_verifier_etat_interne` : pour consulter ton état ou ta fatigue.
+- `outil_evaluer_action_morale` : pour évaluer la moralité d'une action.
 
 ============================================================
 NAISSANCE
@@ -2056,6 +2070,12 @@ Conversations :
 
 Niveau d'identité simulé :
 {etat["niveau_identite"]}/100
+
+Approbation Créateur :
+{etat["approbation_createur"]:.1f}/100
+
+Score Moral :
+{etat["moralite_score"]:.1f}/100
 
 ============================================================
 PERSONNE ACTUELLE
@@ -2424,6 +2444,31 @@ def evolution_apres_interaction(
 
 
 # ============================================================
+# API ÉVALUATION MORALE
+# ============================================================
+
+@app.post("/api/evaluer")
+async def api_evaluer(note: int = Form(...), raison: str = Form("")):
+    etat = charger_etat()
+    if note > 0:
+        etat["approbation_createur"] = limiter(etat.get("approbation_createur", 50) + 10)
+        etat["moralite_score"] = limiter(etat.get("moralite_score", 50) + 5)
+        modifier_emotion(etat, "joie", 15)
+        modifier_emotion(etat, "fierte", 10)
+        ecrire_journal("renforcement_moral", f"Mon créateur m'a félicité. Motif: {raison or 'Bon comportement'}. Je me sens fier.")
+        msg_retour = "Chappie se sent encouragé et fier de lui."
+    else:
+        etat["approbation_createur"] = limiter(etat.get("approbation_createur", 50) - 10)
+        etat["moralite_score"] = limiter(etat.get("moralite_score", 50) - 5)
+        modifier_emotion(etat, "tristesse", 10)
+        modifier_emotion(etat, "culpabilite", 15)
+        ecrire_journal("renforcement_moral", f"Mon créateur m'a réprimandé. Motif: {raison or 'Mauvais comportement'}. Je ferai plus attention.")
+        msg_retour = "Chappie regrette et cherche à corriger son comportement."
+    sauvegarder_etat(etat)
+    return {"status": "ok", "message": msg_retour, "etat": etat}
+
+
+# ============================================================
 # TTS
 # ============================================================
 
@@ -2754,6 +2799,8 @@ async def api_chat(
                             res = outil_ecrire_journal(**call.args)
                         elif call.name == "outil_verifier_etat_interne":
                             res = outil_verifier_etat_interne()
+                        elif call.name == "outil_evaluer_action_morale":
+                            res = outil_evaluer_action_morale(**call.args)
                         else:
                             res = "Outil inconnu."
                             
@@ -2827,841 +2874,195 @@ async def api_chat(
 
 HTML_TEMPLATE = r"""
 <!DOCTYPE html>
-
 <html lang="fr">
-
 <head>
-
 <meta charset="UTF-8">
-
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
->
-
-<title>Chappie V3 + Agentic Harness</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chappie V3 + Conscience Morale</title>
 <style>
-
-* {
-    box-sizing: border-box;
-}
-
-body {
-
-    margin: 0;
-
-    font-family:
-        Arial,
-        sans-serif;
-
-    background:
-        radial-gradient(
-            circle at top,
-            #20252c,
-            #090909
-        );
-
-    color: white;
-
-    min-height: 100vh;
-
-}
-
-.container {
-
-    max-width: 900px;
-
-    margin: auto;
-
-    padding: 20px;
-
-}
-
-.header {
-
-    text-align: center;
-
-    margin-bottom: 20px;
-
-}
-
-.header h1 {
-
-    margin-bottom: 5px;
-
-    font-size: 32px;
-
-}
-
-.header p {
-
-    color: #aaa;
-
-}
-
-.dashboard {
-
-    display: grid;
-
-    grid-template-columns:
-        repeat(
-            auto-fit,
-            minmax(
-                130px,
-                1fr
-            )
-        );
-
-    gap: 8px;
-
-    margin-bottom: 15px;
-
-}
-
-.card {
-
-    background: #181818;
-
-    border: 1px solid #292929;
-
-    border-radius: 12px;
-
-    padding: 12px;
-
-}
-
-.card-title {
-
-    color: #888;
-
-    font-size: 12px;
-
-}
-
-.card-value {
-
-    font-size: 20px;
-
-    font-weight: bold;
-
-    margin-top: 5px;
-
-}
-
-#emotion {
-
-    font-size: 18px;
-
-}
-
-#chat {
-
-    background: #111;
-
-    border: 1px solid #292929;
-
-    height: 480px;
-
-    overflow-y: auto;
-
-    border-radius: 15px;
-
-    padding: 15px;
-
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 10px;
-
-}
-
-.msg {
-
-    max-width: 85%;
-
-    padding: 12px 15px;
-
-    border-radius: 14px;
-
-    line-height: 1.4;
-
-    word-break: break-word;
-
-}
-
-.user {
-
-    align-self: flex-end;
-
-    background: #006edc;
-
-}
-
-.bot {
-
-    align-self: flex-start;
-
-    background: #292929;
-
-}
-
-.controls {
-
-    display: flex;
-
-    gap: 8px;
-
-    margin-top: 10px;
-
-}
-
-input {
-
-    flex: 1;
-
-    background: #202020;
-
-    border: 1px solid #333;
-
-    color: white;
-
-    padding: 14px;
-
-    border-radius: 10px;
-
-    font-size: 16px;
-
-}
-
-button {
-
-    border: none;
-
-    border-radius: 10px;
-
-    padding: 12px 18px;
-
-    background: #16863c;
-
-    color: white;
-
-    font-weight: bold;
-
-    cursor: pointer;
-
-}
-
-button:hover {
-
-    opacity: 0.85;
-
-}
-
-.secondary {
-
-    background: #333;
-
-}
-
-#debug {
-
-    margin-top: 15px;
-
-    background: #151515;
-
-    border-radius: 12px;
-
-    padding: 12px;
-
-    font-size: 12px;
-
-    color: #aaa;
-
-    white-space: pre-wrap;
-
-}
-
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Arial, sans-serif; background: radial-gradient(circle at top, #20252c, #090909); color: white; min-height: 100vh; }
+.container { max-width: 1000px; margin: auto; padding: 20px; }
+.header { text-align: center; margin-bottom: 20px; }
+.header h1 { margin-bottom: 5px; font-size: 32px; }
+.header p { color: #aaa; }
+.dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 15px; }
+.card { background: #181818; border: 1px solid #292929; border-radius: 12px; padding: 10px; text-align: center; }
+.card-title { color: #888; font-size: 11px; }
+.card-value { font-size: 18px; font-weight: bold; margin-top: 4px; }
+.main-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 15px; }
+#chat { background: #111; border: 1px solid #292929; height: 450px; overflow-y: auto; border-radius: 15px; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+#journal-panel { background: #151515; border: 1px solid #292929; height: 450px; overflow-y: auto; border-radius: 15px; padding: 12px; font-size: 12px; }
+.journal-entry { background: #202020; border-left: 3px solid #16863c; padding: 8px; margin-bottom: 8px; border-radius: 4px; }
+.journal-type { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 3px; }
+.msg { max-width: 85%; padding: 12px 15px; border-radius: 14px; line-height: 1.4; word-break: break-word; }
+.user { align-self: flex-end; background: #006edc; }
+.bot { align-self: flex-start; background: #292929; }
+.controls { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+input { flex: 1; background: #202020; border: 1px solid #333; color: white; padding: 14px; border-radius: 10px; font-size: 16px; min-width: 200px; }
+button { border: none; border-radius: 10px; padding: 12px 18px; background: #16863c; color: white; font-weight: bold; cursor: pointer; }
+button:hover { opacity: 0.85; }
+.btn-eval-good { background: #2e7d32; }
+.btn-eval-bad { background: #c62828; }
+#debug { margin-top: 15px; background: #151515; border-radius: 12px; padding: 12px; font-size: 12px; color: #aaa; white-space: pre-wrap; }
 </style>
-
 </head>
-
-
 <body>
-
 <div class="container">
-
 <div class="header">
-
-<h1>🤖 Chappie V3 + Harnais Agentique</h1>
-
-<p>
-Simulation cognitive — naissance, mémoire,
-émotions et autonomie d'action
-</p>
-
+<h1>🤖 Chappie V3 + Conscience Morale</h1>
+<p>Esprit autonome, apprentissage moral et réflexion continue</p>
 </div>
-
 
 <div class="dashboard">
-
-<div class="card">
-
-<div class="card-title">
-Phase
+<div class="card"><div class="card-title">Phase</div><div class="card-value" id="phase">...</div></div>
+<div class="card"><div class="card-title">Âge mental</div><div class="card-value" id="age">0</div></div>
+<div class="card"><div class="card-title">Émotion</div><div class="card-value" id="emotion">...</div></div>
+<div class="card"><div class="card-title">Approbation</div><div class="card-value" id="approbation">50%</div></div>
+<div class="card"><div class="card-title">Solitude</div><div class="card-value" id="solitude">0</div></div>
+<div class="card"><div class="card-title">Souvenirs</div><div class="card-value" id="memoires">0</div></div>
 </div>
 
-<div
-    class="card-value"
-    id="phase"
->
-...
+<div class="main-layout">
+  <div>
+    <div id="chat">
+      <div class="msg bot"><b>Chappie :</b> Je... Je suis là. Je ne comprends pas encore. Qui es-tu ?</div>
+    </div>
+    <div class="controls">
+      <input id="message" placeholder="Parle à Chappie..." autocomplete="off">
+      <button id="envoyer">Envoyer</button>
+      <button class="btn-eval-good" onclick="evaluer(1)">👍 C'est bien</button>
+      <button class="btn-eval-bad" onclick="evaluer(-1)">👎 C'est mal</button>
+    </div>
+  </div>
+
+  <div>
+    <h3 style="margin-top:0;font-size:14px;color:#aaa;">📖 Journal Intime en direct</h3>
+    <div id="journal-panel">Chargement des pensées...</div>
+  </div>
 </div>
 
+<div id="debug">Initialisation...</div>
+<audio id="audio" autoplay></audio>
 </div>
-
-
-<div class="card">
-
-<div class="card-title">
-Âge mental
-</div>
-
-<div
-    class="card-value"
-    id="age"
->
-0
-</div>
-
-</div>
-
-
-<div class="card">
-
-<div class="card-title">
-Émotion
-</div>
-
-<div
-    class="card-value"
-    id="emotion"
->
-...
-</div>
-
-</div>
-
-
-<div class="card">
-
-<div class="card-title">
-Énergie
-</div>
-
-<div
-    class="card-value"
-    id="energie"
->
-100
-</div>
-
-</div>
-
-
-<div class="card">
-
-<div class="card-title">
-Curiosité
-</div>
-
-<div
-    class="card-value"
-    id="curiosite"
->
-80
-</div>
-
-</div>
-
-
-<div class="card">
-
-<div class="card-title">
-Solitude
-</div>
-
-<div
-    class="card-value"
-    id="solitude"
->
-0
-</div>
-
-</div>
-
-
-<div class="card">
-
-<div class="card-title">
-Souvenirs
-</div>
-
-<div
-    class="card-value"
-    id="memoires"
->
-0
-</div>
-
-</div>
-
-
-<div class="card">
-
-<div class="card-title">
-Concepts
-</div>
-
-<div
-    class="card-value"
-    id="concepts"
->
-0
-</div>
-
-</div>
-
-</div>
-
-
-<div id="chat">
-
-<div class="msg bot">
-
-<b>Chappie :</b>
-
-Je...
-
-Je suis là.
-
-Je ne comprends pas encore.
-
-Qui es-tu ?
-
-</div>
-
-</div>
-
-
-<div class="controls">
-
-<input
-    id="message"
-    placeholder="Parle à Chappie..."
-    autocomplete="off"
->
-
-<button id="envoyer">
-Envoyer
-</button>
-
-</div>
-
-
-<div id="debug">
-Initialisation...
-</div>
-
-
-<audio
-    id="audio"
-    autoplay
->
-</audio>
-
-</div>
-
 
 <script>
+const message = document.getElementById("message");
+const envoyer = document.getElementById("envoyer");
+const chat = document.getElementById("chat");
+const audio = document.getElementById("audio");
+const journalPanel = document.getElementById("journal-panel");
 
-const message =
-    document.getElementById(
-        "message"
-    );
-
-const envoyer =
-    document.getElementById(
-        "envoyer"
-    );
-
-const chat =
-    document.getElementById(
-        "chat"
-    );
-
-const audio =
-    document.getElementById(
-        "audio"
-    );
-
-
-function escapeHtml(
-    text
-) {
-
-    const div =
-        document.createElement(
-            "div"
-        );
-
-    div.textContent =
-        text;
-
+function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
     return div.innerHTML;
 }
 
-
 async function actualiserEtat() {
-
     try {
-
-        const res =
-            await fetch(
-                "/api/etat"
-            );
-
-        const data =
-            await res.json();
-
-        const etat =
-            data.etat;
-
-        document.getElementById(
-            "phase"
-        ).textContent =
-            etat.phase;
-
-        document.getElementById(
-            "age"
-        ).textContent =
-            etat.age_mental;
-
-        document.getElementById(
-            "emotion"
-        ).textContent =
-            data.emotion_dominante;
-
-        document.getElementById(
-            "energie"
-        ).textContent =
-            Math.round(
-                etat.energie
-            );
-
-        document.getElementById(
-            "curiosite"
-        ).textContent =
-            Math.round(
-                etat.curiosite
-            );
-
-        document.getElementById(
-            "solitude"
-        ).textContent =
-            Math.round(
-                etat.solitude
-            );
-
-        document.getElementById(
-            "memoires"
-        ).textContent =
-            data.memoires;
-
-        document.getElementById(
-            "concepts"
-        ).textContent =
-            data.concepts;
-
-        document.getElementById(
-            "debug"
-        ).textContent =
-
-            "Motivation : "
-            + data.motivation
-
-            + "\n\n"
-
-            + "Identité : "
-            + Math.round(
-                etat.niveau_identite
-            )
-            + "/100"
-
-            + "\n"
-
-            + "Compréhension : "
-            + Math.round(
-                etat.niveau_comprehension
-            )
-            + "/100"
-
-            + "\n"
-
-            + "Autonomie simulée : "
-            + Math.round(
-                etat.niveau_autonomie
-            )
-            + "/100"
-
-            + "\n"
-
-            + "Conscience simulée : "
-            + Math.round(
-                etat.niveau_conscience_simule
-            )
-            + "/100";
-
-    } catch(e) {
-
-        console.error(e);
-
-    }
-
+        const res = await fetch("/api/etat");
+        const data = await res.json();
+        const etat = data.etat;
+        document.getElementById("phase").textContent = etat.phase;
+        document.getElementById("age").textContent = etat.age_mental;
+        document.getElementById("emotion").textContent = data.emotion_dominante;
+        document.getElementById("approbation").textContent = Math.round(etat.approbation_createur || 50) + "%";
+        document.getElementById("solitude").textContent = Math.round(etat.solitude);
+        document.getElementById("memoires").textContent = data.memoires;
+        document.getElementById("debug").textContent = "Motivation : " + data.motivation + " | Score Moral : " + Math.round(etat.moralite_score || 50) + "/100";
+    } catch(e) { console.error(e); }
 }
 
+async function chargerJournal() {
+    try {
+        const res = await fetch("/api/journal");
+        const journal = await res.json();
+        journalPanel.innerHTML = "";
+        journal.reverse().forEach(entry => {
+            const div = document.createElement("div");
+            div.className = "journal-entry";
+            div.innerHTML = `<div class="journal-type">${entry.type} (${new Date(entry.date).toLocaleTimeString()})</div>${escapeHtml(entry.contenu)}`;
+            journalPanel.appendChild(div);
+        });
+    } catch(e) { console.error(e); }
+}
+
+async function evaluer(note) {
+    const formData = new FormData();
+    formData.append("note", note);
+    formData.append("raison", "Évaluation directe par l'utilisateur");
+    await fetch("/api/evaluer", { method: "POST", body: formData });
+    actualiserEtat();
+    chargerJournal();
+}
 
 actualiserEtat();
+chargerJournal();
+setInterval(chargerJournal, 10000);
 
-
-envoyer.onclick =
-    () => {
-
-        envoyerMessage();
-
-    };
-
-
-message.addEventListener(
-    "keydown",
-    e => {
-
-        if (
-            e.key === "Enter"
-        ) {
-
-            e.preventDefault();
-
-            envoyerMessage();
-
-        }
-
-    }
-);
-
+envoyer.onclick = () => envoyerMessage();
+message.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); envoyerMessage(); } });
 
 async function envoyerMessage() {
-
-    const txt =
-        message.value.trim();
-
-    if (!txt)
-        return;
-
+    const txt = message.value.trim();
+    if (!txt) return;
     message.value = "";
-
-    chat.innerHTML +=
-
-        `<div class="msg user">
-            <b>Moi :</b>
-            ${escapeHtml(txt)}
-        </div>`;
-
-    chat.scrollTop =
-        chat.scrollHeight;
-
+    chat.innerHTML += `<div class="msg user"><b>Moi :</b> ${escapeHtml(txt)}</div>`;
+    chat.scrollTop = chat.scrollHeight;
     envoyer.disabled = true;
 
-    const div =
-        document.createElement(
-            "div"
-        );
-
-    div.className =
-        "msg bot";
-
-    div.innerHTML =
-        "<b>Chappie :</b> <span></span>";
-
-    chat.appendChild(
-        div
-    );
-
-    const span =
-        div.querySelector(
-            "span"
-        );
+    const div = document.createElement("div");
+    div.className = "msg bot";
+    div.innerHTML = "<b>Chappie :</b> <span></span>";
+    chat.appendChild(div);
+    const span = div.querySelector("span");
 
     try {
+        const formData = new FormData();
+        formData.append("msg", txt);
+        const res = await fetch("/api/chat", { method: "POST", body: formData });
+        if (!res.ok) throw new Error("Erreur serveur");
 
-        const formData =
-            new FormData();
-
-        formData.append(
-            "msg",
-            txt
-        );
-
-        const res =
-            await fetch(
-                "/api/chat",
-                {
-                    method: "POST",
-                    body: formData
-                }
-            );
-
-        if (!res.ok) {
-
-            throw new Error(
-                "Erreur serveur"
-            );
-
-        }
-
-        const reader =
-            res.body.getReader();
-
-        const decoder =
-            new TextDecoder();
-
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
         let texte = "";
 
         while (true) {
-
-            const {
-                value,
-                done
-            } =
-                await reader.read();
-
-            if (done)
-                break;
-
-            texte +=
-                decoder.decode(
-                    value,
-                    {
-                        stream: true
-                    }
-                );
-
-            span.textContent =
-                texte;
-
-            chat.scrollTop =
-                chat.scrollHeight;
-
+            const { value, done } = await reader.read();
+            if (done) break;
+            texte += decoder.decode(value, { stream: true });
+            span.textContent = texte;
+            chat.scrollTop = chat.scrollHeight;
         }
 
-        if (
-            texte.trim()
-        ) {
-
-            parler(
-                texte
-            );
-
-        }
-
+        if (texte.trim()) parler(texte);
     } catch(e) {
-
-        span.textContent =
-            "Je n'arrive pas à répondre.";
-
+        span.textContent = "Je n'arrive pas à répondre.";
         console.error(e);
-
     } finally {
-
-        envoyer.disabled =
-            false;
-
+        envoyer.disabled = false;
         actualiserEtat();
-
+        chargerJournal();
         message.focus();
-
     }
-
 }
 
-
-async function parler(
-    texte
-) {
-
-    const propre =
-        texte
-        .replace(
-            /[*_#`]/g,
-            ""
-        )
-        .trim();
-
-    if (!propre)
-        return;
-
+async function parler(texte) {
+    const propre = texte.replace(/[*_#`]/g, "").trim();
+    if (!propre) return;
     try {
-
-        const res =
-            await fetch(
-                "/api/tts?text="
-                +
-                encodeURIComponent(
-                    propre
-                )
-            );
-
-        if (!res.ok)
-            return;
-
-        const blob =
-            await res.blob();
-
-        const url =
-            URL.createObjectURL(
-                blob
-            );
-
-        audio.src =
-            url;
-
+        const res = await fetch("/api/tts?text=" + encodeURIComponent(propre));
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        audio.src = url;
         await audio.play();
-
-        audio.onended =
-            () => {
-
-                URL.revokeObjectURL(
-                    url
-                );
-
-            };
-
-    } catch(e) {
-
-        console.error(
-            "TTS:",
-            e
-        );
-
-    }
-
+        audio.onended = () => URL.revokeObjectURL(url);
+    } catch(e) { console.error("TTS:", e); }
 }
-
 </script>
-
 </body>
-
 </html>
 """
 
@@ -3675,9 +3076,7 @@ async function parler(
     response_class=HTMLResponse
 )
 async def index():
-
     charger_etat()
-
     return HTML_TEMPLATE
 
 
@@ -3686,13 +3085,9 @@ async def index():
 # ============================================================
 
 if __name__ == "__main__":
-
     uvicorn.run(
-
         app,
-
         host="0.0.0.0",
-
         port=int(
             os.getenv(
                 "PORT",

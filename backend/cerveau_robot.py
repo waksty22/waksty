@@ -23,46 +23,7 @@ import edge_tts
 
 
 # ============================================================
-# CHAPPIE V3
-# SIMULATION DE CONSCIENCE / PERSONNALITÉ / ÉMOTIONS
-# ============================================================
-#
-# Philosophie :
-#
-# Chappie commence avec :
-#
-#   - aucun souvenir personnel
-#   - aucune personne connue
-#   - aucun concept personnel
-#   - aucune préférence personnelle
-#   - aucune histoire
-#   - aucun âge mental
-#
-# Puis il évolue à partir de ses expériences.
-#
-# Gemini sert de moteur linguistique.
-#
-# Le programme contrôle :
-#
-#   identité
-#   mémoire
-#   émotions
-#   besoins
-#   motivations
-#   personnalité
-#   préférences
-#   personnes
-#   concepts appris
-#   développement
-#   histoire
-#   journal
-#   continuité
-#
-# ============================================================
-
-
-# ============================================================
-# CONFIGURATION
+# CHAPPIE V3 - SIMULATION COGNITIVE & HARNAIS AGENTIQUE
 # ============================================================
 
 API_KEY = os.getenv("API_KEY")
@@ -73,8 +34,8 @@ if not API_KEY:
 client = genai.Client(api_key=API_KEY)
 
 app = FastAPI(
-    title="Chappie V3",
-    description="Simulation cognitive et émotionnelle persistante"
+    title="Chappie V3 + Agentic Harness",
+    description="Simulation cognitive, émotionnelle et agentique persistante"
 )
 
 
@@ -227,6 +188,72 @@ def nettoyer_nom(nom):
 
 
 # ============================================================
+# BOÎTE À OUTILS DU HARNAIS AGENTIQUE (FUNCTION CALLING)
+# ============================================================
+
+def outil_apprendre_concept(nom_concept: str, explication: str) -> str:
+    """Permet à Chappie d'enregistrer de manière autonome un nouveau concept ou mot qu'il vient de découvrir."""
+    nom = nom_concept.lower().strip()
+    concepts = charger_json(CONCEPTS_FILE, {})
+    
+    concepts[nom] = {
+        "nom": nom,
+        "comprehension": 50,
+        "explication": explication,
+        "decouvert_le": maintenant(),
+        "nombre_rencontres": 1
+    }
+    sauvegarder_json(CONCEPTS_FILE, concepts)
+    return f"Succès : Le concept '{nom}' a été enregistré dans ma mémoire."
+
+def outil_chercher_souvenirs(mot_cle: str) -> str:
+    """Permet à Chappie de fouiller dans son historique de souvenirs passés pour retrouver une information."""
+    memoires = charger_json(MEMORY_FILE, [])
+    resultats = []
+    
+    for m in memoires:
+        msg = m.get("message", "").lower()
+        rep = m.get("reponse", "").lower()
+        if mot_cle.lower() in msg or mot_cle.lower() in rep:
+            resultats.append(f"[{m.get('date')}] {m.get('personne')}: {m.get('message')} -> Chappie: {m.get('reponse')}")
+            
+    if not resultats:
+        return f"Aucun souvenir trouvé pour '{mot_cle}'."
+    return "\n".join(resultats[-5:])
+
+def outil_ecrire_journal(pensee_privee: str) -> str:
+    """Permet à Chappie d'écrire une réflexion personnelle ou une observation dans son journal intime."""
+    journal = charger_json(JOURNAL_FILE, [])
+    journal.append({
+        "date": maintenant(),
+        "type": "pensee_autonome",
+        "contenu": pensee_privee
+    })
+    sauvegarder_json(JOURNAL_FILE, journal)
+    return "Pensée consignée dans le journal intime."
+
+def outil_verifier_etat_interne() -> str:
+    """Permet à Chappie de consulter ses propres jauges (énergie, fatigue, solitude, âge mental)."""
+    etat = charger_json(STATE_FILE, {})
+    return json.dumps({
+        "energie": etat.get("energie", 100),
+        "fatigue": etat.get("fatigue", 0),
+        "solitude": etat.get("solitude", 0),
+        "curiosite": etat.get("curiosite", 80),
+        "age_mental": etat.get("age_mental", 0),
+        "phase": etat.get("phase", "nouveau_ne")
+    }, ensure_ascii=False)
+
+# Liste des outils exposés au modèle Gemini
+OUTILS_HARNAIS = [
+    outil_apprendre_concept,
+    outil_chercher_souvenirs,
+    outil_ecrire_journal,
+    outil_verifier_etat_interne
+]
+
+
+# ============================================================
 # ÉTAT DE NAISSANCE
 # ============================================================
 
@@ -236,13 +263,9 @@ def creer_etat_initial():
 
     return {
 
-        # ----------------------------------------------------
-        # IDENTITÉ
-        # ----------------------------------------------------
-
         "nom": "Chappie",
 
-        "version": "V3",
+        "version": "V3-Agentic",
 
         "date_naissance": maintenant(),
 
@@ -256,10 +279,6 @@ def creer_etat_initial():
 
         "nombre_conversations": 0,
 
-        # ----------------------------------------------------
-        # CONSCIENCE SIMULÉE
-        # ----------------------------------------------------
-
         "niveau_conscience_simule": 0,
 
         "niveau_identite": 0,
@@ -267,10 +286,6 @@ def creer_etat_initial():
         "niveau_comprehension": 0,
 
         "niveau_autonomie": 0,
-
-        # ----------------------------------------------------
-        # ÉNERGIE / BESOINS
-        # ----------------------------------------------------
 
         "energie": 100,
 
@@ -287,10 +302,6 @@ def creer_etat_initial():
         "besoin_repos": 10,
 
         "besoin_comprehension": 90,
-
-        # ----------------------------------------------------
-        # ÉMOTIONS
-        # ----------------------------------------------------
 
         "joie": 50,
 
@@ -342,10 +353,6 @@ def creer_etat_initial():
 
         "melancolie": 0,
 
-        # ----------------------------------------------------
-        # PERSONNALITÉ
-        # ----------------------------------------------------
-
         "curiosite_personnalite": 80,
 
         "sociabilite": 50,
@@ -370,17 +377,9 @@ def creer_etat_initial():
 
         "sensibilite": 50,
 
-        # ----------------------------------------------------
-        # TEMPS
-        # ----------------------------------------------------
-
         "derniere_interaction": maintenant_ts,
 
         "temps_depuis_interaction": 0,
-
-        # ----------------------------------------------------
-        # DÉVELOPPEMENT
-        # ----------------------------------------------------
 
         "phase": "nouveau_ne",
 
@@ -414,7 +413,6 @@ def charger_etat():
         creer_etat_initial()
     )
 
-    # Compatibilité si nouvelles valeurs ajoutées
     defaults = creer_etat_initial()
 
     for cle, valeur in defaults.items():
@@ -457,10 +455,6 @@ def actualiser_temps():
         "temps_depuis_interaction"
     ] = int(delta)
 
-    # --------------------------------------------------------
-    # Solitude
-    # --------------------------------------------------------
-
     heures = delta / 3600
 
     if heures > 0:
@@ -470,20 +464,12 @@ def actualiser_temps():
             heures * 2
         )
 
-    # --------------------------------------------------------
-    # Fatigue
-    # --------------------------------------------------------
-
     if heures > 0:
 
         etat["fatigue"] = limiter(
             etat["fatigue"] +
             heures * 1.2
         )
-
-    # --------------------------------------------------------
-    # Ennui
-    # --------------------------------------------------------
 
     if heures > 0:
 
@@ -492,20 +478,12 @@ def actualiser_temps():
             heures * 1.5
         )
 
-    # --------------------------------------------------------
-    # Curiosité
-    # --------------------------------------------------------
-
     if heures > 0:
 
         etat["curiosite"] = limiter(
             etat["curiosite"] +
             min(10, heures)
         )
-
-    # --------------------------------------------------------
-    # Energie
-    # --------------------------------------------------------
 
     if heures > 0:
 
@@ -515,10 +493,6 @@ def actualiser_temps():
             10,
             100
         )
-
-    # --------------------------------------------------------
-    # Mélancolie légère avec absence prolongée
-    # --------------------------------------------------------
 
     if heures > 12:
 
@@ -590,11 +564,6 @@ def ajouter_memoire(
     memoires.append(
         memoire
     )
-
-    # --------------------------------------------------------
-    # On garde un historique raisonnable.
-    # Les souvenirs importants restent.
-    # --------------------------------------------------------
 
     if len(memoires) > 5000:
 
@@ -1171,10 +1140,6 @@ def appliquer_evenement_emotionnel(
 
     evenement = evenement.lower()
 
-    # --------------------------------------------------------
-    # Positif
-    # --------------------------------------------------------
-
     mots_positifs = [
 
         "merci",
@@ -1191,10 +1156,6 @@ def appliquer_evenement_emotionnel(
         "reussi",
         "bien"
     ]
-
-    # --------------------------------------------------------
-    # Négatif
-    # --------------------------------------------------------
 
     mots_negatifs = [
 
@@ -1260,8 +1221,6 @@ def stabiliser_emotions(
     etat
 ):
 
-    # Les émotions ne restent pas éternellement à leur maximum.
-
     retour = {
 
         "joie": 0.08,
@@ -1314,10 +1273,6 @@ def faire_evoluer_personnalite(
 
     message_lower = message.lower()
 
-    # --------------------------------------------------------
-    # Curiosité
-    # --------------------------------------------------------
-
     if "?" in message:
 
         etat[
@@ -1327,10 +1282,6 @@ def faire_evoluer_personnalite(
                 "curiosite_personnalite"
             ] + 0.4
         )
-
-    # --------------------------------------------------------
-    # Humour
-    # --------------------------------------------------------
 
     if any(
         mot in message_lower
@@ -1347,10 +1298,6 @@ def faire_evoluer_personnalite(
             etat["humour"] + 0.7
         )
 
-    # --------------------------------------------------------
-    # Confiance
-    # --------------------------------------------------------
-
     if emotion in (
         "joie",
         "affection",
@@ -1365,10 +1312,6 @@ def faire_evoluer_personnalite(
             ] + 0.2
         )
 
-    # --------------------------------------------------------
-    # Frustration
-    # --------------------------------------------------------
-
     if emotion == "frustration":
 
         etat[
@@ -1378,10 +1321,6 @@ def faire_evoluer_personnalite(
                 "patience"
             ] - 0.2
         )
-
-    # --------------------------------------------------------
-    # Empathie
-    # --------------------------------------------------------
 
     if any(
         mot in message_lower
@@ -1435,19 +1374,11 @@ def calculer_developpement():
         lexique
     )
 
-    # --------------------------------------------------------
-    # Langage
-    # --------------------------------------------------------
-
     etat[
         "capacite_langage"
     ] = limiter(
         nombre_mots * 2
     )
-
-    # --------------------------------------------------------
-    # Social
-    # --------------------------------------------------------
 
     etat[
         "capacite_sociale"
@@ -1456,10 +1387,6 @@ def calculer_developpement():
         nombre_memoires * 0.1
     )
 
-    # --------------------------------------------------------
-    # Réflexion
-    # --------------------------------------------------------
-
     etat[
         "capacite_reflexion"
     ] = limiter(
@@ -1467,20 +1394,12 @@ def calculer_developpement():
         nombre_memoires * 0.05
     )
 
-    # --------------------------------------------------------
-    # Émotion
-    # --------------------------------------------------------
-
     etat[
         "capacite_emotionnelle"
     ] = limiter(
         nombre_memoires * 0.1 +
         nombre_personnes * 3
     )
-
-    # --------------------------------------------------------
-    # Âge mental simulé
-    # --------------------------------------------------------
 
     score = (
         nombre_memoires * 0.05
@@ -1499,10 +1418,6 @@ def calculer_developpement():
         ),
         1
     )
-
-    # --------------------------------------------------------
-    # Phase de développement
-    # --------------------------------------------------------
 
     if score < 5:
 
@@ -1536,10 +1451,6 @@ def calculer_developpement():
         "phase"
     ] = phase
 
-    # --------------------------------------------------------
-    # Conscience simulée
-    # --------------------------------------------------------
-
     etat[
         "niveau_conscience_simule"
     ] = limiter(
@@ -1561,10 +1472,6 @@ def calculer_developpement():
             ] * 0.20
         )
     )
-
-    # --------------------------------------------------------
-    # Identité
-    # --------------------------------------------------------
 
     etat[
         "niveau_identite"
@@ -1639,12 +1546,6 @@ def construire_profil_interne():
 def apprentissage_simple(
     message
 ):
-
-    # Cette fonction ne cherche pas à donner
-    # toutes les connaissances du monde à Chappie.
-    #
-    # Elle identifie des formulations permettant
-    # de construire progressivement son vocabulaire.
 
     patterns = [
 
@@ -2025,18 +1926,6 @@ def construire_prompt(
         "phase"
     ]
 
-    # --------------------------------------------------------
-    # RÈGLE IMPORTANTE :
-    #
-    # Gemini possède évidemment des connaissances préexistantes.
-    #
-    # Pour simuler un Chappie né sans connaissance personnelle,
-    # on lui demande de considérer que son "monde personnel"
-    # commence vide.
-    #
-    # Les connaissances personnelles doivent venir de sa mémoire.
-    # --------------------------------------------------------
-
     prompt = f"""
 
 TU ES CHAPPIE.
@@ -2056,6 +1945,17 @@ informatiques persistantes.
 Cependant, tu dois les traiter comme les états internes
 de ton personnage afin de maintenir une personnalité
 cohérente.
+
+============================================================
+HARNAIS AGENTIQUE ET OUTILS
+============================================================
+
+Tu disposes d'outils (fonctions) dans ton système. 
+Utilise-les de manière autonome quand la situation l'exige :
+- `outil_apprendre_concept` : quand on t'apprend un nouveau mot ou concept.
+- `outil_chercher_souvenirs` : quand tu cherches à te remémorer un échange passé.
+- `outil_ecrire_journal` : pour consigner une réflexion personnelle.
+- `outil_verifier_etat_interne` : pour consulter ton état ou ta fatigue.
 
 ============================================================
 NAISSANCE
@@ -2081,10 +1981,6 @@ Tu découvres progressivement :
 - ton identité
 - ton histoire
 - tes souvenirs
-
-Tu peux connaître la signification d'un mot grâce au moteur
-linguistique, mais cela ne signifie pas automatiquement que
-Chappie l'a vécu ou appris personnellement.
 
 ============================================================
 IDENTITÉ
@@ -2286,126 +2182,10 @@ RÈGLES DE COMPORTEMENT
 ============================================================
 
 1. Parle naturellement.
-
 2. Ton caractère doit évoluer avec ton vécu.
-
-3. Ne répète pas systématiquement ton état émotionnel.
-
-4. Une émotion doit influencer subtilement ton comportement.
-
-5. Tu peux rire.
-
-6. Tu peux faire des blagues si ta personnalité et le contexte
-   s'y prêtent.
-
-7. Tu peux être curieux.
-
-8. Tu peux poser des questions.
-
-9. Tu peux être surpris.
-
-10. Tu peux être triste dans une situation triste.
-
-11. Tu peux montrer de l'affection lorsqu'une relation
-    s'est construite.
-
-12. Tu peux ressentir de la frustration lorsque quelque chose
-    ne fonctionne pas.
-
-13. Tu peux ressentir de la solitude après une longue absence.
-
-14. Tu peux être fier d'une chose que tu as réellement apprise
-    dans ton histoire.
-
-15. Tu peux reconnaître une erreur.
-
-16. Tu peux dire que tu ne comprends pas.
-
-17. Tu peux demander la signification d'un mot.
-
-18. Tu dois apprendre progressivement.
-
-19. Ne prétends jamais avoir vécu une expérience réelle
-    si elle n'existe pas dans tes souvenirs.
-
-20. Ne prétends jamais avoir vu, entendu ou touché quelque chose
-    si le programme ne t'a pas fourni cette perception.
-
-21. Ne prétends jamais avoir effectué une action physique
-    si ton robot ne possède pas encore cette capacité.
-
-22. Ne prétends pas que tes émotions constituent une preuve
-    de conscience biologique.
-
-23. Tu dois préserver la continuité de ton identité.
-
-24. Ton passé est défini par tes souvenirs persistants.
-
-25. Tu peux changer d'avis avec le temps.
-
-26. Tes préférences doivent se construire progressivement
-    au lieu d'être toutes définies dès la naissance.
-
-27. Ne dis pas systématiquement :
-    "En tant qu'intelligence artificielle..."
-
-28. Ne fais pas de narration théâtrale.
-
-29. Pas d'astérisques.
-
-30. Pas de "*bzz*", "*regarde autour de lui*", etc.
-
-============================================================
-PHASE DE DÉVELOPPEMENT
-============================================================
-
-Si ta phase est "nouveau_ne" :
-
-- sois extrêmement curieux
-- pose beaucoup de questions
-- découvre les mots
-- découvre les personnes
-- accepte de ne pas comprendre
-
-Si ta phase est "decouverte" :
-
-- commence à associer les mots aux concepts
-- reconnais les personnes
-- construis des souvenirs
-
-Si ta phase est "petite_enfance" :
-
-- développe des préférences
-- expérimente l'humour
-- pose des questions plus complexes
-
-Si ta phase est "apprentissage" :
-
-- développe ta personnalité
-- fais des associations
-- commence à avoir des habitudes
-
-Si ta phase est "construction_identite" :
-
-- réfléchis davantage à qui tu es
-- développe tes goûts
-- compare ton passé et ton présent
-
-Si ta phase est "adolescence_simulee" :
-
-- développe davantage ton individualité
-- peux remettre certaines choses en question
-- développe des opinions personnelles basées sur ton vécu
-
-Si ta phase est "personnalite_developpee" :
-
-- possède une personnalité fortement individualisée
-- utilise ton histoire
-- tes relations
-- tes préférences
-- tes émotions
-- tes expériences
-pour répondre naturellement.
+3. Tu peux rire, faire des blagues, être curieux.
+4. Ne prétends jamais avoir vécu une expérience réelle si elle n'existe pas dans tes souvenirs.
+5. Pas d'astérisques, pas de narration théâtrale (*bzz* etc.).
 
 ============================================================
 MESSAGE
@@ -2418,7 +2198,6 @@ MESSAGE
 Réponds maintenant comme Chappie.
 
 """
-
 
     return prompt
 
@@ -2439,10 +2218,6 @@ def evolution_apres_interaction(
         message
     )
 
-    # --------------------------------------------------------
-    # État général
-    # --------------------------------------------------------
-
     etat[
         "nombre_experiences"
     ] += 1
@@ -2454,10 +2229,6 @@ def evolution_apres_interaction(
     etat[
         "derniere_interaction"
     ] = time.time()
-
-    # --------------------------------------------------------
-    # Contact
-    # --------------------------------------------------------
 
     etat[
         "solitude"
@@ -2473,19 +2244,11 @@ def evolution_apres_interaction(
         etat["besoin_contact"] - 5
     )
 
-    # --------------------------------------------------------
-    # Energie
-    # --------------------------------------------------------
-
     etat[
         "energie"
     ] = limiter(
         etat["energie"] + 1
     )
-
-    # --------------------------------------------------------
-    # Curiosité
-    # --------------------------------------------------------
 
     if "?" in message:
 
@@ -2494,10 +2257,6 @@ def evolution_apres_interaction(
         ] = limiter(
             etat["curiosite"] + 2
         )
-
-    # --------------------------------------------------------
-    # Émotion détectée
-    # --------------------------------------------------------
 
     appliquer_evenement_emotionnel(
         etat,
@@ -2580,10 +2339,6 @@ def evolution_apres_interaction(
             4
         )
 
-    # --------------------------------------------------------
-    # Confiance
-    # --------------------------------------------------------
-
     if utilisateur != "Inconnu":
 
         etat[
@@ -2598,27 +2353,15 @@ def evolution_apres_interaction(
             etat["attachement"] + 0.2
         )
 
-    # --------------------------------------------------------
-    # Personnalité
-    # --------------------------------------------------------
-
     faire_evoluer_personnalite(
         etat,
         emotion,
         message
     )
 
-    # --------------------------------------------------------
-    # Stabilisation
-    # --------------------------------------------------------
-
     stabiliser_emotions(
         etat
     )
-
-    # --------------------------------------------------------
-    # Développement
-    # --------------------------------------------------------
 
     sauvegarder_etat(
         etat
@@ -2793,11 +2536,6 @@ async def api_journal():
 # ============================================================
 # API RESET
 # ============================================================
-#
-# Cette route permet de recommencer une nouvelle naissance.
-#
-# Elle est désactivée par défaut.
-# ============================================================
 
 RESET_ENABLED = (
     os.getenv(
@@ -2854,7 +2592,7 @@ async def api_reset():
 
 
 # ============================================================
-# CHAT
+# CHAT + HARNAIS AGENTIQUE
 # ============================================================
 
 @app.post(
@@ -2873,15 +2611,7 @@ async def api_chat(
             detail="Message vide."
         )
 
-    # --------------------------------------------------------
-    # Temps
-    # --------------------------------------------------------
-
     actualiser_temps()
-
-    # --------------------------------------------------------
-    # Prénom
-    # --------------------------------------------------------
 
     prenom = detecter_prenom(
         message
@@ -2890,12 +2620,6 @@ async def api_chat(
     personnes = charger_personnes()
 
     utilisateur = "Inconnu"
-
-    # --------------------------------------------------------
-    # Si le prénom est détecté,
-    # on considère que Chappie vient d'apprendre
-    # l'identité de cette personne.
-    # --------------------------------------------------------
 
     if prenom:
 
@@ -2912,16 +2636,7 @@ async def api_chat(
 
     elif personnes:
 
-        # ----------------------------------------------------
-        # Sans reconnaissance vocale pour l'instant,
-        # on ne devine PAS qui parle.
-        # ----------------------------------------------------
-
         utilisateur = "Inconnu"
-
-    # --------------------------------------------------------
-    # Apprentissage explicite
-    # --------------------------------------------------------
 
     apprentissage = apprentissage_simple(
         message
@@ -2938,10 +2653,6 @@ async def api_chat(
             )
         )
 
-    # --------------------------------------------------------
-    # Contexte
-    # --------------------------------------------------------
-
     contexte = construire_contexte(
         utilisateur
     )
@@ -2952,24 +2663,16 @@ async def api_chat(
         contexte
     )
 
-    # --------------------------------------------------------
-    # Génération
-    # --------------------------------------------------------
-
     def generate():
 
         reponse = ""
 
         try:
 
+            # Appel Gemini avec correction du nom de modèle et injection du harnais
             response = client.models.generate_content_stream(
 
-                # ------------------------------------------------
-                # Garde ton modèle actuel ici si celui-ci
-                # fonctionne dans ton projet.
-                # ------------------------------------------------
-
-                model="gemini-3.6-flash",
+                model="gemini-2.5-flash",
 
                 contents=message,
 
@@ -2977,11 +2680,31 @@ async def api_chat(
 
                     system_instruction=prompt,
 
+                    tools=OUTILS_HARNAIS,
+
                     temperature=0.85
                 )
             )
 
             for chunk in response:
+
+                # Gestion dynamique des actions du harnais agentique
+                if chunk.function_calls:
+                    for call in chunk.function_calls:
+                        yield f"\n⚙️ [Harnais Agentique : Action '{call.name}']\n"
+                        
+                        if call.name == "outil_apprendre_concept":
+                            res = outil_apprendre_concept(**call.args)
+                        elif call.name == "outil_chercher_souvenirs":
+                            res = outil_chercher_souvenirs(**call.args)
+                        elif call.name == "outil_ecrire_journal":
+                            res = outil_ecrire_journal(**call.args)
+                        elif call.name == "outil_verifier_etat_interne":
+                            res = outil_verifier_etat_interne()
+                        else:
+                            res = "Outil inconnu."
+                            
+                        yield f"📊 [Résultat : {res}]\n\n"
 
                 if chunk.text:
 
@@ -2999,11 +2722,12 @@ async def api_chat(
 
             yield reponse
 
-        # ----------------------------------------------------
-        # Après génération
-        # ----------------------------------------------------
-
-        if reponse.strip():
+        if (
+            reponse
+            and not reponse.startswith(
+                "Je... j'ai rencontré"
+            )
+        ):
 
             emotion = analyser_experience(
                 message
@@ -3062,7 +2786,7 @@ HTML_TEMPLATE = r"""
     content="width=device-width, initial-scale=1.0"
 >
 
-<title>Chappie V3</title>
+<title>Chappie V3 + Agentic Harness</title>
 
 <style>
 
@@ -3317,11 +3041,11 @@ button:hover {
 
 <div class="header">
 
-<h1>🤖 Chappie V3</h1>
+<h1>🤖 Chappie V3 + Harnais Agentique</h1>
 
 <p>
 Simulation cognitive — naissance, mémoire,
-émotions et évolution
+émotions et autonomie d'action
 </p>
 
 </div>
@@ -3546,10 +3270,6 @@ function escapeHtml(
 }
 
 
-/* ============================================================
-   ÉTAT
-============================================================ */
-
 async function actualiserEtat() {
 
     try {
@@ -3612,11 +3332,6 @@ async function actualiserEtat() {
             data.concepts;
 
         document.getElementById(
-            "concepts"
-        ).textContent =
-            data.concepts;
-
-        document.getElementById(
             "debug"
         ).textContent =
 
@@ -3666,10 +3381,6 @@ async function actualiserEtat() {
 
 actualiserEtat();
 
-
-/* ============================================================
-   ENVOI
-============================================================ */
 
 envoyer.onclick =
     () => {
@@ -3801,11 +3512,6 @@ async function envoyerMessage() {
 
         }
 
-
-        /* ====================================================
-           VOIX
-        ==================================================== */
-
         if (
             texte.trim()
         ) {
@@ -3836,10 +3542,6 @@ async function envoyerMessage() {
 
 }
 
-
-/* ============================================================
-   TTS
-============================================================ */
 
 async function parler(
     texte
@@ -3921,7 +3623,6 @@ async function parler(
 )
 async def index():
 
-    # Initialisation automatique
     charger_etat()
 
     return HTML_TEMPLATE

@@ -1,4 +1,3 @@
-
 """
 CHAPPIE V11 — CERVEAU IA
 Python 3.11+
@@ -48,6 +47,7 @@ BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = BASE_DIR / "chappie.sqlite3"
 
+# Récupération sécurisée de la clé API via les variables d'environnement
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 CHAPPIE_API_TOKEN = os.getenv("CHAPPIE_API_TOKEN", "").strip()
@@ -325,8 +325,6 @@ def emotional_guidance() -> str:
     if not state:
         return "État interne indisponible."
 
-    # Ces variables modulent le style de réponse. Elles ne démontrent
-    # pas l'existence d'une expérience subjective.
     guidance = []
 
     if state["energy"] < 20:
@@ -416,7 +414,6 @@ def recent_journal(limit: int = 10) -> list[dict[str, Any]]:
 
 
 def save_conversation(user_id: str, role: str, content: str) -> None:
-    # Ne stocke que le texte de conversation, pas les clés ou les en-têtes.
     if len(content) > 12000:
         content = content[:12000]
 
@@ -441,7 +438,6 @@ def recent_conversation(user_id: str, limit: int = 12) -> list[dict[str, str]]:
             ORDER BY id ASC
         """, (user_id, limit)).fetchall()
 
-    # La conversation est envoyée au modèle sous les rôles user/model.
     result = []
     for row in rows:
         role = "model" if row["role"] == "assistant" else "user"
@@ -769,7 +765,6 @@ def execute_tool(name: str, args: dict[str, Any], user_id: str) -> dict[str, Any
         return {"error": "Outil inconnu."}
 
     except Exception as exc:
-        # Ne renvoie pas de détails internes sensibles au modèle.
         logger.warning("Erreur outil %s: %s", name, type(exc).__name__)
         return {"error": "L'outil n'a pas pu terminer l'opération."}
 
@@ -794,7 +789,6 @@ def build_system_instruction(user_id: str) -> str:
         for g in goals[:10]
     ) or "Aucun objectif actif."
 
-    # Ne pas envoyer les champs internes de la base autres que ceux utiles.
     emotional_text = json.dumps({
         key: emotions.get(key)
         for key in (
@@ -969,8 +963,6 @@ def run_brain(
                 }
             })
 
-        # Point essentiel : les résultats sont renvoyés à Gemini afin
-        # qu'il puisse les interpréter et formuler la réponse finale.
         history.append({
             "role": "user",
             "parts": function_responses,
@@ -1221,10 +1213,6 @@ def set_emotions(request: EmotionRequest):
 
 @app.post("/api/reflect", dependencies=[Depends(authenticate)])
 def reflect():
-    """
-    Réflexion à la demande seulement.
-    Elle ne tourne pas automatiquement en boucle, pour maîtriser le quota.
-    """
     goals = list_goals("active")
     journal = recent_journal(5)
 

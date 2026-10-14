@@ -50,7 +50,7 @@ DB_PATH = BASE_DIR / "chappie.sqlite3"
 
 # Récupération sécurisée de la clé API via les variables d'environnement
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
 CHAPPIE_API_TOKEN = os.getenv("CHAPPIE_API_TOKEN", "").strip()
 CHAPPIE_TIMEZONE = os.getenv("CHAPPIE_TIMEZONE", "Europe/Paris")
 

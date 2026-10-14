@@ -50,7 +50,7 @@ DB_PATH = BASE_DIR / "chappie.sqlite3"
 
 # Récupération sécurisée de la clé API via les variables d'environnement
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 CHAPPIE_API_TOKEN = os.getenv("CHAPPIE_API_TOKEN", "").strip()
 CHAPPIE_TIMEZONE = os.getenv("CHAPPIE_TIMEZONE", "Europe/Paris")
 
@@ -74,10 +74,6 @@ app = FastAPI(
     version="11.0.0",
     description="Cerveau IA évolutif de Chappie",
 )
-
-# CORS désactivé par défaut. Si une interface web externe est nécessaire,
-# configure une liste d'origines précise avant de l'activer.
-# Ne remplace pas l'authentification par CORS.
 
 
 # ============================================================
@@ -210,8 +206,6 @@ init_db()
 def authenticate(
     x_chappie_token: str | None = Header(default=None),
 ) -> None:
-    # Pour un usage local sans jeton, laisse CHAPPIE_API_TOKEN vide.
-    # Pour Render ou tout accès distant, définis impérativement un jeton.
     if CHAPPIE_API_TOKEN:
         if not x_chappie_token:
             raise HTTPException(status_code=401, detail="Jeton manquant")
@@ -1089,7 +1083,6 @@ def root():
         </div>
 
         <script>
-            // Token configuré par défaut pour l'interface web
             const CHAPPIE_TOKEN = "Ab8RN6KrVPmqHHwtpdK0YOmDw6kiEZboE5aya0naVPvYBvV9NA";
 
             async function sendMessage() {
@@ -1098,7 +1091,6 @@ def root():
                 const text = input.value.trim();
                 if (!text) return;
 
-                // Afficher le message utilisateur
                 chatBox.innerHTML += `<div class="msg user"><b>Moi :</b> ${text}</div>`;
                 input.value = '';
                 chatBox.scrollTop = chatBox.scrollHeight;

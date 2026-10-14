@@ -836,7 +836,7 @@ def call_gemini(contents: list[dict[str, Any]], user_id: str) -> dict[str, Any]:
     check_and_increment_usage("ai")
 
     payload = {
-        "systemInstruction": {
+        "system_instruction": {
             "parts": [{"text": build_system_instruction(user_id)}]
         },
         "contents": contents,
@@ -859,7 +859,7 @@ def call_gemini(contents: list[dict[str, Any]], user_id: str) -> dict[str, Any]:
         )
 
         if response.status_code >= 400:
-            logger.error("Gemini HTTP %s", response.status_code)
+            logger.error("Gemini HTTP %s: %s", response.status_code, response.text)
             raise HTTPException(
                 status_code=502,
                 detail="Le service IA a renvoyé une erreur.",

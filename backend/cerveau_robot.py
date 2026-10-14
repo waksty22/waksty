@@ -1,5 +1,5 @@
 """
-CHAPPIE V11 — CERVEAU IA
+CHAPPIE V11 — CERVEAU IA AVEC INTERFACE WEB
 Python 3.11+
 - Gemini via API REST
 - Mémoire persistante SQLite
@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 import requests
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -1049,20 +1050,80 @@ class EmotionRequest(BaseModel):
 
 
 # ============================================================
-# ROUTES HTTP
+# ROUTES HTTP ET INTERFACE WEB
 # ============================================================
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def root():
-    return {
-        "name": APP_NAME,
-        "version": "11.0.0",
-        "status": "online",
-        "message": "Le cerveau de Chappie est prêt.",
-        "api_key_configured": bool(GEMINI_API_KEY),
-        "authentication_enabled": bool(CHAPPIE_API_TOKEN),
-        "timestamp": utc_now(),
-    }
+    return """
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Chappie - Cerveau IA</title>
+        <style>
+            body { background-color: #0b0b0b; color: #ffffff; font-family: sans-serif; padding: 20px; display: flex; flex-direction: column; align-items: center; margin: 0; }
+            .container { max-width: 600px; width: 100%; margin-top: 20px; }
+            h1 { font-size: 1.3rem; text-align: center; margin-bottom: 20px; }
+            #chat-box { background: #121212; border: 1px solid #222; border-radius: 8px; height: 400px; overflow-y: auto; padding: 15px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 12px; }
+            .msg { padding: 10px 14px; border-radius: 6px; max-width: 85%; word-break: break-word; line-height: 1.4; }
+            .user { background: #0033aa; align-self: flex-end; color: white; }
+            .bot { background: #222; align-self: flex-start; color: white; border: 1px solid #333; }
+            .input-group { display: flex; gap: 8px; }
+            input { flex: 1; padding: 12px; background: #1a1a1a; border: 1px solid #333; color: white; border-radius: 6px; font-size: 1rem; }
+            button { background: #008800; border: none; color: white; padding: 0 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 1rem; }
+            button:hover { background: #00aa00; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🤖 Chappie (Cerveau IA)</h1>
+            <div id="chat-box">
+                <div class="msg bot"><b>Chappie :</b> Salut ! Je suis prêt, que puis-je faire pour toi ?</div>
+            </div>
+            <div class="input-group">
+                <input type="text" id="user-input" placeholder="Parle à Chappie..." onkeydown="if(event.key==='Enter') sendMessage()">
+                <button onclick="sendMessage()">Envoyer</button>
+            </div>
+        </div>
+
+        <script>
+            // Token configuré par défaut pour l'interface web
+            const CHAPPIE_TOKEN = "Ab8RN6KrVPmqHHwtpdK0YOmDw6kiEZboE5aya0naVPvYBvV9NA";
+
+            async function sendMessage() {
+                const input = document.getElementById('user-input');
+                const chatBox = document.getElementById('chat-box');
+                const text = input.value.trim();
+                if (!text) return;
+
+                // Afficher le message utilisateur
+                chatBox.innerHTML += `<div class="msg user"><b>Moi :</b> ${text}</div>`;
+                input.value = '';
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+                try {
+                    const res = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Chappie-Token': CHAPPIE_TOKEN
+                        },
+                        body: JSON.stringify({ user_id: 'creator', message: text })
+                    });
+                    const data = await res.json();
+                    const reply = data.reply || data.detail || 'Erreur de réponse';
+                    chatBox.innerHTML += `<div class="msg bot"><b>Chappie :</b> ${reply}</div>`;
+                } catch (e) {
+                    chatBox.innerHTML += `<div class="msg bot"><b>Erreur :</b> Impossible de contacter Chappie</div>`;
+                }
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        </script>
+    </body>
+    </html>
+    """
 
 
 @app.get("/health")

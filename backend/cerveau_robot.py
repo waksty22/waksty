@@ -655,13 +655,47 @@ async def home():
 </style></head><body>
 <h1>🤖 Chappie V18</h1><div class="muted">Mémoire autobiographique · états internes simulés · conversation vocale</div>
 <div class="panel"><label for="token">Jeton API</label><input id="token" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN"><div class="muted">Le jeton reste dans cette page. N’expose pas le serveur directement sur Internet.</div></div>
-<div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie…"></textarea><div class="row"><button id="sendBtn" onclick="sendMessage()">Envoyer</button><button class="secondary" id="micBtn" onclick="toggleMic()">🎙️ Dicter</button><button class="secondary" onclick="stopSpeech()">■ Arrêter la voix</button></div><div id="status" class="status">Prêt.</div></div>
+<div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie…"></textarea><div class="row"><button type="button" id="sendBtn" onclick="sendMessage()">Envoyer</button><button type="button" class="secondary" id="micBtn" onclick="toggleMic()">🎙️ Dicter</button><button type="button" class="secondary" onclick="stopSpeech()">■ Arrêter la voix</button></div><div id="status" class="status">Prêt.</div></div>
 <div class="panel"><strong>Réponse de Chappie</strong><pre id="out">En attente de ton message…</pre><small class="muted">Les émotions et les rêves sont des états logiciels simulés, pas une preuve de conscience.</small></div>
-<div class="panel"><strong>🗣️ Conversation vocale en temps réel</strong><p class="muted">Audio en continu via Gemini Live. Tu peux parler pendant que Chappie répond ; le navigateur doit autoriser le micro.</p><div class="row"><button id="liveBtn" onclick="toggleLive()">▶ Démarrer la conversation live</button><button class="secondary" onclick="stopLive()">■ Arrêter</button></div><div id="liveStatus" class="status">Session non démarrée.</div></div>
-<div class="panel"><strong>👁️ Vision par caméra</strong><p class="muted">La caméra n’est activée qu’après ton clic. Une image fixe est envoyée à Gemini pour analyse ; pas de surveillance continue.</p><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button onclick="startCamera()">Activer la caméra</button><button class="secondary" onclick="captureVision()">Que vois-tu ?</button><button class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
-<div class="panel"><strong>🎙️ Profils vocaux facultatifs</strong><p class="muted">Enregistre un profil avec un extrait de voix, puis compare un nouvel extrait. L’identification biométrique est optionnelle et reste locale dans la base de Chappie. Demande le consentement explicite de la personne. Nécessite l’installation du module optionnel resemblyzer.</p><label>Nom du profil</label><input id="voiceName" maxlength="80" placeholder="Ex. Julien"><div class="row"><button onclick="recordVoice('enroll')">Enregistrer un profil (8 s)</button><button class="secondary" onclick="recordVoice('identify')">Identifier (5 s)</button></div><div id="voiceStatus" class="status">Aucun enregistrement en cours.</div></div>
-<div class="panel"><strong>État interne simulé</strong><pre id="state">En attente…</pre><div class="row"><button class="secondary" onclick="loadSummary()">Voir sa mémoire autobiographique</button><button class="secondary" onclick="consolidate()">Consolider les souvenirs</button></div><pre id="summary">Résumé non chargé.</pre></div>
+<div class="panel"><strong>🗣️ Conversation vocale en temps réel</strong><p class="muted">Audio en continu via Gemini Live. Tu peux parler pendant que Chappie répond ; le navigateur doit autoriser le micro.</p><div class="row"><button type="button" id="liveBtn" onclick="toggleLive()">▶ Démarrer la conversation live</button><button type="button" class="secondary" onclick="stopLive()">■ Arrêter</button></div><div id="liveStatus" class="status">Session non démarrée.</div></div>
+<div class="panel"><strong>👁️ Vision par caméra</strong><p class="muted">La caméra n’est activée qu’après ton clic. Une image fixe est envoyée à Gemini pour analyse ; pas de surveillance continue.</p><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button type="button" onclick="startCamera()">Activer la caméra</button><button type="button" class="secondary" onclick="captureVision()">Que vois-tu ?</button><button type="button" class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
+<div class="panel"><strong>🎙️ Profils vocaux facultatifs</strong><p class="muted">Enregistre un profil avec un extrait de voix, puis compare un nouvel extrait. L’identification biométrique est optionnelle et reste locale dans la base de Chappie. Demande le consentement explicite de la personne. Nécessite l’installation du module optionnel resemblyzer.</p><label>Nom du profil</label><input id="voiceName" maxlength="80" placeholder="Ex. Julien"><div class="row"><button type="button" onclick="recordVoice('enroll')">Enregistrer un profil (8 s)</button><button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5 s)</button></div><div id="voiceStatus" class="status">Aucun enregistrement en cours.</div></div>
+<div class="panel"><strong>État interne simulé</strong><pre id="state">En attente…</pre><div class="row"><button type="button" class="secondary" onclick="loadSummary()">Voir sa mémoire autobiographique</button><button type="button" class="secondary" onclick="consolidate()">Consolider les souvenirs</button></div><pre id="summary">Résumé non chargé.</pre></div>
 <script>
+// Diagnostic interface Render : rend visibles les erreurs JavaScript et confirme les clics.
+(function installChappieDiagnostics(){
+  function showDiagnostic(message) {
+    const status = document.getElementById('status');
+    if (status) status.textContent = message;
+    const liveStatus = document.getElementById('liveStatus');
+    if (liveStatus && message.startsWith('Erreur')) liveStatus.textContent = message;
+    console.error('[Chappie V18.2]', message);
+  }
+  window.addEventListener('error', function(event) {
+    showDiagnostic('Erreur JavaScript : ' + (event.message || 'erreur inconnue') +
+      (event.lineno ? ' (ligne ' + event.lineno + ')' : ''));
+  });
+  window.addEventListener('unhandledrejection', function(event) {
+    const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+    showDiagnostic('Erreur asynchrone : ' + reason);
+  });
+  document.addEventListener('click', function(event) {
+    const button = event.target && event.target.closest ? event.target.closest('button') : null;
+    if (!button) return;
+    console.info('[Chappie V18.2] Clic détecté :', (button.innerText || button.textContent || '').trim());
+    // Si le gestionnaire inline n'est pas disponible, affiche un indice plutôt que de rester silencieux.
+    if (button.hasAttribute('onclick') && !button.disabled) {
+      const handler = button.getAttribute('onclick');
+      if (handler && /sendMessage|toggleMic|stopSpeech|toggleLive|stopLive|startCamera|captureVision|stopCamera|recordVoice|loadSummary|consolidate/.test(handler)) {
+        setTimeout(function() {
+          if (typeof window.sendMessage !== 'function' && /sendMessage/.test(handler)) {
+            showDiagnostic('Les fonctions JavaScript ne sont pas chargées. Recharge la page ; vérifie le déploiement Render et la console.');
+          }
+        }, 0);
+      }
+    }
+  }, true);
+})();
 let recognition=null;let speakingAudio=null;const $=id=>document.getElementById(id);
 function headers(){return {'Content-Type':'application/json','Authorization':'Bearer '+$('token').value.trim()}}
 function setStatus(s){$('status').textContent=s}

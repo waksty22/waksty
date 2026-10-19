@@ -29,4 +29,8 @@ edge-tts
 librosa
 soundfile
 libsql
+resemblyzer
+soundfile
+numpy
+
 

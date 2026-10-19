@@ -949,40 +949,49 @@ async def gemini_live_socket(websocket: WebSocket):
             setup = {"setup": {"model": "models/" + GEMINI_LIVE_MODEL, "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}}, "systemInstruction": {"parts": [{"text": get_identity_prompt(CHAPPIE_OWNER_ID) + "\nTu es Chappie, parle français naturellement, avec des phrases concises, chaleureuses et curieuses. Écoute les interruptions et laisse l'utilisateur reprendre la parole. Tes émotions sont des états simulés."}]}, "inputAudioTranscription": {"languageCodes": ["fr-FR"]}, "outputAudioTranscription": {"languageCodes": ["fr-FR"]}}}
             await upstream.send(json.dumps(setup))
             setup_ready = asyncio.Event()
+
             async def browser_to_gemini():
-                while True:
-                    msg = await websocket.receive_json()
-                    await setup_ready.wait()
-                    if "audio" in msg:
-                        await upstream.send(json.dumps({"realtimeInput": {"audio": {"mimeType": "audio/pcm;rate=16000", "data": msg["audio"]}}}))
-                    elif "text" in msg:
-                        await upstream.send(json.dumps({"realtimeInput": {"text": str(msg["text"])[:2000]}}))
-                    elif msg.get("end"):
-                        await upstream.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
-                        break
+                try:
+                    while True:
+                        msg = await websocket.receive_json()
+                        await setup_ready.wait()
+                        if "audio" in msg:
+                            await upstream.send(json.dumps({"realtimeInput": {"audio": {"mimeType": "audio/pcm;rate=16000", "data": msg["audio"]}}}))
+                        elif "text" in msg:
+                            await upstream.send(json.dumps({"realtimeInput": {"text": str(msg["text"])[:2000]}}))
+                        elif msg.get("end"):
+                            await upstream.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
+                            break
+                except (WebSocketDisconnect, asyncio.CancelledError):
+                    pass
+
             async def gemini_to_browser():
-                async for raw in upstream:
-                    try: data = json.loads(raw)
-                    except Exception: continue
-                    if data.get("setupComplete") is not None:
-                        setup_ready.set()
-                        await websocket.send_json({"status": "Connecté à Gemini Live. Tu peux parler, Chappie t'écoute."})
-                    if "error" in data:
-                        await websocket.send_json({"error": str(data["error"])[:1000]}); continue
-                    server = data.get("serverContent", {})
-                    if server.get("interrupted"):
-                        await websocket.send_json({"interrupt": True})
-                    if server.get("inputTranscription", {}).get("text"):
-                        await websocket.send_json({"user_text": server["inputTranscription"]["text"]})
-                    if server.get("outputTranscription", {}).get("text"):
-                        await websocket.send_json({"text": server["outputTranscription"]["text"]})
-                    model_turn = server.get("modelTurn", {})
-                    for part in model_turn.get("parts", []):
-                        inline = part.get("inlineData") or part.get("inline_data")
-                        if inline and inline.get("data"):
-                            await websocket.send_json({"audio": inline["data"], "sample_rate": 24000})
-                        if part.get("text"):
-                            await websocket.send_json({"text": part["text"]})
+                try:
+                    async for raw in upstream:
+                        try: data = json.loads(raw)
+                        except Exception: continue
+                        if data.get("setupComplete") is not None:
+                            setup_ready.set()
+                            await websocket.send_json({"status": "Connecté à Gemini Live. Tu peux parler, Chappie t'écoute."})
+                        if "error" in data:
+                            await websocket.send_json({"error": str(data["error"])[:1000]}); continue
+                        server = data.get("serverContent", {})
+                        if server.get("interrupted"):
+                            await websocket.send_json({"interrupt": True})
+                        if server.get("inputTranscription", {}).get("text"):
+                            await websocket.send_json({"user_text": server["inputTranscription"]["text"]})
+                        if server.get("outputTranscription", {}).get("text"):
+                            await websocket.send_json({"text": server["outputTranscription"]["text"]})
+                        model_turn = server.get("modelTurn", {})
+                        for part in model_turn.get("parts", []):
+                            inline = part.get("inlineData") or part.get("inline_data")
+                            if inline and inline.get("data"):
+                                await websocket.send_json({"audio": inline["data"], "sample_rate": 24000})
+                            if part.get("text"):
+                                await websocket.send_json({"text": part["text"]})
+                except (WebSocketDisconnect, asyncio.CancelledError):
+                    pass
+
             tasks = [asyncio.create_task(browser_to_gemini()), asyncio.create_task(gemini_to_browser())]
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending: task.cancel()

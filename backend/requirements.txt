@@ -30,7 +30,3 @@ librosa
 soundfile
 libsql
 resemblyzer
-soundfile
-numpy
-
-

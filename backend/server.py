@@ -90,6 +90,8 @@ def row_to_dict(row) -> dict[str, Any]:
         return {}
     if hasattr(row, "keys"):
         return {key: row[key] for key in row.keys()}
+    if isinstance(row, dict):
+        return row
     try:
         return dict(row)
     except Exception:
@@ -722,7 +724,7 @@ async def dream_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
 
 @app.post("/api/goals")
 async def add_goal(req: GoalRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(req.user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
     return create_goal(auth_user, req.title, req.steps)
 
 

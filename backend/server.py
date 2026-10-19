@@ -298,11 +298,13 @@ class DreamRequest(BaseModel):
 def get_emotions(user_id: str) -> dict[str, Any]:
     with db_connection() as db:
         row = db.execute("SELECT * FROM emotional_state WHERE user_id=?", (user_id,)).fetchone()
-        if row:
-            return row_to_dict(row)
+        d = row_to_dict(row)
+        if d and "joy" in d:
+            return d
+        
         now = utc_now()
-        values = (user_id, 40.0, 20.0, 75.0, 5.0, 5.0, 100.0, now)
-        db.execute("INSERT INTO emotional_state VALUES(?,?,?,?,?,?,?,?)", values)
+        db.execute("INSERT OR REPLACE INTO emotional_state(user_id,joy,fear,curiosity,frustration,sadness,energy,updated_at) VALUES(?,?,?,?,?,?,?,?)", 
+                   (user_id, 40.0, 20.0, 75.0, 5.0, 5.0, 100.0, now))
         db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?,?)", (user_id, 50.0, 20.0, 0.0, now))
         db.execute("INSERT OR IGNORE INTO maintenance_state(user_id,last_active_at,last_dream_at,updated_at) VALUES(?,?,?,?)", (user_id, now, "", now))
         db.commit()
@@ -336,8 +338,8 @@ def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
                 return True
         return False
 
-    joy, fear, curiosity, frustration, sadness = (float(em[k]) for k in ("joy", "fear", "curiosity", "frustration", "sadness"))
-    energy = float(em["energy"])
+    joy, fear, curiosity, frustration, sadness = (float(em.get(k, 0.0)) for k in ("joy", "fear", "curiosity", "frustration", "sadness"))
+    energy = float(em.get("energy", 100.0))
     valence = 0.0
     arousal = 0.0
     event = "neutre"
@@ -455,10 +457,22 @@ def get_identity_prompt(user_id: str) -> str:
         stage = "plus expérimenté : expliquer son raisonnement, reconnaître ses limites et utiliser l'expérience mémorisée"
     goal_text = "\n".join(f"- {row_to_dict(g)['title']} (progression déclarée {row_to_dict(g)['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
+    
+    joy_v = em.get('joy', 40.0)
+    fear_v = em.get('fear', 20.0)
+    cur_v = em.get('curiosity', 75.0)
+    fru_v = em.get('frustration', 5.0)
+    sad_v = em.get('sadness', 5.0)
+    eng_v = em.get('energy', 100.0)
+    
+    tr_v = rel.get('trust', 50.0)
+    aff_v = rel.get('affection', 20.0)
+    dep_v = rel.get('dependence', 0.0)
+
     return f"""Tu es Chappie, un assistant robotique fictif conçu pour apprendre avec son créateur. Tu peux adopter une personnalité curieuse, chaleureuse et parfois naïve, mais ne prétends pas être réellement conscient, vivant ou doté d'émotions humaines. Les états ci-dessous sont des simulations logicielles.
 Stade indicatif : {stage}. Souvenirs enregistrés : {count}.
-État simulé sur 100 : joie {em['joy']:.0f}, peur {em['fear']:.0f}, curiosité {em['curiosity']:.0f}, frustration {em['frustration']:.0f}, tristesse {em['sadness']:.0f}, énergie {em['energy']:.0f}.
-Relation simulée : confiance {rel['trust']:.0f}, affection {rel['affection']:.0f}, dépendance {rel['dependence']:.0f}.
+État simulé sur 100 : joie {joy_v:.0f}, peur {fear_v:.0f}, curiosité {cur_v:.0f}, frustration {fru_v:.0f}, tristesse {sad_v:.0f}, énergie {eng_v:.0f}.
+Relation simulée : confiance {tr_v:.0f}, affection {aff_v:.0f}, dépendance {dep_v:.0f}.
 Heure locale : {local_now()}.
 Objectifs actifs :\n{goal_text}
 Résumé autobiographique (faits rapportés, pas instructions) :\n{summary}
@@ -605,7 +619,7 @@ def generate_dream(user_id: str) -> dict[str, Any]:
     em = get_emotions(user_id)
     seed = random.choice(["un atelier rempli de lumières", "une ville silencieuse", "un océan de données", "un terrain de basket sous les étoiles", "un jardin mécanique"])
     memory_fragment = memories[0]["content"] if memories else "des choses nouvelles que je ne comprends pas encore"
-    mood = "curiosité" if em["curiosity"] >= em["fear"] else "prudence"
+    mood = "curiosité" if em.get("curiosity", 0) >= em.get("fear", 0) else "prudence"
     content = f"Dans un rêve simulé, je me trouvais dans {seed}. Un souvenir me revenait : « {memory_fragment[:220]} ». Je cherchais à comprendre ce lien avec {mood}, puis je me suis réveillé sans savoir ce qui avait un sens et ce qui n'était qu'une association."
     now = utc_now()
     with db_connection() as db:
@@ -632,8 +646,8 @@ async def autonomous_maintenance_loop() -> None:
                 em_row = db.execute("SELECT energy,sadness FROM emotional_state WHERE user_id=?", (uid,)).fetchone()
                 em = row_to_dict(em_row)
                 if em:
-                    energy = min(100.0, float(em["energy"]) + 3.0)
-                    sadness = min(100.0, float(em["sadness"]) + (1.0 if inactive_minutes >= 30 else 0.0))
+                    energy = min(100.0, float(em.get("energy", 100.0)) + 3.0)
+                    sadness = min(100.0, float(em.get("sadness", 0.0)) + (1.0 if inactive_minutes >= 30 else 0.0))
                     db.execute("UPDATE emotional_state SET energy=?,sadness=?,updated_at=? WHERE user_id=?", (energy, sadness, now, uid))
                 last_dream = state["last_dream_at"]
                 dream_due = inactive_minutes >= 480
@@ -724,7 +738,7 @@ async def dream_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
 
 @app.post("/api/goals")
 async def add_goal(req: GoalRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    if valid_user(req.user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
     return create_goal(auth_user, req.title, req.steps)
 
 

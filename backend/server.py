@@ -34,6 +34,7 @@ APP_NAME = "Chappie V18.2 — édition complète vocale et visuelle"
 BASE_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).expanduser().resolve()
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"  # conserve la mémoire existante V16; les nouvelles tables sont ajoutées sans effacer les données
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
 CHAPPIE_API_TOKEN = os.getenv("CHAPPIE_API_TOKEN", "").strip()
@@ -49,6 +50,9 @@ MAX_BODY_BYTES = max(1024, min(2_000_000, int(os.getenv("MAX_BODY_BYTES", "30000
 RATE_LIMIT_REQUESTS = max(5, int(os.getenv("RATE_LIMIT_REQUESTS", "60")))
 RATE_LIMIT_WINDOW = max(10, int(os.getenv("RATE_LIMIT_WINDOW", "60")))
 GEMINI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "").strip()
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "").strip()
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("chappie")
@@ -67,7 +71,14 @@ def local_now() -> str:
         return datetime.now().astimezone().isoformat()
 
 
-def db_connection() -> sqlite3.Connection:
+def db_connection():
+    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
+        import libsql_experimental as libsql
+        conn = libsql.connect("chappie_remote.db", sync_url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+        conn.sync()
+        conn.row_factory = sqlite3.Row
+        return conn
+
     db = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
@@ -77,7 +88,8 @@ def db_connection() -> sqlite3.Connection:
 
 def init_db() -> None:
     with db_connection() as db:
-        db.execute("PRAGMA journal_mode=WAL")
+        if not (TURSO_DATABASE_URL and TURSO_AUTH_TOKEN):
+            db.execute("PRAGMA journal_mode=WAL")
         db.executescript("""
         CREATE TABLE IF NOT EXISTS voice_profiles (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, profile_name TEXT NOT NULL, embedding_json TEXT NOT NULL,
@@ -105,7 +117,6 @@ def init_db() -> None:
             UNIQUE(user_id, content)
         );
         CREATE INDEX IF NOT EXISTS idx_memories_user_importance ON memories(user_id, importance DESC, id DESC);
-        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, category, tags);
         CREATE TABLE IF NOT EXISTS journal (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, entry TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL
         );
@@ -354,9 +365,6 @@ def remember(user_id: str, content: str, category: str = "general", importance: 
           VALUES(?,?,?,?,?,0,?,?) ON CONFLICT(user_id,content) DO UPDATE SET
           category=excluded.category, importance=MAX(memories.importance,excluded.importance),
           tags=excluded.tags, updated_at=excluded.updated_at""", (user_id, category.strip()[:60], content, importance, tags_json, now, now))
-        row = db.execute("SELECT id FROM memories WHERE user_id=? AND content=?", (user_id, content)).fetchone()
-        db.execute("DELETE FROM memories_fts WHERE rowid=?", (row["id"],))
-        db.execute("INSERT INTO memories_fts(rowid,content,category,tags) VALUES(?,?,?,?)", (row["id"], content, category, " ".join(safe_tags)))
         db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Souvenir enregistré ({category}, importance {importance}).", "memory", now))
         db.commit()
     return {"saved": True, "content": content, "category": category, "importance": importance, "tags": safe_tags}
@@ -366,18 +374,7 @@ def retrieve_memories(user_id: str, query: str = "", limit: int = 10) -> list[di
     user_id = valid_user(user_id)
     limit = max(1, min(30, int(limit)))
     with db_connection() as db:
-        rows: list[sqlite3.Row] = []
-        terms = [t for t in re.findall(r"[\wÀ-ÿ'-]+", query.casefold()) if len(t) > 1][:10]
-        if terms:
-            fts_query = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
-            try:
-                rows = db.execute("""SELECT m.id,m.content,m.category,m.importance,m.tags,m.access_count,m.created_at,
-                    bm25(memories_fts) AS rank FROM memories_fts JOIN memories m ON m.id=memories_fts.rowid
-                    WHERE memories_fts MATCH ? AND m.user_id=? ORDER BY rank ASC, m.importance DESC LIMIT ?""", (fts_query, user_id, limit)).fetchall()
-            except sqlite3.OperationalError:
-                rows = []
-        if not rows and not terms:
-            rows = db.execute("SELECT id,content,category,importance,tags,access_count,created_at,0 AS rank FROM memories WHERE user_id=? ORDER BY importance DESC, updated_at DESC LIMIT ?", (user_id, limit)).fetchall()
+        rows = db.execute("SELECT id,content,category,importance,tags,access_count,created_at FROM memories WHERE user_id=? ORDER BY importance DESC, updated_at DESC LIMIT ?", (user_id, limit)).fetchall()
         results = []
         for row in rows:
             item = dict(row)

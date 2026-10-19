@@ -28,4 +28,5 @@ google-genai
 edge-tts
 librosa
 soundfile
-libsql-experimental
+libsql
+

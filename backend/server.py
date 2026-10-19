@@ -76,7 +76,6 @@ def db_connection():
         import libsql
         conn = libsql.connect("chappie_remote.db", sync_url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
         conn.sync()
-        conn.row_factory = sqlite3.Row
         return conn
 
     db = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
@@ -700,7 +699,7 @@ async def dream_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
 
 @app.post("/api/goals")
 async def add_goal(req: GoalRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    if valid_user(req.user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
     return create_goal(auth_user, req.title, req.steps)
 
 

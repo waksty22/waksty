@@ -36,7 +36,7 @@ BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"  # conserve la mémoire existante V16; les nouvelles tables sont ajoutées sans effacer les données
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 CHAPPIE_API_TOKEN = os.getenv("CHAPPIE_API_TOKEN", "").strip()
 CHAPPIE_OWNER_ID = os.getenv("CHAPPIE_OWNER_ID", "creator").strip() or "creator"
 GEMINI_LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview").strip()
@@ -392,10 +392,14 @@ def retrieve_memories(user_id: str, query: str = "", limit: int = 10) -> list[di
         results = []
         for row in rows:
             item = row_to_dict(row)
-            try: item["tags"] = json.loads(item["tags"])
-            except Exception: item["tags"] = []
+            try: 
+                item["tags"] = json.loads(item["tags"]) if isinstance(item.get("tags"), str) else item.get("tags", [])
+            except Exception: 
+                item["tags"] = []
             results.append(item)
-            db.execute("UPDATE memories SET access_count=access_count+1 WHERE id=?", (item["id"],))
+            mem_id = item.get("id")
+            if mem_id is not None:
+                db.execute("UPDATE memories SET access_count=access_count+1 WHERE id=?", (mem_id,))
         db.commit()
         return results
 
@@ -753,7 +757,7 @@ async def dream_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
 
 @app.post("/api/goals")
 async def add_goal(req: GoalRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(req.user_id) != auth_user:
+    if valid_user(user_id) != auth_user:
         raise HTTPException(403, "Utilisateur non autorisé.")
     return create_goal(auth_user, req.title, req.steps)
 

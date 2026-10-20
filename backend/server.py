@@ -859,14 +859,14 @@ async def vision_analyze(req: VisionRequest, user_id: str = Depends(require_auth
 
 
 def speaker_embedding(wav_bytes: bytes) -> list[float]:
-    """Embedding speaker optionnel. La dépendance resemblyzer doit être installée séparément."""
+    """Embedding speaker optionnel. Gère proprement l'absence des bibliothèques."""
     try:
         import io
         import numpy as np
         from resemblyzer import VoiceEncoder, preprocess_wav
         import soundfile as sf
     except ImportError as exc:
-        raise HTTPException(503, "Reconnaissance vocale biométrique optionnelle non installée. Installe resemblyzer, soundfile et numpy.") from exc
+        raise HTTPException(503, "Le module de reconnaissance vocale biométrique (resemblyzer / soundfile) n'est pas disponible sur le serveur.") from exc
     try:
         audio, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=True)
         if len(audio) / sr < 2.0:

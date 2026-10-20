@@ -546,7 +546,10 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         raise HTTPException(413, f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).")
     update_emotions_once(user_id, message)
     relevant = retrieve_memories(user_id, message, 6)
-    memory_context = "\n".join(f"- [{m['category']}, importance {m['importance']}] {m['content']}" for m in relevant)
+    memory_context = "\n".join(
+        f"- [{m.get('category', 'general')}, importance {m.get('importance', 3)}] {m.get('content', '')}"
+        for m in relevant
+    )
     autobiographical_summary = get_latest_summary(user_id)
     
     with db_connection() as db:
@@ -757,7 +760,7 @@ async def dream_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
 
 @app.post("/api/goals")
 async def add_goal(req: GoalRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(user_id) != auth_user:
+    if valid_user(req.user_id) != auth_user:
         raise HTTPException(403, "Utilisateur non autorisé.")
     return create_goal(auth_user, req.title, req.steps)
 

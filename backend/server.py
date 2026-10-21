@@ -226,7 +226,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=APP_NAME, version="18.9.0", description="Compagnon conversationnel Chappie : mémoire persistante, objectifs, états simulés et interface vocale.", lifespan=lifespan)
 
-# Montage du dossier static pour servir script.js proprement
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -246,7 +245,6 @@ async def body_size_guard(request: Request, call_next):
     return response
 
 
-# ---------- Modèles API ----------
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: str = Field(default="creator", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.@-]+$")
@@ -306,7 +304,6 @@ class DreamRequest(BaseModel):
     user_id: str = "creator"
 
 
-# ---------- États internes simulés ----------
 def get_emotions(user_id: str) -> dict[str, Any]:
     with db_connection() as db:
         row = db.execute("SELECT * FROM emotional_state WHERE user_id=?", (user_id,)).fetchone()
@@ -710,7 +707,6 @@ async def autonomous_maintenance_loop() -> None:
             log.exception("Erreur dans la boucle de maintenance")
 
 
-# ---------- Routes ----------
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse("""<!doctype html>
@@ -849,7 +845,6 @@ async def speak(req: SpeakRequest, _: str = Depends(require_auth)):
     return StreamingResponse(chunks(), media_type="audio/mpeg", headers={"Content-Disposition": "inline; filename=chappie.mp3", "Cache-Control": "no-store"})
 
 
-# ---------- Vision, voix temps réel et profils vocaux optionnels ----------
 class VisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     image_data_url: str = Field(min_length=50, max_length=MAX_CAMERA_IMAGE_BYTES * 2)

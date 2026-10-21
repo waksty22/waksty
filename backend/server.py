@@ -1,4 +1,4 @@
-"""Chappie V18 - Interface complète, mémoire intégrale et persistance Turso.
+"""Chappie V18 - Édition Intégrale : Mémoire Totale, Turso, Caméra et Gemini Live.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-APP_NAME = "Chappie V18.6 — Édition Intégrale et Mémoire Totale"
+APP_NAME = "Chappie V18.7 — Édition Live & Mémoire Intégrale"
 BASE_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).expanduser().resolve()
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"
@@ -344,10 +344,11 @@ async def home():
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:850px;margin:0 auto;padding:24px 16px;background:#0b1220;color:#eef4ff}.panel{background:#131f31;border:1px solid #2b3b52;border-radius:16px;padding:18px;margin:14px 0}h1{margin-bottom:4px}.muted{color:#aabbd0;font-size:.9rem}input,textarea,select{width:100%;padding:12px;margin:6px 0;background:#0b1525;color:#fff;border:1px solid #40536e;border-radius:9px;font:inherit}textarea{resize:vertical}button{padding:11px 15px;border:0;border-radius:9px;background:#54d3ee;color:#07131e;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#263850;color:#eef4ff}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1525;padding:14px;border-radius:10px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}.status{font-size:.9rem;color:#9de4f5}
 </style></head><body>
-<h1>🤖 Chappie V18</h1><div class="muted">Mémoire intégrale · états internes · vision caméra · interface complète</div>
+<h1>🤖 Chappie V18</h1><div class="muted">Mémoire intégrale · états internes · vision caméra · conversation live</div>
 <div class="panel"><label for="token">Jeton API</label><input id="token" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN"></div>
 <div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie..."></textarea><div class="row"><button type="button" id="sendBtn" onclick="sendMessage()">Envoyer</button></div><div id="status" class="status">Prêt.</div></div>
 <div class="panel"><strong>Réponse de Chappie</strong><pre id="out">En attente de ton message...</pre></div>
+<div class="panel"><strong>🗣️ Conversation vocale en temps réel (Gemini Live)</strong><div class="row"><button type="button" id="liveBtn" onclick="toggleLive()">▶ Démarrer la conversation live</button><button type="button" class="secondary" onclick="stopLive()">■ Arrêter</button></div><div id="liveStatus" class="status">Session non démarrée.</div></div>
 <div class="panel"><strong>👁️ Vision par caméra</strong><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button type="button" onclick="startCamera()">Activer la caméra</button><button type="button" class="secondary" onclick="captureVision()">Que vois-tu ?</button><button type="button" class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
 <script src="/static/script.js"></script>
 </body></html>""")
@@ -367,6 +368,83 @@ async def vision_analyze(req: VisionRequest, user_id: str = Depends(require_auth
         db.commit()
         sync_db_if_turso(db)
     return {"description": description}
+
+
+@app.websocket("/ws/live")
+async def gemini_live_socket(websocket: WebSocket):
+    token = websocket.query_params.get("token", "")
+    if not CHAPPIE_API_TOKEN or not hmac.compare_digest(token, CHAPPIE_API_TOKEN):
+        await websocket.close(code=1008, reason="Jeton invalide")
+        return
+    if not GEMINI_API_KEY:
+        await websocket.accept(); await websocket.send_json({"error": "GEMINI_API_KEY n'est pas configurée."}); await websocket.close(code=1011); return
+    try:
+        import websockets
+    except ImportError:
+        await websocket.accept(); await websocket.send_json({"error": "Installe websockets>=13 pour activer Gemini Live."}); await websocket.close(code=1011); return
+    await websocket.accept()
+    upstream_url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" + GEMINI_API_KEY
+    try:
+        async with websockets.connect(upstream_url, max_size=12_000_000, ping_interval=20, ping_timeout=20) as upstream:
+            setup = {"setup": {"model": "models/" + GEMINI_LIVE_MODEL, "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}}}, "systemInstruction": {"parts": [{"text": get_identity_prompt(CHAPPIE_OWNER_ID) + "\nTu es Chappie, parle français naturellement, avec des phrases concises, chaleureuses et curieuses."}]}, "inputAudioTranscription": {"languageCodes": ["fr-FR"]}, "outputAudioTranscription": {"languageCodes": ["fr-FR"]}}}
+            await upstream.send(json.dumps(setup))
+            setup_ready = asyncio.Event()
+
+            async def browser_to_gemini():
+                try:
+                    while True:
+                        msg = await websocket.receive_json()
+                        await setup_ready.wait()
+                        if "audio" in msg:
+                            await upstream.send(json.dumps({"realtimeInput": {"audio": {"mimeType": "audio/pcm;rate=16000", "data": msg["audio"]}}}))
+                        elif "text" in msg:
+                            await upstream.send(json.dumps({"realtimeInput": {"text": str(msg["text"])[:2000]}}))
+                        elif msg.get("end"):
+                            await upstream.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
+                            break
+                except (WebSocketDisconnect, asyncio.CancelledError):
+                    pass
+
+            async def gemini_to_browser():
+                try:
+                    async for raw in upstream:
+                        try: data = json.loads(raw)
+                        except Exception: continue
+                        if data.get("setupComplete") is not None:
+                            setup_ready.set()
+                            await websocket.send_json({"status": "Connecté à Gemini Live. Tu peux parler."})
+                        if "error" in data:
+                            await websocket.send_json({"error": str(data["error"])[:1000]}); continue
+                        server = data.get("serverContent", {})
+                        if server.get("interrupted"):
+                            await websocket.send_json({"interrupt": True})
+                        if server.get("inputTranscription", {}).get("text"):
+                            await websocket.send_json({"user_text": server["inputTranscription"]["text"]})
+                        if server.get("outputTranscription", {}).get("text"):
+                            await websocket.send_json({"text": server["outputTranscription"]["text"]})
+                        model_turn = server.get("modelTurn", {})
+                        for part in model_turn.get("parts", []):
+                            inline = part.get("inlineData") or part.get("inline_data")
+                            if inline and inline.get("data"):
+                                await websocket.send_json({"audio": inline["data"], "sample_rate": 24000})
+                            if part.get("text"):
+                                await websocket.send_json({"text": part["text"]})
+                except (WebSocketDisconnect, asyncio.CancelledError):
+                    pass
+
+            tasks = [asyncio.create_task(browser_to_gemini()), asyncio.create_task(gemini_to_browser())]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending: task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        log.exception("Gemini Live WebSocket a échoué")
+        try: await websocket.send_json({"error": "Connexion Gemini Live impossible : " + str(exc)[:250]})
+        except Exception: pass
+    finally:
+        try: await websocket.close()
+        except Exception: pass
 
 
 if __name__ == "__main__":

@@ -965,16 +965,16 @@ async def gemini_live_socket(websocket: WebSocket):
                 while True:
                     msg = await websocket.receive_json()
                     await setup_ready.wait()
-                    if "audio" in msg:
-                        # Format valide audio pour Gemini Live
+                                        if "audio" in msg:
                         await upstream.send(json.dumps({
                             "realtimeInput": {
-                                "mediaChunks": [{
+                                "audio": {
                                     "mimeType": "audio/pcm;rate=16000",
                                     "data": msg["audio"]
-                                }]
+                                }
                             }
                         }))
+
                     elif "text" in msg:
                         text_value = str(msg["text"])[:2000]
                         current_user_parts.append(text_value)

@@ -138,6 +138,7 @@ async function consolidate() {
 
 // --- Gemini Live ---
 let liveSocket = null, liveStream = null, liveCtx = null, liveProcessor = null, liveSource = null, liveNextTime = 0, liveActive = false, liveAudioSources = new Set();
+let visionInterval = null;
 
 function b64(bytes) {
   let s = '';
@@ -175,6 +176,41 @@ function resample(input, fromRate, toRate) {
   return out;
 }
 
+// Envoi en continu du flux vidéo de la caméra dans Gemini Live
+function startLiveVision() {
+  stopLiveVision();
+  const video = $('camera');
+  if (!video || !cameraStream) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const ctx = canvas.getContext('2d');
+
+  visionInterval = setInterval(() => {
+    if (!liveActive || !liveSocket || liveSocket.readyState !== WebSocket.OPEN) return;
+    if (!video.videoWidth || !video.videoHeight) return;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
+    if (!base64Image) return;
+
+    liveSocket.send(JSON.stringify({
+      mediaChunks: [{
+        mimeType: 'image/jpeg',
+        data: base64Image
+      }]
+    }));
+  }, 2000);
+}
+
+function stopLiveVision() {
+  if (visionInterval) {
+    clearInterval(visionInterval);
+    visionInterval = null;
+  }
+}
+
 async function toggleLive() {
   if (liveActive) {
     stopLive();
@@ -186,6 +222,7 @@ async function toggleLive() {
     await liveCtx.resume();
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     liveSocket = new WebSocket(proto + '//' + location.host + '/ws/live?token=' + encodeURIComponent($('token').value.trim()));
+    window.liveSocket = liveSocket;
     
     liveSocket.onopen = () => {
       liveActive = true;
@@ -200,6 +237,11 @@ async function toggleLive() {
       };
       liveSource.connect(liveProcessor);
       liveProcessor.connect(liveCtx.destination);
+
+      // Si la caméra est active, lancer le flux visuel en direct
+      if (cameraStream) {
+        startLiveVision();
+      }
     };
     
     liveSocket.onmessage = e => {
@@ -247,6 +289,7 @@ function playLiveAudio(encoded, rate) {
 
 function stopLive(close = true) {
   liveActive = false;
+  stopLiveVision();
   try { if (liveProcessor) { liveProcessor.disconnect(); liveProcessor.onaudioprocess = null; } } catch {}
   try { if (liveSource) liveSource.disconnect(); } catch {}
   try { if (liveStream) liveStream.getTracks().forEach(t => t.stop()); } catch {}
@@ -254,7 +297,7 @@ function stopLive(close = true) {
   try { if (liveCtx) liveCtx.close(); } catch {}
   for (const a of liveAudioSources) { try { a.stop(); } catch {} }
   liveAudioSources.clear();
-  liveSocket = null; liveStream = null; liveCtx = null; liveProcessor = null; liveSource = null; liveNextTime = 0;
+  liveSocket = null; window.liveSocket = null; liveStream = null; liveCtx = null; liveProcessor = null; liveSource = null; liveNextTime = 0;
   $('liveBtn').textContent = '▶ Démarrer la conversation live';
 }
 
@@ -265,13 +308,19 @@ async function startCamera() {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     $('camera').srcObject = cameraStream;
-    $('visionOut').textContent = 'Caméra active. Clique sur « Que vois-tu ? » pour analyser une image.';
+    $('visionOut').textContent = 'Caméra active. Chappie peut vous observer en direct si Gemini Live est lancé.';
+    
+    // Si Gemini Live est déjà en cours, démarrer la vision continue immédiatement
+    if (liveActive && liveSocket) {
+      startLiveVision();
+    }
   } catch (e) {
     $('visionOut').textContent = 'Accès caméra refusé ou indisponible : ' + e.message;
   }
 }
 
 function stopCamera() {
+  stopLiveVision();
   if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
   cameraStream = null;
   $('camera').srcObject = null;

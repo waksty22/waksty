@@ -968,14 +968,25 @@ async def gemini_live_socket(websocket: WebSocket):
                     msg = await websocket.receive_json()
                     await setup_ready.wait()
                     if "audio" in msg:
-                        await upstream.send(json.dumps({"realtimeInput": {"audio": {"mimeType": "audio/pcm;rate=16000", "data": msg["audio"]}}}))
+                        await upstream.send(json.dumps({
+                            "realtimeInput": {
+                                "mediaChunks": [{
+                                    "mimeType": "audio/pcm;rate=16000",
+                                    "data": msg["audio"]
+                                }]
+                            }
+                        }))
                     elif "text" in msg:
                         text_value = str(msg["text"])[:2000]
                         current_user_parts.append(text_value)
                         await upstream.send(json.dumps({"realtimeInput": {"text": text_value}}))
                     elif "mediaChunks" in msg:
-                        # Relais des images de la caméra en direct vers Gemini Live
-                        await upstream.send(json.dumps({"realtimeInput": {"mediaChunks": msg["mediaChunks"]}}))
+                        # Relais des images de la caméra en direct vers Gemini Live sous le format attendu
+                        await upstream.send(json.dumps({
+                            "realtimeInput": {
+                                "mediaChunks": msg["mediaChunks"]
+                            }
+                        }))
                     elif msg.get("end"):
                         await upstream.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
 

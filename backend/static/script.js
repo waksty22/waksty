@@ -454,3 +454,15 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// --- Exposer globalement les fonctions pour le HTML (onclick) ---
+window.sendMessage = sendMessage;
+window.stopSpeech = stopSpeech;
+window.toggleMic = toggleMic;
+window.loadSummary = loadSummary;
+window.consolidate = consolidate;
+window.toggleLive = toggleLive;
+window.startCamera = startCamera;
+window.stopCamera = stopCamera;
+window.captureVision = captureVision;
+window.recordVoice = recordVoice;

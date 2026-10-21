@@ -191,8 +191,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=APP_NAME, version="18.9.0", description="Compagnon conversationnel Chappie : mémoire persistante, objectifs, états simulés et interface vocale.", lifespan=lifespan)
 
-# Montage du dossier static pour servir script.js
-static_dir = BASE_DIR / "static"
+# Montage du dossier static situé au même niveau que server.py (dans backend/static)
+static_dir = Path(__file__).resolve().parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 

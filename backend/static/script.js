@@ -278,7 +278,6 @@ function stopCamera() {
   $('visionOut').textContent = 'Caméra inactive.';
 }
 
-
 async function captureVision() {
   const v = $('camera');
 
@@ -371,7 +370,6 @@ async function captureVision() {
   }
 }
 
-
 // --- Profils Vocaux ---
 function wavBlob(floatSamples, sampleRate) {
   const rate = 16000, s = resample(floatSamples, sampleRate, rate), buf = new ArrayBuffer(44 + s.length * 2), v = new DataView(buf);
@@ -456,4 +454,3 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
-

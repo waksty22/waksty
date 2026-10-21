@@ -965,7 +965,7 @@ async def gemini_live_socket(websocket: WebSocket):
                 while True:
                     msg = await websocket.receive_json()
                     await setup_ready.wait()
-                                        if "audio" in msg:
+                    if "audio" in msg:
                         await upstream.send(json.dumps({
                             "realtimeInput": {
                                 "audio": {
@@ -974,13 +974,11 @@ async def gemini_live_socket(websocket: WebSocket):
                                 }
                             }
                         }))
-
                     elif "text" in msg:
                         text_value = str(msg["text"])[:2000]
                         current_user_parts.append(text_value)
                         await upstream.send(json.dumps({"realtimeInput": {"text": text_value}}))
                     elif "mediaChunks" in msg:
-                        # Correction : Envoi des frames vidéo au format conforme attendu
                         chunks = msg["mediaChunks"]
                         formatted_chunks = []
                         for c in chunks:
@@ -1012,7 +1010,6 @@ async def gemini_live_socket(websocket: WebSocket):
                     if server.get("interrupted"):
                         await websocket.send_json({"interrupt": True})
                     
-                    # Traitement des appels d'outils (Function Calling / Souvenirs)
                     model_turn = server.get("modelTurn", {})
                     for part in model_turn.get("parts", []):
                         if "functionCall" in part:
@@ -1085,4 +1082,5 @@ async def gemini_live_socket(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "8000")), reload=False)
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=False)

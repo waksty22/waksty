@@ -278,34 +278,99 @@ function stopCamera() {
   $('visionOut').textContent = 'Caméra inactive.';
 }
 
+
 async function captureVision() {
   const v = $('camera');
-  if (!cameraStream || !v.videoWidth) {
-    $('visionOut').textContent = 'Active la caméra d’abord.';
+
+  if (!cameraStream || !v.videoWidth || !v.videoHeight) {
+    $('visionOut').textContent = 'Active la caméra et attends que l’image apparaisse.';
     return;
   }
-  const c = document.createElement('canvas');
-  const scale = Math.min(1, 1280 / v.videoWidth);
-  c.width = Math.round(v.videoWidth * scale);
-  c.height = Math.round(v.videoHeight * scale);
-  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-  $('visionOut').textContent = 'Analyse de l’image...';
+
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(1, 960 / v.videoWidth);
+
+  canvas.width = Math.round(v.videoWidth * scale);
+  canvas.height = Math.round(v.videoHeight * scale);
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    $('visionOut').textContent = 'Impossible de préparer l’image.';
+    return;
+  }
+
+  ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+
+  $('visionOut').textContent = 'Chappie observe l’image...';
+
   try {
-    const r = await fetch('/api/vision/analyze', {
+    const imageData = canvas.toDataURL('image/jpeg', 0.65);
+
+    const visionResponse = await fetch('/api/vision/analyze', {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({
-        image_data_url: c.toDataURL('image/jpeg', .82),
-        prompt: 'Décris précisément et prudemment ce qui est visible.'
+        image_data_url: imageData,
+        prompt: 'Décris ce que tu vois. Distingue les éléments certains des suppositions. Si une personne est visible, décris son apparence sans chercher à déterminer son identité.'
       })
     });
-    const d = await r.json();
-    if (!r.ok) throw Error(d.detail || 'Erreur API');
-    $('visionOut').textContent = d.description;
+
+    const visionData = await visionResponse.json();
+
+    if (!visionResponse.ok) {
+      throw new Error(
+        visionData.detail || 'L’analyse visuelle a échoué.'
+      );
+    }
+
+    const description = visionData.description;
+
+    $('visionOut').textContent =
+      'Ce que Chappie voit :\n' + description +
+      '\n\nChappie prépare sa réponse...';
+
+    const chatResponse = await fetch('/api/chat', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        user_id: 'creator',
+        message:
+          'Tu viens d’analyser une image avec ta caméra. ' +
+          'Voici la description obtenue :\n' +
+          description +
+          '\nRéagis naturellement à ce que tu observes et explique-moi ce que tu en comprends.'
+      })
+    });
+
+    const chatData = await chatResponse.json();
+
+    if (!chatResponse.ok) {
+      throw new Error(
+        chatData.detail ||
+        'Image analysée, mais Chappie ne peut pas répondre.'
+      );
+    }
+
+    $('visionOut').textContent =
+      'Ce que Chappie voit :\n' + description;
+
+    $('out').textContent = chatData.reply;
+    if (chatData.psychology) {
+      $('state').textContent =
+        JSON.stringify(chatData.psychology, null, 2);
+    }
+
+    setStatus('Image analysée et réponse de Chappie reçue.');
+
+    await speak(chatData.reply);
+
   } catch (e) {
-    $('visionOut').textContent = 'Erreur vision : ' + e.message;
+    $('visionOut').textContent =
+      'Erreur caméra : ' + e.message;
+    setStatus('Vérifie le jeton et la connexion au serveur.');
   }
 }
+
 
 // --- Profils Vocaux ---
 function wavBlob(floatSamples, sampleRate) {

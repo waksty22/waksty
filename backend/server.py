@@ -75,7 +75,10 @@ def db_connection():
     if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
         import libsql
         conn = libsql.connect("chappie_remote.db", sync_url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
-        conn.sync()
+        try:
+            conn.sync()
+        except Exception as e:
+            log.warning("Échec de la synchronisation initiale Turso : %s", e)
         return conn
 
     db = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
@@ -83,6 +86,14 @@ def db_connection():
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("PRAGMA busy_timeout=20000")
     return db
+
+
+def sync_db_if_turso(db: Any) -> None:
+    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and hasattr(db, "sync"):
+        try:
+            db.sync()
+        except Exception as e:
+            log.warning("Échec de la synchronisation Turso : %s", e)
 
 
 def row_to_dict(row) -> dict[str, Any]:
@@ -168,6 +179,7 @@ def init_db() -> None:
         );
         """)
         db.commit()
+        sync_db_if_turso(db)
 
 init_db()
 
@@ -308,6 +320,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
         db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?,?)", (user_id, 50.0, 20.0, 0.0, now))
         db.execute("INSERT OR IGNORE INTO maintenance_state(user_id,last_active_at,last_dream_at,updated_at) VALUES(?,?,?,?)", (user_id, now, "", now))
         db.commit()
+        sync_db_if_turso(db)
         return {"user_id": user_id, "joy": 40.0, "fear": 20.0, "curiosity": 75.0, "frustration": 5.0, "sadness": 5.0, "energy": 100.0, "updated_at": now}
 
 
@@ -362,6 +375,7 @@ def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
         db.execute("UPDATE maintenance_state SET last_active_at=?,updated_at=? WHERE user_id=?", (now, now, user_id))
         db.execute("INSERT INTO mood_events(user_id,event,valence,arousal,created_at) VALUES(?,?,?,?,?)", (user_id, event, valence, arousal, now))
         db.commit()
+        sync_db_if_turso(db)
     return vals
 
 
@@ -381,6 +395,7 @@ def remember(user_id: str, content: str, category: str = "general", importance: 
           tags=excluded.tags, updated_at=excluded.updated_at""", (user_id, category.strip()[:60], content, importance, tags_json, now, now))
         db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Souvenir enregistré ({category}, importance {importance}).", "memory", now))
         db.commit()
+        sync_db_if_turso(db)
     return {"saved": True, "content": content, "category": category, "importance": importance, "tags": safe_tags}
 
 
@@ -401,6 +416,7 @@ def retrieve_memories(user_id: str, query: str = "", limit: int = 20) -> list[di
             if mem_id is not None:
                 db.execute("UPDATE memories SET access_count=access_count+1 WHERE id=?", (mem_id,))
         db.commit()
+        sync_db_if_turso(db)
         return results
 
 
@@ -443,6 +459,7 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
         db.execute("INSERT OR IGNORE INTO conversation_summaries(user_id,summary,through_conversation_id,created_at) VALUES(?,?,?,?)", (user_id, summary, int(last_item["id"]), now))
         db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Résumé autobiographique consolidé jusqu'à l'échange {last_item['id']}.", "summary", now))
         db.commit()
+        sync_db_if_turso(db)
         return {"created": True, "summary": summary, "through_id": int(last_item["id"])}
 
 
@@ -599,6 +616,7 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         db.execute("INSERT INTO conversations(user_id,role,content,created_at) VALUES(?,?,?,?)", (user_id, "assistant", reply, now))
         db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Échange terminé; message de {len(message)} caractères.", "conversation", now))
         db.commit()
+        sync_db_if_turso(db)
         
     with db_connection() as db:
         count_row = db.execute("SELECT COUNT(*) as cnt FROM conversations WHERE user_id=?", (user_id,)).fetchone()
@@ -624,6 +642,7 @@ def create_goal(user_id: str, title: str, steps: list[str]) -> dict[str, Any]:
             if clean:
                 db.execute("INSERT INTO goal_steps(goal_id,description,status,evidence,updated_at) VALUES(?,?,'pending','',?)", (goal_id, clean[:500], now))
         db.commit()
+        sync_db_if_turso(db)
     return {"id": goal_id, "title": title.strip(), "steps": len([s for s in steps if s.strip()]), "status": "active"}
 
 
@@ -651,6 +670,7 @@ def generate_dream(user_id: str) -> dict[str, Any]:
         db.execute("UPDATE maintenance_state SET last_dream_at=?,updated_at=? WHERE user_id=?", (now, now, user_id))
         db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, "Cycle de rêve simulé généré à partir de souvenirs disponibles.", "dream", now))
         db.commit()
+        sync_db_if_turso(db)
     return {"dream": content, "created_at": now, "simulated": True}
 
 
@@ -682,6 +702,7 @@ async def autonomous_maintenance_loop() -> None:
                         pass
                 db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (uid, f"Maintenance autonome effectuée; inactivité estimée {inactive_minutes:.0f} minutes.", "maintenance", now))
                 db.commit()
+                sync_db_if_turso(db)
             if dream_due:
                 generate_dream(uid)
         except asyncio.CancelledError:
@@ -789,6 +810,7 @@ async def complete_goal_step(goal_id: int, step_id: int, req: GoalStepRequest, a
         db.execute("UPDATE goal_steps SET status='completed',evidence=?,updated_at=? WHERE id=?", (req.evidence.strip(), utc_now(), step_id))
         update_goal_progress(db, goal_id)
         db.commit()
+        sync_db_if_turso(db)
         goal_row = db.execute("SELECT id,title,status,progress FROM goals WHERE id=?", (goal_id,)).fetchone()
         goal = row_to_dict(goal_row)
     return {"goal": goal, "step_id": step_id, "completed": True}
@@ -868,6 +890,7 @@ async def vision_analyze(req: VisionRequest, user_id: str = Depends(require_auth
         db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, "Analyse visuelle : " + description[:1800], "vision", now))
         db.execute("INSERT INTO conversations(user_id,role,content,created_at) VALUES(?,?,?,?)", (user_id, "user", f"[Capture caméra analysée] {req.prompt} -> {description}", now))
         db.commit()
+        sync_db_if_turso(db)
     return {"description": description, "model": GEMINI_MODEL, "continuous_stream": False}
 
 
@@ -910,6 +933,7 @@ async def voice_profile_enroll(profile_name: str, request: Request, user_id: str
     with db_connection() as db:
         db.execute("INSERT INTO voice_profiles(user_id,profile_name,embedding_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,profile_name) DO UPDATE SET embedding_json=excluded.embedding_json,updated_at=excluded.updated_at", (user_id, name, json.dumps(embedding), now, now))
         db.commit()
+        sync_db_if_turso(db)
     return {"saved": True, "profile_name": name, "note": "Gabarit biométrique vocal enregistré. Utilise uniquement avec le consentement de la personne."}
 
 
@@ -952,6 +976,7 @@ async def voice_profile_delete(profile_name: str, user_id: str = Depends(require
     with db_connection() as db:
         cur = db.execute("DELETE FROM voice_profiles WHERE user_id=? AND profile_name=?", (user_id, profile_name))
         db.commit()
+        sync_db_if_turso(db)
     if not cur.rowcount:
         raise HTTPException(404, "Profil vocal introuvable.")
     return {"deleted": True, "profile_name": profile_name}

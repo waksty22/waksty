@@ -176,15 +176,15 @@ function resample(input, fromRate, toRate) {
   return out;
 }
 
-// Envoi en continu du flux vidéo de la caméra dans Gemini Live
+// Envoi en continu du flux vidéo de la caméra dans Gemini Live (optimisé et stabilisé)
 function startLiveVision() {
   stopLiveVision();
   const video = $('camera');
   if (!video || !cameraStream) return;
 
   const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = 480;
+  canvas.width = 480;
+  canvas.height = 360;
   const ctx = canvas.getContext('2d');
 
   visionInterval = setInterval(() => {
@@ -192,7 +192,7 @@ function startLiveVision() {
     if (!video.videoWidth || !video.videoHeight) return;
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
+    const base64Image = canvas.toDataURL('image/jpeg', 0.4).split(',')[1];
     if (!base64Image) return;
 
     liveSocket.send(JSON.stringify({
@@ -201,7 +201,7 @@ function startLiveVision() {
         data: base64Image
       }]
     }));
-  }, 2000);
+  }, 1000);
 }
 
 function stopLiveVision() {

@@ -978,17 +978,14 @@ async def gemini_live_socket(websocket: WebSocket):
                         text_value = str(msg["text"])[:2000]
                         current_user_parts.append(text_value)
                         await upstream.send(json.dumps({"realtimeInput": {"text": text_value}}))
-                    elif "mediaChunks" in msg:
-                        chunks = msg["mediaChunks"]
-                        formatted_chunks = []
-                        for c in chunks:
-                            formatted_chunks.append({
-                                "mimeType": c.get("mimeType", "image/jpeg"),
-                                "data": c.get("data", "")
-                            })
+                    elif "video" in msg:
+                        vid = msg["video"]
                         await upstream.send(json.dumps({
                             "realtimeInput": {
-                                "mediaChunks": formatted_chunks
+                                "video": {
+                                    "mimeType": vid.get("mimeType", "image/jpeg"),
+                                    "data": vid.get("data", "")
+                                }
                             }
                         }))
                     elif msg.get("end"):

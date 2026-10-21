@@ -176,7 +176,7 @@ function resample(input, fromRate, toRate) {
   return out;
 }
 
-// Envoi en continu du flux vidéo de la caméra dans Gemini Live (optimisé et stabilisé)
+// Envoi en continu du flux vidéo de la caméra dans Gemini Live (Corrigé au format video compatible)
 function startLiveVision() {
   stopLiveVision();
   const video = $('camera');
@@ -196,12 +196,12 @@ function startLiveVision() {
     if (!base64Image) return;
 
     liveSocket.send(JSON.stringify({
-      mediaChunks: [{
+      video: {
         mimeType: 'image/jpeg',
         data: base64Image
-      }]
+      }
     }));
-  }, 1000);
+  }, 1500); // Cadencé à toutes les 1.5 secondes pour fluidifier et stabiliser la connexion
 }
 
 function stopLiveVision() {

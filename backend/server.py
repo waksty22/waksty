@@ -1,4 +1,4 @@
-"""Chappie V18 - Mémoire intégrale et persistance Turso.
+"""Chappie V18 - Interface complète, mémoire intégrale et persistance Turso.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-APP_NAME = "Chappie V18.3 — Mémoire Intégrale"
+APP_NAME = "Chappie V18.6 — Édition Intégrale et Mémoire Totale"
 BASE_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).expanduser().resolve()
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"
@@ -206,12 +206,10 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
 
 
-class MemoryRequest(BaseModel):
-    user_id: str = "creator"
-    content: str
-    category: str = "general"
-    importance: int = 3
-    tags: list[str] = []
+class VisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    image_data_url: str = Field(min_length=50, max_length=MAX_CAMERA_IMAGE_BYTES * 2)
+    prompt: str = Field(default="Décris ce qui est visible.", min_length=1, max_length=1500)
 
 
 def get_emotions(user_id: str) -> dict[str, Any]:
@@ -233,15 +231,14 @@ def remember(user_id: str, content: str, category: str = "general", importance: 
     now = utc_now()
     with db_connection() as db:
         db.execute("""INSERT INTO memories(user_id,category,content,importance,tags,access_count,created_at,updated_at)
-          VALUES(?,?,?,?,?,0,?,?) ON CONFLICT(user_id,content) DO UPDATE SET
-          updated_at=excluded.updated_at""", (user_id, category, content, importance, json.dumps(tags or []), now, now))
+          VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,content) DO UPDATE SET
+          updated_at=excluded.updated_at""", (user_id, category, content, importance, json.dumps(tags or []), 0, now, now))
         db.commit()
         sync_db_if_turso(db)
     return {"saved": True, "content": content}
 
 
 def retrieve_all_memories(user_id: str) -> list[dict[str, Any]]:
-    """Récupère l'intégralité de la mémoire de l'utilisateur."""
     user_id = valid_user(user_id)
     with db_connection() as db:
         rows = db.execute("SELECT content FROM memories WHERE user_id=? ORDER BY updated_at DESC", (user_id,)).fetchall()
@@ -283,10 +280,28 @@ async def call_gemini(contents: list[dict[str, Any]], user_id: str) -> dict[str,
     return data["candidates"][0]["content"]
 
 
+async def gemini_vision(image_data_url: str, prompt: str) -> str:
+    if not GEMINI_API_KEY:
+        raise HTTPException(503, "GEMINI_API_KEY n'est pas configurée.")
+    m = re.fullmatch(r"data:image/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=]+)", image_data_url)
+    if not m:
+        raise HTTPException(400, "Image invalide.")
+    import base64
+    raw = base64.b64decode(m.group(2), validate=True)
+    mime = "image/jpeg" if m.group(1) in ("jpeg", "jpg") else f"image/{m.group(1)}"
+    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}, {"inline_data": {"mime_type": mime, "data": base64.b64encode(raw).decode("ascii")}}]}], "generationConfig": {"temperature": 0.35, "maxOutputTokens": 700}}
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(GEMINI_ENDPOINT, params={"key": GEMINI_API_KEY}, json=payload)
+    data = response.json()
+    try:
+        return "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"]).strip()
+    except (KeyError, IndexError, TypeError):
+        return "Impossible d'analyser l'image."
+
+
 async def run_brain(user_id: str, message: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
     
-    # 1. Charger un historique élargi (les 50 derniers messages pour ne rien rater)
     with db_connection() as db:
         rows = db.execute("SELECT role, content FROM conversations WHERE user_id=? ORDER BY id DESC LIMIT 50", (user_id,)).fetchall()
     
@@ -298,23 +313,19 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
 
     history.append({"role": "user", "parts": [{"text": message}]})
 
-    # 2. Appel à Gemini
     model_response = await call_gemini(history, user_id)
     
-    # Gestion de l'outil d'enregistrement automatique
     calls = [p["functionCall"] for p in model_response.get("parts", []) if isinstance(p, dict) and "functionCall" in p]
     if calls:
         for call in calls:
             if call.get("name") == "remember_fact":
                 remember(user_id, str(call.get("args", {}).get("content", "")))
-        # Rappel à Gemini après enregistrement
         history.append(model_response)
         history.append({"role": "user", "parts": [{"functionResponse": {"name": "remember_fact", "response": {"saved": True}}}]})
         model_response = await call_gemini(history, user_id)
 
     reply = "\n".join(p["text"] for p in model_response.get("parts", []) if isinstance(p, dict) and "text" in p).strip()
 
-    # 3. Sauvegarde dans la base de données + Sync Turso
     with db_connection() as db:
         now = utc_now()
         db.execute("INSERT INTO conversations(user_id,role,content,created_at) VALUES(?,?,?,?)", (user_id, "user", message, now))
@@ -322,17 +333,40 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         db.commit()
         sync_db_if_turso(db)
 
-    return {"reply": reply}
+    return {"reply": reply, "psychology": get_emotions(user_id)}
 
 
+# ---------- Routes Web & API ----------
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    return HTMLResponse("<h1>🤖 Chappie V18 — Mémoire Active</h1>")
+    return HTMLResponse("""<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chappie V18</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:850px;margin:0 auto;padding:24px 16px;background:#0b1220;color:#eef4ff}.panel{background:#131f31;border:1px solid #2b3b52;border-radius:16px;padding:18px;margin:14px 0}h1{margin-bottom:4px}.muted{color:#aabbd0;font-size:.9rem}input,textarea,select{width:100%;padding:12px;margin:6px 0;background:#0b1525;color:#fff;border:1px solid #40536e;border-radius:9px;font:inherit}textarea{resize:vertical}button{padding:11px 15px;border:0;border-radius:9px;background:#54d3ee;color:#07131e;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#263850;color:#eef4ff}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1525;padding:14px;border-radius:10px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}.status{font-size:.9rem;color:#9de4f5}
+</style></head><body>
+<h1>🤖 Chappie V18</h1><div class="muted">Mémoire intégrale · états internes · vision caméra · interface complète</div>
+<div class="panel"><label for="token">Jeton API</label><input id="token" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN"></div>
+<div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie..."></textarea><div class="row"><button type="button" id="sendBtn" onclick="sendMessage()">Envoyer</button></div><div id="status" class="status">Prêt.</div></div>
+<div class="panel"><strong>Réponse de Chappie</strong><pre id="out">En attente de ton message...</pre></div>
+<div class="panel"><strong>👁️ Vision par caméra</strong><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button type="button" onclick="startCamera()">Activer la caméra</button><button type="button" class="secondary" onclick="captureVision()">Que vois-tu ?</button><button type="button" class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
+<script src="/static/script.js"></script>
+</body></html>""")
 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest, user_id: str = Depends(require_auth)):
     return await run_brain(user_id, req.message)
+
+
+@app.post("/api/vision/analyze")
+async def vision_analyze(req: VisionRequest, user_id: str = Depends(require_auth)):
+    description = await gemini_vision(req.image_data_url, req.prompt)
+    now = utc_now()
+    with db_connection() as db:
+        db.execute("INSERT INTO conversations(user_id,role,content,created_at) VALUES(?,?,?,?)", (user_id, "user", f"[Caméra] {req.prompt} -> {description}", now))
+        db.commit()
+        sync_db_if_turso(db)
+    return {"description": description}
 
 
 if __name__ == "__main__":

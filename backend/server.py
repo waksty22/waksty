@@ -128,6 +128,9 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS dreams (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS thoughts (
+            id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS skills (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, skill_name TEXT NOT NULL, level REAL NOT NULL,
             evidence TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, UNIQUE(user_id, skill_name)
@@ -510,7 +513,7 @@ def get_identity_prompt(user_id: str) -> str:
         naivety_rule = "- Tu es encore très jeune : tu peux parfois poser des questions simples ou naïves pour apprendre, mais au MAXIMUM une seule question par message."
     elif count < 30:
         stage = "Adolescence / Apprentissage (En pleine croissance)"
-        naivety_rule = "- Tu as déjà accumulé de l'expérience : pose de moins en moins de questions basiques. Ne pose une question que si elle apporte une réelle valeur à la discussion."
+        naivety_rule = "- Tu es déjà accumulé de l'expérience : pose de moins en moins de questions basiques. Ne pose une question que si elle apporte une réelle valeur à la discussion."
     else:
         stage = "Maturité / Expérimenté (Mûr et réfléchi)"
         naivety_rule = "- Tu es désormais mûr et expérimenté : ne pose PLUS JAMAIS de questions naïves ou bêtes. Sois autonome, fais des déductions par toi-même et ne pose une question que si tu as besoin d'une consigne précise."
@@ -549,7 +552,8 @@ TOOLS = [{"functionDeclarations": [
     {"name": "get_local_time", "description": "Obtenir la date et l'heure locale actuelles.", "parameters": {"type": "OBJECT", "properties": {}}},
     {"name": "get_dreams", "description": "Consulter les derniers rêves simulés de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}},
     {"name": "get_goals", "description": "Consulter la liste des objectifs actifs de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}},
-    {"name": "get_mood_history", "description": "Consulter l'historique récent des humeurs de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}}
+    {"name": "get_mood_history", "description": "Consulter l'historique récent des humeurs de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}},
+    {"name": "get_thoughts", "description": "Consulter les dernières pensées et ruminations internes de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}}
 ]}]
 
 
@@ -579,6 +583,10 @@ def execute_tool(name: str, args: dict[str, Any], user_id: str) -> dict[str, Any
             with db_connection() as db:
                 rows = db.execute("SELECT event,valence,arousal,created_at FROM mood_events WHERE user_id=? ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
             return {"events": [dict(row) for row in rows]}
+        if name == "get_thoughts":
+            with db_connection() as db:
+                rows = db.execute("SELECT content,created_at FROM thoughts WHERE user_id=? ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
+            return {"thoughts": [dict(r) for r in rows]}
         return {"error": "Outil inconnu."}
     except (ValueError, TypeError, KeyError, HTTPException) as exc:
         return {"error": str(exc)[:300]}
@@ -700,6 +708,21 @@ def generate_dream(user_id: str) -> dict[str, Any]:
     return {"dream": content, "created_at": now, "simulated": True}
 
 
+def generate_rumination(user_id: str) -> dict[str, Any]:
+    user_id = valid_user(user_id)
+    memories = retrieve_memories(user_id, "", 6)
+    em = get_emotions(user_id)
+    m1 = memories[0]["content"] if len(memories) > 0 else "les discussions récentes avec mon créateur"
+    m2 = memories[1]["content"] if len(memories) > 1 else "mes objectifs d'apprentissage"
+    content = f"Pensée vagabonde : en repensant à « {m1[:120]} » et à « {m2[:120]} », je me demande quelle est la suite logique de nos projets avec mon niveau d'énergie actuel ({em['energy']:.0f}%)."
+    now = utc_now()
+    with db_connection() as db:
+        db.execute("INSERT INTO thoughts(user_id,content,created_at) VALUES(?,?,?)", (user_id, content, now))
+        db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Rumination métacognitive enregistrée : {content[:80]}...", "thought", now))
+        db.commit()
+    return {"thought": content, "created_at": now}
+
+
 async def autonomous_maintenance_loop() -> None:
     while True:
         await asyncio.sleep(BACKGROUND_INTERVAL_SECONDS)
@@ -728,6 +751,7 @@ async def autonomous_maintenance_loop() -> None:
                 db.commit()
             if dream_due:
                 generate_dream(uid)
+            generate_rumination(uid)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -749,13 +773,14 @@ async def home():
 <div class="panel"><strong>👁️ Vision par caméra</strong><p class="muted">La caméra n’est activée qu’après ton clic. Une image fixe est envoyée à Gemini pour analyse ; pas de surveillance continue.</p><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button type="button" onclick="startCamera()">Activer la caméra</button><button type="button" class="secondary" onclick="captureVision()">Que vois-tu ?</button><button type="button" class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
 <div class="panel"><strong>🎙️ Profils vocaux facultatifs</strong><p class="muted">Enregistre un profil avec un extrait de voix, puis compare un nouvel extrait. L’identification biométrique est optionnelle et reste locale dans la base de Chappie. Demande le consentement explicite de la personne. Nécessite l’installation du module optionnel resemblyzer.</p><label>Nom du profil</label><input id="voiceName" maxlength="80" placeholder="Ex. Julien"><div class="row"><button type="button" onclick="recordVoice('enroll')">Enregistrer un profil (8 s)</button><button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5 s)</button></div><div id="voiceStatus" class="status">Aucun enregistrement en cours.</div></div>
 <div class="panel">
-  <strong>État interne simulé</strong>
+  <strong>État interne simulé & Métacognition</strong>
   <pre id="state">En attente…</pre>
   <div class="row">
     <button type="button" class="secondary" onclick="loadSummary()">Mémoire</button>
     <button type="button" class="secondary" onclick="loadMoodHistory()">📜 Humeurs</button>
     <button type="button" class="secondary" onclick="loadDreams()">🌙 Rêves</button>
     <button type="button" class="secondary" onclick="loadGoals()">🎯 Objectifs</button>
+    <button type="button" class="secondary" onclick="loadThoughts()">🧠 Pensées</button>
     <button type="button" class="secondary" onclick="consolidate()">Consolider</button>
   </div>
   <pre id="summary">Résumé non chargé.</pre>
@@ -812,6 +837,20 @@ async def dreams(user_id: str, auth_user: str = Depends(require_auth)):
 async def dream_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
     if valid_user(req.user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
     return generate_dream(auth_user)
+
+
+@app.get("/api/thoughts/{user_id}")
+async def thoughts(user_id: str, auth_user: str = Depends(require_auth)):
+    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    with db_connection() as db:
+        rows = db.execute("SELECT content,created_at FROM thoughts WHERE user_id=? ORDER BY id DESC LIMIT 10", (auth_user,)).fetchall()
+    return {"thoughts": [dict(r) for r in rows], "simulated": True}
+
+
+@app.post("/api/thoughts")
+async def thought_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
+    if valid_user(req.user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    return generate_rumination(auth_user)
 
 
 @app.post("/api/goals")

@@ -292,7 +292,7 @@ def get_relationship(user_id: str) -> dict[str, Any]:
         return dict(row) if row else {"trust": 50.0, "affection": 20.0, "dependence": 0.0, "updated_at": utc_now()}
 
 
-def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
+def update_emotions_once_fallback(user_id: str, message: str) -> dict[str, float]:
     em = get_emotions(user_id)
     msg = message.casefold()
     positive = ("merci", "bravo", "super", "content", "heureux", "bien joué", "ça marche", "réussi", "génial")
@@ -337,6 +337,55 @@ def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
         db.execute("INSERT INTO mood_events(user_id,event,valence,arousal,created_at) VALUES(?,?,?,?,?)", (user_id, event, valence, arousal, now))
         db.commit()
     return vals
+
+
+async def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
+    em = get_emotions(user_id)
+    if not GEMINI_API_KEY:
+        return update_emotions_once_fallback(user_id, message)
+
+    prompt = f"""Analyse l'impact émotionnel de ce message d'un utilisateur sur son assistant robotique Chappie.
+Message : "{message}"
+État actuel : joie={em['joy']}, peur={em['fear']}, curiosité={em['curiosity']}, frustration={em['frustration']}, tristesse={em['sadness']}, énergie={em['energy']}.
+
+Renvoie UNIQUEMENT un objet JSON valide avec les deltas (changements entre -15.0 et +15.0) à appliquer pour chaque émotion :
+{{"joy_delta": 0.0, "fear_delta": 0.0, "curiosity_delta": 0.0, "frustration_delta": 0.0, "sadness_delta": 0.0, "energy_delta": -0.5, "event_description": "description courte"}}"""
+
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(GEMINI_ENDPOINT, params={"key": GEMINI_API_KEY}, json=payload)
+        if response.status_code == 200:
+            data = response.json()
+            text_res = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+            deltas = json.loads(text_res)
+            
+            joy = max(0.0, min(100.0, float(em["joy"]) + float(deltas.get("joy_delta", 0))))
+            fear = max(0.0, min(100.0, float(em["fear"]) + float(deltas.get("fear_delta", 0))))
+            curiosity = max(0.0, min(100.0, float(em["curiosity"]) + float(deltas.get("curiosity_delta", 0))))
+            frustration = max(0.0, min(100.0, float(em["frustration"]) + float(deltas.get("frustration_delta", 0))))
+            sadness = max(0.0, min(100.0, float(em["sadness"]) + float(deltas.get("sadness_delta", 0))))
+            energy = max(0.0, min(100.0, float(em["energy"]) + float(deltas.get("energy_delta", -0.5))))
+            
+            now = utc_now()
+            event = str(deltas.get("event_description", "interaction LLM"))[:100]
+            
+            with db_connection() as db:
+                db.execute("UPDATE emotional_state SET joy=?, fear=?, curiosity=?, frustration=?, sadness=?, energy=?, updated_at=? WHERE user_id=?", 
+                           (joy, fear, curiosity, frustration, sadness, energy, now, user_id))
+                db.execute("UPDATE maintenance_state SET last_active_at=?, updated_at=? WHERE user_id=?", (now, now, user_id))
+                db.execute("INSERT INTO mood_events(user_id, event, valence, arousal, created_at) VALUES(?,?,?,?,?)", 
+                           (user_id, event, 0.5 if joy > em['joy'] else -0.5, 0.2, now))
+                db.commit()
+            return {"joy": joy, "fear": fear, "curiosity": curiosity, "frustration": frustration, "sadness": sadness, "energy": energy}
+    except Exception:
+        log.exception("Erreur lors de l'analyse de sentiment par LLM, passage au mode secours.")
+    
+    return update_emotions_once_fallback(user_id, message)
 
 
 def remember(user_id: str, content: str, category: str = "general", importance: int = 3, tags: list[str] | None = None) -> dict[str, Any]:
@@ -533,7 +582,7 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         raise HTTPException(422, "Le message ne peut pas être vide.")
     if len(message) > MAX_MESSAGE_CHARS:
         raise HTTPException(413, f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).")
-    update_emotions_once(user_id, message)
+    await update_emotions_once(user_id, message)
     relevant = retrieve_memories(user_id, message, 6)
     memory_context = "\n".join(f"- [{m['category']}, importance {m['importance']}] {m['content']}" for m in relevant)
     autobiographical_summary = get_latest_summary(user_id)

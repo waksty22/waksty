@@ -14,6 +14,53 @@ function setStatus(s) {
   $('status').textContent = s;
 }
 
+// --- Rendu visuel du tableau de bord émotionnel ---
+function renderEmotionsDashboard(psy) {
+  const container = $('state');
+  if (!container || !psy) return;
+
+  // Si l'élément est une balise PRE, on la convertit en conteneur stylé
+  if (container.tagName === 'PRE') {
+    const div = document.createElement('div');
+    div.id = 'state';
+    container.parentNode.replaceChild(div, container);
+  }
+
+  const stateEl = $('state');
+  const metrics = [
+    { label: '⚡ Énergie', key: 'energy', color: '#10b981' },
+    { label: '😊 Joie', key: 'joy', color: '#f59e0b' },
+    { label: '🧐 Curiosité', key: 'curiosity', color: '#3b82f6' },
+    { label: '😰 Peur / Inquiétude', key: 'fear', color: '#ef4444' },
+    { label: '😤 Frustration', key: 'frustration', color: '#8b5cf6' },
+    { label: '😢 Tristesse', key: 'sadness', color: '#64748b' }
+  ];
+
+  let html = '<div style="display: flex; flex-direction: column; gap: 10px; background: #0b1525; padding: 14px; border-radius: 10px;">';
+  
+  metrics.forEach(m => {
+    const val = Math.max(0, Math.min(100, Math.round(psy[m.key] ?? 50)));
+    let barColor = m.color;
+    // Ajustement dynamique des couleurs selon les seuils critiques
+    if (m.key === 'energy' && val < 25) barColor = '#ef4444'; // Rouge si très fatigué
+
+    html += `
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #aabbd0;">
+          <span>${m.label}</span>
+          <span style="font-weight: bold; color: #fff;">${val}%</span>
+        </div>
+        <div style="width: 100%; background: #131f31; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #2b3b52;">
+          <div style="width: ${val}%; background: ${barColor}; height: 100%; transition: width 0.5s ease-in-out;"></div>
+        </div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  stateEl.innerHTML = html;
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   setStatus('Interface chargée. Jeton requis pour les fonctions protégées.');
   console.info('Chappie interface prête');
@@ -38,7 +85,9 @@ async function sendMessage() {
     if (!r.ok) throw new Error(d.detail || 'Erreur API');
     
     $('out').textContent = d.reply;
-    $('state').textContent = JSON.stringify(d.psychology, null, 2);
+    if (d.psychology) {
+      renderEmotionsDashboard(d.psychology);
+    }
     $('msg').value = '';
     setStatus('Réponse reçue.');
     await speak(d.reply);
@@ -176,7 +225,7 @@ function resample(input, fromRate, toRate) {
   return out;
 }
 
-// Envoi en continu du flux vidéo de la caméra dans Gemini Live (Corrigé au format video compatible)
+// Envoi en continu du flux vidéo de la caméra dans Gemini Live
 function startLiveVision() {
   stopLiveVision();
   const video = $('camera');
@@ -201,7 +250,7 @@ function startLiveVision() {
         data: base64Image
       }
     }));
-  }, 1500); // Cadencé à toutes les 1.5 secondes pour fluidifier et stabiliser la connexion
+  }, 1500); // Cadencé à toutes les 1.5 secondes
 }
 
 function stopLiveVision() {
@@ -238,7 +287,6 @@ async function toggleLive() {
       liveSource.connect(liveProcessor);
       liveProcessor.connect(liveCtx.destination);
 
-      // Si la caméra est active, lancer le flux visuel en direct
       if (cameraStream) {
         startLiveVision();
       }
@@ -310,7 +358,6 @@ async function startCamera() {
     $('camera').srcObject = cameraStream;
     $('visionOut').textContent = 'Caméra active. Chappie peut vous observer en direct si Gemini Live est lancé.';
     
-    // Si Gemini Live est déjà en cours, démarrer la vision continue immédiatement
     if (liveActive && liveSocket) {
       startLiveVision();
     }
@@ -404,8 +451,7 @@ async function captureVision() {
 
     $('out').textContent = chatData.reply;
     if (chatData.psychology) {
-      $('state').textContent =
-        JSON.stringify(chatData.psychology, null, 2);
+      renderEmotionsDashboard(chatData.psychology);
     }
 
     setStatus('Image analysée et réponse de Chappie reçue.');
@@ -504,7 +550,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// --- Exposer globalement les fonctions pour le HTML (onclick) ---
+// --- Exposer globalement les fonctions pour le HTML ---
 window.sendMessage = sendMessage;
 window.stopSpeech = stopSpeech;
 window.toggleMic = toggleMic;

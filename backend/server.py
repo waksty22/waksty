@@ -350,7 +350,7 @@ def remember(user_id: str, content: str, category: str = "general", importance: 
     now = utc_now()
     with db_connection() as db:
         db.execute("""INSERT INTO memories(user_id,category,content,importance,tags,access_count,created_at,updated_at)
-          VALUES(?,?,?,?,?,0,?,?) ON CONFLICT(user_id,content) DO UPDATE SET
+          VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,content) DO UPDATE SET
           category=excluded.category, importance=MAX(memories.importance,excluded.importance),
           tags=excluded.tags, updated_at=excluded.updated_at""", (user_id, category.strip()[:60], content, importance, tags_json, now, now))
         row = db.execute("SELECT id FROM memories WHERE user_id=? AND content=?", (user_id, content)).fetchone()

@@ -286,6 +286,30 @@ async function loadThoughts() {
   }
 }
 
+// --- Chargement de l'Arbre de Compétences (Axe 4) ---
+async function loadSkills() {
+  try {
+    const r = await fetch('/api/skills/creator', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.skills) {
+      if (d.skills.length === 0) {
+        $('summary').textContent = 'Aucune compétence enregistrée pour le moment.';
+        return;
+      }
+      let text = "🎓 Arbre de Compétences de Chappie (Piliers d'apprentissage) :\n\n";
+      d.skills.forEach(s => {
+        const percent = Math.min(100, Math.round((s.xp % 100)));
+        text += `🔹 ${s.evidence || s.skill_name} : Niveau ${Math.round(s.level)} (XP: ${Math.round(s.xp)} - ${percent}% niv suivant)\n`;
+      });
+      $('summary').textContent = text;
+    } else {
+      $('summary').textContent = 'Impossible de charger les compétences.';
+    }
+  } catch (e) {
+    $('summary').textContent = 'Erreur de chargement des compétences : ' + e.message;
+  }
+}
+
 // --- Chargement des objectifs actifs (Étape 4) ---
 async function loadGoals() {
   try {
@@ -708,6 +732,7 @@ window.loadSummary = loadSummary;
 window.loadMoodHistory = loadMoodHistory;
 window.loadDreams = loadDreams;
 window.loadThoughts = loadThoughts;
+window.loadSkills = loadSkills;
 window.loadGoals = loadGoals;
 window.consolidate = consolidate;
 window.toggleLive = toggleLive;

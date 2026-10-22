@@ -728,7 +728,16 @@ async def home():
 <div class="panel"><strong>🗣️ Conversation vocale en temps réel</strong><p class="muted">Audio en continu via Gemini Live. Tu peux parler pendant que Chappie répond ; le navigateur doit autoriser le micro.</p><div class="row"><button type="button" id="liveBtn" onclick="toggleLive()">▶ Démarrer la conversation live</button><button type="button" class="secondary" onclick="stopLive()">■ Arrêter</button></div><div id="liveStatus" class="status">Session non démarrée.</div></div>
 <div class="panel"><strong>👁️ Vision par caméra</strong><p class="muted">La caméra n’est activée qu’après ton clic. Une image fixe est envoyée à Gemini pour analyse ; pas de surveillance continue.</p><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button type="button" onclick="startCamera()">Activer la caméra</button><button type="button" class="secondary" onclick="captureVision()">Que vois-tu ?</button><button type="button" class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
 <div class="panel"><strong>🎙️ Profils vocaux facultatifs</strong><p class="muted">Enregistre un profil avec un extrait de voix, puis compare un nouvel extrait. L’identification biométrique est optionnelle et reste locale dans la base de Chappie. Demande le consentement explicite de la personne. Nécessite l’installation du module optionnel resemblyzer.</p><label>Nom du profil</label><input id="voiceName" maxlength="80" placeholder="Ex. Julien"><div class="row"><button type="button" onclick="recordVoice('enroll')">Enregistrer un profil (8 s)</button><button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5 s)</button></div><div id="voiceStatus" class="status">Aucun enregistrement en cours.</div></div>
-<div class="panel"><strong>État interne simulé</strong><pre id="state">En attente…</pre><div class="row"><button type="button" class="secondary" onclick="loadSummary()">Voir sa mémoire autobiographique</button><button type="button" class="secondary" onclick="consolidate()">Consolider les souvenirs</button></div><pre id="summary">Résumé non chargé.</pre></div>
+<div class="panel">
+  <strong>État interne simulé</strong>
+  <pre id="state">En attente…</pre>
+  <div class="row">
+    <button type="button" class="secondary" onclick="loadSummary()">Voir sa mémoire autobiographique</button>
+    <button type="button" class="secondary" onclick="loadMoodHistory()">📜 Historique des humeurs</button>
+    <button type="button" class="secondary" onclick="consolidate()">Consolider les souvenirs</button>
+  </div>
+  <pre id="summary">Résumé non chargé.</pre>
+</div>
 <script src="/static/script.js"></script>
 </body></html>""")
 

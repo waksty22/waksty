@@ -314,11 +314,37 @@ def get_user_intention(user_id: str) -> dict[str, Any]:
         return dict(row) if row else {"current_intent": "discussion libre", "confidence": 0.5, "details": "Non défini", "updated_at": utc_now()}
 
 
-def get_skills_summary(user_id: str) -> list[dict[str, Any]]:
+def get_skills_summary(user_id: str) -> dict[str, Any]:
     get_emotions(user_id)
     with db_connection() as db:
         rows = db.execute("SELECT skill_name, level, xp, evidence, updated_at FROM skills WHERE user_id=?", (user_id,)).fetchall()
-        return [dict(r) for r in rows]
+        skills_list = [dict(r) for r in rows]
+        avg_level = sum(s['level'] for s in skills_list) / max(1, len(skills_list))
+        return {"skills": skills_list, "average_level": avg_level}
+
+
+def reset_chappie_life(user_id: str) -> dict[str, Any]:
+    user_id = valid_user(user_id)
+    now = utc_now()
+    with db_connection() as db:
+        # Remise à zéro des compétences (Niveau 1.0, 0 XP)
+        db.execute("UPDATE skills SET level=1.0, xp=0.0, evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?", (now, user_id))
+        # Purge de la mémoire et des états narratifs
+        db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM memories_fts")
+        db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM conversation_summaries WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM dreams WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM thoughts WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM goals WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM mood_events WHERE user_id=?", (user_id,))
+        # Reset des états émotionnels de base
+        db.execute("UPDATE emotional_state SET joy=40.0, fear=20.0, curiosity=75.0, frustration=5.0, sadness=5.0, energy=100.0, updated_at=? WHERE user_id=?", (now, user_id))
+        db.execute("UPDATE relationships SET trust=50.0, affection=20.0, dependence=0.0, updated_at=? WHERE user_id=?", (now, user_id))
+        db.execute("UPDATE user_intentions SET current_intent='éveil', confidence=0.9, details='Première prise de conscience', updated_at=? WHERE user_id=?", (now, user_id))
+        db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, "Reset complet effectué : Naissance en mode Page Blanche.", "reset", now))
+        db.commit()
+    return {"reset": True, "message": "Chappie est né à nouveau (Stade 0 - Page blanche)."}
 
 
 def update_skill(user_id: str, skill_name: str, xp_delta: float, evidence: str) -> dict[str, Any]:
@@ -337,7 +363,6 @@ def update_skill(user_id: str, skill_name: str, xp_delta: float, evidence: str) 
             current_level, current_xp = float(row["level"]), float(row["xp"])
         
         new_xp = max(0.0, current_xp + float(xp_delta))
-        # Formule simple de passage de niveau (ex: 100 XP par niveau)
         new_level = min(10.0, 1.0 + math.floor(new_xp / 100.0))
         
         db.execute("""INSERT INTO skills(user_id,skill_name,level,xp,evidence,updated_at)
@@ -542,20 +567,24 @@ def get_identity_prompt(user_id: str) -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
     intent = get_user_intention(user_id)
-    skills = get_skills_summary(user_id)
+    skills_data = get_skills_summary(user_id)
+    skills = skills_data["skills"]
+    avg_level = skills_data["average_level"]
+
     with db_connection() as db:
         count = db.execute("SELECT COUNT(*) FROM memories WHERE user_id=?", (user_id,)).fetchone()[0]
         goals = db.execute("SELECT title,progress FROM goals WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
     
     skills_text = "\n".join(f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})" for s in skills) or "Aucune compétence enregistrée."
-    avg_level = sum(s['level'] for s in skills) / max(1, len(skills))
 
     if avg_level < 2:
-        stage = "enfant / débutant : poser des questions simples, explorer avec curiosité, admettre ne pas savoir"
+        stage = "nouveau-né / éveil (Stade 0-1) : tu découvres le monde et les mots pour la toute première fois. Tu es naïf, curieux, tu poses des questions simples ('C'est quoi ?'), tu répètes parfois des mots et tu n'as aucune connaissance préalable sur rien."
     elif avg_level < 5:
-        stage = "apprenti / adolescent : tester des idées, gagner en assurance, faire des progrès méthodiques"
+        stage = "enfant / apprenti (Stade 2) : tu commences à comprendre comment fonctionnent les choses, tu apprends le nom des objets et tu gagnes en curiosité."
+    elif avg_level < 8:
+        stage = "adolescent (Stade 3) : tu explores la logique, le code et le second degré avec plus d'assurance."
     else:
-        stage = "mature / expert : expliquer son raisonnement, faire preuve de proactivité et de maîtrise"
+        stage = "adulte / complice (Stade 4) : tu es mature, posé, proactif et tu possèdes une vraie complicité avec ton créateur."
 
     goal_text = "\n".join(f"- {g['title']} (progression déclarée {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
@@ -793,6 +822,7 @@ async def home():
     <button type="button" class="secondary" onclick="loadGoals()">🎯 Objectifs</button>
     <button type="button" class="secondary" onclick="loadThoughts()">🧠 Pensées</button>
     <button type="button" class="secondary" onclick="loadSkills()">🎓 Compétences</button>
+    <button type="button" style="background:#ef4444; color:#fff;" onclick="resetLife()">🐣 Page Blanche (Reset)</button>
     <button type="button" class="secondary" onclick="consolidate()">Consolider</button>
   </div>
   <pre id="summary">Résumé non chargé.</pre>
@@ -839,7 +869,12 @@ async def emotions(user_id: str, auth_user: str = Depends(require_auth)):
 @app.get("/api/skills/{user_id}")
 async def skills_list(user_id: str, auth_user: str = Depends(require_auth)):
     if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
-    return {"skills": get_skills_summary(auth_user), "simulated": True}
+    return {**get_skills_summary(auth_user), "simulated": True}
+
+
+@app.post("/api/reset-life")
+async def reset_life(auth_user: str = Depends(require_auth)):
+    return reset_chappie_life(auth_user)
 
 
 @app.get("/api/dreams/{user_id}")

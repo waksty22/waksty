@@ -70,7 +70,9 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
   stateEl.innerHTML = html;
 }
 
-// --- Polling dynamique pour rafraîchir le tableau de bord émotionnel et les événements ---
+// --- Polling dynamique allégé pour stopper les erreurs 429 ---
+let psychologyInterval = null;
+
 async function fetchPsychology() {
   const tokenField = $('token');
   const token = tokenField ? tokenField.value.trim() : '';
@@ -80,25 +82,14 @@ async function fetchPsychology() {
     const r = await fetch('/api/emotions/creator', { headers: headers() });
     if (r.ok) {
       const d = await r.json();
-      
-      let lastEvent = null;
-      try {
-        const moodRes = await fetch('/api/mood/history?limit=1', { headers: headers() });
-        if (moodRes.ok) {
-          const moodData = await moodRes.json();
-          if (moodData.events && moodData.events.length > 0) {
-            lastEvent = moodData.events[0].event;
-          }
-        }
-      } catch (e) {}
-
-      if (d.psychology) renderEmotionsDashboard(d.psychology, lastEvent);
+      if (d.psychology) renderEmotionsDashboard(d.psychology);
     }
   } catch (e) {}
 }
 
-// Intervalle ajusté à 20 secondes pour éviter le spam et les erreurs 429
-setInterval(fetchPsychology, 20000);
+// Intervalle espacé à 30 secondes et sécurisé contre les doublons
+if (psychologyInterval) clearInterval(psychologyInterval);
+psychologyInterval = setInterval(fetchPsychology, 30000);
 
 window.addEventListener('DOMContentLoaded', () => {
   setStatus('Interface chargée. Jeton requis pour les fonctions protégées.');

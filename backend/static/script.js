@@ -70,7 +70,7 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
   stateEl.innerHTML = html;
 }
 
-// --- Polling dynamique allégé pour stopper les erreurs 429 ---
+// --- Polling unique et espacé pour le tableau de bord (toutes les 30 secondes) ---
 let psychologyInterval = null;
 
 async function fetchPsychology() {
@@ -87,7 +87,6 @@ async function fetchPsychology() {
   } catch (e) {}
 }
 
-// Intervalle espacé à 30 secondes et sécurisé contre les doublons
 if (psychologyInterval) clearInterval(psychologyInterval);
 psychologyInterval = setInterval(fetchPsychology, 30000);
 
@@ -117,7 +116,6 @@ async function sendMessage() {
     $('out').textContent = d.reply;
     if (d.psychology) {
       renderEmotionsDashboard(d.psychology);
-      fetchPsychology();
     }
     $('msg').value = '';
     setStatus('Réponse reçue.');
@@ -521,8 +519,6 @@ async function toggleLive() {
 
       if (d.psychology) {
         renderEmotionsDashboard(d.psychology);
-      } else {
-        fetchPsychology();
       }
     };
     
@@ -665,7 +661,6 @@ async function captureVision() {
     $('out').textContent = chatData.reply;
     if (chatData.psychology) {
       renderEmotionsDashboard(chatData.psychology);
-      fetchPsychology();
     }
 
     setStatus('Image analysée et réponse de Chappie reçue.');

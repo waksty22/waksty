@@ -510,7 +510,10 @@ async function toggleLive() {
         liveAudioSources.clear();
         liveNextTime = liveCtx ? liveCtx.currentTime : 0;
       }
-      if (d.text) { $('out').textContent += ('\nChappie : ' + d.text); }
+      if (d.text) { 
+        // Affichage propre actualisé pour éviter l'accumulation en cascade
+        $('out').textContent = 'Chappie : ' + d.text; 
+      }
       if (d.audio) { 
         let maturityLevel = d.maturity_level || 1.0;
         playLiveAudio(d.audio, d.sample_rate || 24000, maturityLevel); 
@@ -533,7 +536,7 @@ async function toggleLive() {
   }
 }
 
-// --- Lecture Audio Live corrigée, stabilisée et sécurisée ---
+// --- Lecture Audio Live anti-saccades et stabilisée ---
 function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
   if (!liveCtx) return;
   
@@ -561,8 +564,11 @@ function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
     liveAudioSources.add(src);
     src.onended = () => liveAudioSources.delete(src);
 
+    // Synchronisation anti-saccades robuste
     const now = liveCtx.currentTime;
-    liveNextTime = Math.max(liveNextTime, now + 0.04);
+    if (liveNextTime < now) {
+      liveNextTime = now + 0.05;
+    }
     src.start(liveNextTime);
     liveNextTime += buf.duration;
   } catch (e) {
@@ -659,7 +665,7 @@ async function captureVision() {
       headers: headers(),
       body: JSON.stringify({
         user_id: 'creator',
-        message: 'Tu viens d’analyser une image avec ta caméra. Voici la description obtenue :\n' + description + '\nRéagis خالصement à ce que tu observes et explique-moi ce que tu en comprends.'
+        message: 'Tu viens d’analyser une image avec ta caméra. Voici la description obtenue :\n' + description + '\nRéagis naturellement à ce que tu observes et explique-moi ce que tu en comprends.'
       })
     });
 

@@ -546,7 +546,10 @@ Règles de comportement et de curiosité :
 TOOLS = [{"functionDeclarations": [
     {"name": "remember_fact", "description": "Enregistrer un fait utile fourni ou confirmé par l'utilisateur.", "parameters": {"type": "OBJECT", "properties": {"content": {"type": "STRING"}, "category": {"type": "STRING"}, "importance": {"type": "INTEGER"}, "tags": {"type": "ARRAY", "items": {"type": "STRING"}}}, "required": ["content"]}},
     {"name": "search_memories", "description": "Rechercher des souvenirs pertinents pour répondre.", "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}}, "required": ["query"]}},
-    {"name": "get_local_time", "description": "Obtenir la date et l'heure locale actuelles.", "parameters": {"type": "OBJECT", "properties": {}}}
+    {"name": "get_local_time", "description": "Obtenir la date et l'heure locale actuelles.", "parameters": {"type": "OBJECT", "properties": {}}},
+    {"name": "get_dreams", "description": "Consulter les derniers rêves simulés de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}},
+    {"name": "get_goals", "description": "Consulter la liste des objectifs actifs de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}},
+    {"name": "get_mood_history", "description": "Consulter l'historique récent des humeurs de Chappie.", "parameters": {"type": "OBJECT", "properties": {}}}
 ]}]
 
 
@@ -559,6 +562,23 @@ def execute_tool(name: str, args: dict[str, Any], user_id: str) -> dict[str, Any
             return {"memories": retrieve_memories(user_id, str(args.get("query", "")), 10)}
         if name == "get_local_time":
             return {"time": local_now(), "timezone": CHAPPIE_TIMEZONE}
+        if name == "get_dreams":
+            with db_connection() as db:
+                rows = db.execute("SELECT content,created_at FROM dreams WHERE user_id=? ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
+            return {"dreams": [dict(r) for r in rows]}
+        if name == "get_goals":
+            with db_connection() as db:
+                goals = db.execute("SELECT * FROM goals WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 10", (user_id,)).fetchall()
+                result = []
+                for goal in goals:
+                    item = dict(goal)
+                    item["steps"] = [dict(s) for s in db.execute("SELECT id,description,status,evidence FROM goal_steps WHERE goal_id=?", (goal["id"],)).fetchall()]
+                    result.append(item)
+            return {"goals": result}
+        if name == "get_mood_history":
+            with db_connection() as db:
+                rows = db.execute("SELECT event,valence,arousal,created_at FROM mood_events WHERE user_id=? ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
+            return {"events": [dict(row) for row in rows]}
         return {"error": "Outil inconnu."}
     except (ValueError, TypeError, KeyError, HTTPException) as exc:
         return {"error": str(exc)[:300]}
@@ -732,9 +752,11 @@ async def home():
   <strong>État interne simulé</strong>
   <pre id="state">En attente…</pre>
   <div class="row">
-    <button type="button" class="secondary" onclick="loadSummary()">Voir sa mémoire autobiographique</button>
-    <button type="button" class="secondary" onclick="loadMoodHistory()">📜 Historique des humeurs</button>
-    <button type="button" class="secondary" onclick="consolidate()">Consolider les souvenirs</button>
+    <button type="button" class="secondary" onclick="loadSummary()">Mémoire</button>
+    <button type="button" class="secondary" onclick="loadMoodHistory()">📜 Humeurs</button>
+    <button type="button" class="secondary" onclick="loadDreams()">🌙 Rêves</button>
+    <button type="button" class="secondary" onclick="loadGoals()">🎯 Objectifs</button>
+    <button type="button" class="secondary" onclick="consolidate()">Consolider</button>
   </div>
   <pre id="summary">Résumé non chargé.</pre>
 </div>

@@ -19,7 +19,7 @@ function renderEmotionsDashboard(psy) {
   const container = $('state');
   if (!container || !psy) return;
 
-  // Si l'élément est une balise PRE, on la convertit en conteneur stylé
+  // Si l'élément est une balise PRE, on le remplace par un conteneur stylé
   if (container.tagName === 'PRE') {
     const div = document.createElement('div');
     div.id = 'state';
@@ -41,8 +41,7 @@ function renderEmotionsDashboard(psy) {
   metrics.forEach(m => {
     const val = Math.max(0, Math.min(100, Math.round(psy[m.key] ?? 50)));
     let barColor = m.color;
-    // Ajustement dynamique des couleurs selon les seuils critiques
-    if (m.key === 'energy' && val < 25) barColor = '#ef4444'; // Rouge si très fatigué
+    if (m.key === 'energy' && val < 25) barColor = '#ef4444';
 
     html += `
       <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -60,6 +59,24 @@ function renderEmotionsDashboard(psy) {
   html += '</div>';
   stateEl.innerHTML = html;
 }
+
+// --- Polling dynamique pour rafraîchir le tableau de bord émotionnel ---
+async function fetchPsychology() {
+  try {
+    const token = $('token') ? $('token').value.trim() : '';
+    if (!token) return;
+    const r = await fetch('/api/emotions/creator', { headers: headers() });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.psychology) renderEmotionsDashboard(d.psychology);
+    }
+  } catch (e) {
+    // Ignorer silencieusement les petites coupures réseau
+  }
+}
+
+// Actualisation automatique toutes les 4 secondes pour que les jauges restent vivantes
+setInterval(fetchPsychology, 4000);
 
 window.addEventListener('DOMContentLoaded', () => {
   setStatus('Interface chargée. Jeton requis pour les fonctions protégées.');
@@ -250,7 +267,7 @@ function startLiveVision() {
         data: base64Image
       }
     }));
-  }, 1500); // Cadencé à toutes les 1.5 secondes
+  }, 1500);
 }
 
 function stopLiveVision() {
@@ -304,6 +321,13 @@ async function toggleLive() {
       if (d.text) { $('out').textContent += ('\nChappie : ' + d.text); }
       if (d.audio) { playLiveAudio(d.audio, d.sample_rate || 24000); }
       if (d.error) { $('liveStatus').textContent = 'Erreur : ' + d.error; }
+
+      // Rafraîchir les barres d'émotions pendant le live
+      if (d.psychology) {
+        renderEmotionsDashboard(d.psychology);
+      } else {
+        fetchPsychology();
+      }
     };
     
     liveSocket.onerror = () => { $('liveStatus').textContent = 'Erreur WebSocket.'; };

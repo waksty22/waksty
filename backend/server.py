@@ -792,9 +792,10 @@ async def autonomous_maintenance_loop() -> None:
 
 @app.get("/script.js")
 async def serve_script():
-    script_path = Path(__file__).resolve().parent / "script.js"
+    # Corrigé pour pointer vers le dossier static/
+    script_path = Path(__file__).resolve().parent / "static" / "script.js"
     if not script_path.is_file():
-        raise HTTPException(503, "script.js est absent du déploiement. Place script.js dans le même dossier que server.py.")
+        raise HTTPException(503, "script.js est absent du déploiement. Place script.js dans le dossier static.")
     return FileResponse(script_path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 

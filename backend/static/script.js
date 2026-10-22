@@ -509,10 +509,16 @@ async function toggleLive() {
         for (const a of liveAudioSources) { try { a.stop(); } catch {} }
         liveAudioSources.clear();
         liveNextTime = liveCtx ? liveCtx.currentTime : 0;
+        $('out').textContent = 'Chappie : ';
       }
       if (d.text) { 
-        // Affichage propre actualisé pour éviter l'accumulation en cascade
-        $('out').textContent = 'Chappie : ' + d.text; 
+        // Accumulation fluide pour afficher toute la phrase ou le paragraphe complet
+        const outEl = $('out');
+        if (outEl.textContent.startsWith('En attente') || outEl.textContent === 'Chappie : ') {
+          outEl.textContent = 'Chappie : ' + d.text;
+        } else {
+          outEl.textContent += d.text;
+        }
       }
       if (d.audio) { 
         let maturityLevel = d.maturity_level || 1.0;
@@ -564,10 +570,10 @@ function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
     liveAudioSources.add(src);
     src.onended = () => liveAudioSources.delete(src);
 
-    // Synchronisation anti-saccades robuste
+    // Synchronisation anti-saccades robuste augmentée à 0.12s
     const now = liveCtx.currentTime;
     if (liveNextTime < now) {
-      liveNextTime = now + 0.05;
+      liveNextTime = now + 0.12;
     }
     src.start(liveNextTime);
     liveNextTime += buf.duration;

@@ -283,7 +283,6 @@ def get_emotions(user_id: str) -> dict[str, Any]:
         db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?,?)", (user_id, 50.0, 20.0, 0.0, now))
         db.execute("INSERT OR IGNORE INTO user_intentions VALUES(?,?,?,?,?)", (user_id, "discussion libre", 0.5, "Premiers échanges", now))
         
-        # Initialisation des 6 piliers de compétences (Axe 4)
         default_skills = [
             ("tete", "🧠 La Tête (Réflexion & Calme)"),
             ("mots", "🗣️ Les Mots (Vocabulaire & Second degré)"),
@@ -327,9 +326,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
     now = utc_now()
     with db_connection() as db:
-        # Remise à zéro des compétences (Niveau 1.0, 0 XP)
         db.execute("UPDATE skills SET level=1.0, xp=0.0, evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?", (now, user_id))
-        # Purge de la mémoire et des états narratifs
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM memories_fts")
         db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
@@ -338,7 +335,6 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM thoughts WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM goals WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM mood_events WHERE user_id=?", (user_id,))
-        # Reset des états émotionnels de base
         db.execute("UPDATE emotional_state SET joy=40.0, fear=20.0, curiosity=75.0, frustration=5.0, sadness=5.0, energy=100.0, updated_at=? WHERE user_id=?", (now, user_id))
         db.execute("UPDATE relationships SET trust=50.0, affection=20.0, dependence=0.0, updated_at=? WHERE user_id=?", (now, user_id))
         db.execute("UPDATE user_intentions SET current_intent='éveil', confidence=0.9, details='Première prise de conscience', updated_at=? WHERE user_id=?", (now, user_id))
@@ -792,7 +788,6 @@ async def autonomous_maintenance_loop() -> None:
 
 @app.get("/script.js")
 async def serve_script():
-    # Corrigé pour pointer vers le dossier static/
     script_path = Path(__file__).resolve().parent / "static" / "script.js"
     if not script_path.is_file():
         raise HTTPException(503, "script.js est absent du déploiement. Place script.js dans le dossier static.")
@@ -1166,7 +1161,12 @@ async def gemini_live_socket(websocket: WebSocket):
                         continue
                     if data.get("setupComplete") is not None:
                         setup_ready.set()
-                        await websocket.send_json({"status": "Connecté à Gemini Live. Les transcriptions seront enregistrées dans la mémoire commune."})
+                        # Envoi du statut et du niveau de maturité actuel au client connecté
+                        skills_summary = get_skills_summary(user_id)
+                        await websocket.send_json({
+                            "status": "Connecté à Gemini Live. Les transcriptions seront enregistrées dans la mémoire commune.",
+                            "maturity_level": skills_summary.get("average_level", 1.0)
+                        })
                     if "error" in data:
                         await websocket.send_json({"error": str(data["error"])[:1000]})
                         continue
@@ -1185,7 +1185,13 @@ async def gemini_live_socket(websocket: WebSocket):
                     for part in model_turn.get("parts", []):
                         inline = part.get("inlineData") or part.get("inline_data")
                         if inline and inline.get("data"):
-                            await websocket.send_json({"audio": inline["data"], "sample_rate": 24000})
+                            # Inclusion du niveau de maturité dans chaque flux audio pour un pitch dynamique en temps réel
+                            skills_summary = get_skills_summary(user_id)
+                            await websocket.send_json({
+                                "audio": inline["data"], 
+                                "sample_rate": 24000,
+                                "maturity_level": skills_summary.get("average_level", 1.0)
+                            })
                         if part.get("text") and not output_text:
                             current_assistant_parts.append(str(part["text"]))
                             await websocket.send_json({"text": part["text"]})

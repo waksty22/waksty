@@ -213,7 +213,7 @@ async function loadSummary() {
   }
 }
 
-// --- Nouveau : Chargement de l'historique des 10 dernières humeurs ---
+// --- Chargement de l'historique des 10 dernières humeurs ---
 async function loadMoodHistory() {
   try {
     const r = await fetch('/api/mood/history?limit=10', { headers: headers() });
@@ -235,6 +235,60 @@ async function loadMoodHistory() {
     }
   } catch (e) {
     $('summary').textContent = 'Erreur de chargement des humeurs : ' + e.message;
+  }
+}
+
+// --- Chargement des derniers rêves simulés (Étape 4) ---
+async function loadDreams() {
+  try {
+    const r = await fetch('/api/dreams/creator', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.dreams) {
+      if (d.dreams.length === 0) {
+        $('summary').textContent = 'Aucun rêve simulé enregistré pour le moment.';
+        return;
+      }
+      let text = "🌙 Derniers rêves simulés de Chappie :\n\n";
+      d.dreams.forEach(dream => {
+        const date = new Date(dream.created_at).toLocaleString('fr-FR');
+        text += `• [${date}]\n  "${dream.content}"\n\n`;
+      });
+      $('summary').textContent = text;
+    } else {
+      $('summary').textContent = 'Impossible de charger les rêves.';
+    }
+  } catch (e) {
+    $('summary').textContent = 'Erreur de chargement des rêves : ' + e.message;
+  }
+}
+
+// --- Chargement des objectifs actifs (Étape 4) ---
+async function loadGoals() {
+  try {
+    const r = await fetch('/api/goals', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.goals) {
+      if (d.goals.length === 0) {
+        $('summary').textContent = 'Aucun objectif actif pour le moment.';
+        return;
+      }
+      let text = "🎯 Objectifs actifs de Chappie :\n\n";
+      d.goals.forEach(g => {
+        text += `📌 ${g.title} (Progression : ${Math.round(g.progress)}%)\n`;
+        if (g.steps && g.steps.length > 0) {
+          g.steps.forEach(s => {
+            const icon = s.status === 'completed' ? '✅' : '⏳';
+            text += `   ${icon} ${s.description}\n`;
+          });
+        }
+        text += '\n';
+      });
+      $('summary').textContent = text;
+    } else {
+      $('summary').textContent = 'Impossible de charger les objectifs.';
+    }
+  } catch (e) {
+    $('summary').textContent = 'Erreur de chargement des objectifs : ' + e.message;
   }
 }
 
@@ -628,6 +682,8 @@ window.stopSpeech = stopSpeech;
 window.toggleMic = toggleMic;
 window.loadSummary = loadSummary;
 window.loadMoodHistory = loadMoodHistory;
+window.loadDreams = loadDreams;
+window.loadGoals = loadGoals;
 window.consolidate = consolidate;
 window.toggleLive = toggleLive;
 window.startCamera = startCamera;

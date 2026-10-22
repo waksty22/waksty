@@ -15,7 +15,7 @@ function setStatus(s) {
 }
 
 // --- Rendu visuel du tableau de bord émotionnel ---
-function renderEmotionsDashboard(psy) {
+function renderEmotionsDashboard(psy, lastEvent = null) {
   const container = $('state');
   if (!container || !psy) return;
 
@@ -50,17 +50,25 @@ function renderEmotionsDashboard(psy) {
           <span style="font-weight: bold; color: #fff;">${val}%</span>
         </div>
         <div style="width: 100%; background: #131f31; height: 10px; border-radius: 5px; overflow: hidden; border: 1px solid #2b3b52;">
-          <div style="width: ${val}%; background: ${barColor}; height: 100%; transition: width 0.5s ease-in-out;"></div>
+          <div style="width: ${val}%; background: ${barColor}; height: 100%; transition: width 0.5s ease-in-out, background-color 0.5s ease-in-out;"></div>
         </div>
       </div>
     `;
   });
 
+  if (lastEvent) {
+    html += `
+      <div style="margin-top: 6px; padding-top: 8px; border-top: 1px solid #2b3b52; font-size: 0.8rem; color: #9de4f5;">
+        🧠 <strong>Dernier événement :</strong> ${lastEvent}
+      </div>
+    `;
+  }
+
   html += '</div>';
   stateEl.innerHTML = html;
 }
 
-// --- Polling dynamique pour rafraîchir le tableau de bord émotionnel ---
+// --- Polling dynamique pour rafraîchir le tableau de bord émotionnel et les événements ---
 async function fetchPsychology() {
   try {
     const token = $('token') ? $('token').value.trim() : '';
@@ -68,7 +76,20 @@ async function fetchPsychology() {
     const r = await fetch('/api/emotions/creator', { headers: headers() });
     if (r.ok) {
       const d = await r.json();
-      if (d.psychology) renderEmotionsDashboard(d.psychology);
+      
+      // Essai de récupération du dernier événement d'humeur
+      let lastEvent = null;
+      try {
+        const moodRes = await fetch('/api/mood/history?limit=1', { headers: headers() });
+        if (moodRes.ok) {
+          const moodData = await moodRes.json();
+          if (moodData.events && moodData.events.length > 0) {
+            lastEvent = moodData.events[0].event;
+          }
+        }
+      } catch (e) {}
+
+      if (d.psychology) renderEmotionsDashboard(d.psychology, lastEvent);
     }
   } catch (e) {
     // Ignorer silencieusement les petites coupures réseau
@@ -104,6 +125,7 @@ async function sendMessage() {
     $('out').textContent = d.reply;
     if (d.psychology) {
       renderEmotionsDashboard(d.psychology);
+      fetchPsychology(); // Rafraîchit l'événement émotionnel récent
     }
     $('msg').value = '';
     setStatus('Réponse reçue.');
@@ -476,6 +498,7 @@ async function captureVision() {
     $('out').textContent = chatData.reply;
     if (chatData.psychology) {
       renderEmotionsDashboard(chatData.psychology);
+      fetchPsychology();
     }
 
     setStatus('Image analysée et réponse de Chappie reçue.');

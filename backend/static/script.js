@@ -71,13 +71,12 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
 // --- Polling dynamique pour rafraîchir le tableau de bord émotionnel et les événements ---
 async function fetchPsychology() {
   try {
-    const token = $('token') ? $('token').value.trim() : '';
+    const token = $('token') ? $('token'].value.trim() : '';
     if (!token) return;
     const r = await fetch('/api/emotions/creator', { headers: headers() });
     if (r.ok) {
       const d = await r.json();
       
-      // Essai de récupération du dernier événement d'humeur
       let lastEvent = null;
       try {
         const moodRes = await fetch('/api/mood/history?limit=1', { headers: headers() });
@@ -91,13 +90,11 @@ async function fetchPsychology() {
 
       if (d.psychology) renderEmotionsDashboard(d.psychology, lastEvent);
     }
-  } catch (e) {
-    // Ignorer silencieusement les petites coupures réseau
-  }
+  } catch (e) {}
 }
 
-// Actualisation automatique toutes les 4 secondes pour que les jauges restent vivantes
-setInterval(fetchPsychology, 4000);
+// Correction Erreur 429 : Intervalle élargi à 15 secondes au lieu de 4 secondes pour stopper le spam réseau
+setInterval(fetchPsychology, 15000);
 
 window.addEventListener('DOMContentLoaded', () => {
   setStatus('Interface chargée. Jeton requis pour les fonctions protégées.');
@@ -125,7 +122,7 @@ async function sendMessage() {
     $('out').textContent = d.reply;
     if (d.psychology) {
       renderEmotionsDashboard(d.psychology);
-      fetchPsychology(); // Rafraîchit l'événement émotionnel récent
+      fetchPsychology();
     }
     $('msg').value = '';
     setStatus('Réponse reçue.');
@@ -146,7 +143,6 @@ async function speak(text) {
       URL.revokeObjectURL(speakingAudio.src);
     }
     
-    // Récupérer le niveau global de maturité de Chappie pour ajuster le pitch vocal
     let maturityLevel = 1.0;
     try {
       const skillRes = await fetch('/api/skills/creator', { headers: headers() });
@@ -176,13 +172,10 @@ async function speak(text) {
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
 
-    // Calcul du pitch : Niveau 1 = très aigu (1.35), Niveau 10 = naturel adulte (1.00)
     const playbackRate = Math.max(1.0, Math.min(1.35, 1.35 - (0.35 * (maturityLevel - 1) / 9)));
     source.playbackRate.value = playbackRate;
 
     source.connect(audioCtx.destination);
-    
-    // Convertir l'audio modifié en Blob pour garder la compatibilité avec l'élément audio si besoin
     source.start(0);
     setStatus('Lecture vocale en cours (Maturité : ' + maturityLevel.toFixed(1) + '/10)...');
 
@@ -246,7 +239,6 @@ async function loadSummary() {
   }
 }
 
-// --- Chargement de l'historique des 10 dernières humeurs ---
 async function loadMoodHistory() {
   try {
     const r = await fetch('/api/mood/history?limit=10', { headers: headers() });
@@ -271,7 +263,6 @@ async function loadMoodHistory() {
   }
 }
 
-// --- Chargement des derniers rêves simulés (Étape 4) ---
 async function loadDreams() {
   try {
     const r = await fetch('/api/dreams/creator', { headers: headers() });
@@ -295,7 +286,6 @@ async function loadDreams() {
   }
 }
 
-// --- Chargement des dernières pensées / ruminations (Métacognition) ---
 async function loadThoughts() {
   try {
     const r = await fetch('/api/thoughts/creator', { headers: headers() });
@@ -319,7 +309,6 @@ async function loadThoughts() {
   }
 }
 
-// --- Chargement de l'Arbre de Compétences (Axe 4) ---
 async function loadSkills() {
   try {
     const r = await fetch('/api/skills/creator', { headers: headers() });
@@ -343,7 +332,6 @@ async function loadSkills() {
   }
 }
 
-// --- Réinitialisation Page Blanche (Reset de vie) ---
 async function resetLife() {
   if (!confirm("⚠️ Es-tu sûr de vouloir effacer toute la mémoire et réinitialiser Chappie à zéro (Page Blanche / Naissance) ?")) {
     return;
@@ -366,7 +354,6 @@ async function resetLife() {
   }
 }
 
-// --- Chargement des objectifs actifs (Étape 4) ---
 async function loadGoals() {
   try {
     const r = await fetch('/api/goals', { headers: headers() });
@@ -447,7 +434,6 @@ function resample(input, fromRate, toRate) {
   return out;
 }
 
-// Envoi en continu du flux vidéo de la caméra dans Gemini Live
 function startLiveVision() {
   stopLiveVision();
   const video = $('camera');
@@ -514,7 +500,7 @@ async function toggleLive() {
       }
     };
     
-    liveSocket.onmessage = e => {
+    liveSocket.onmessage = async e => {
       let d;
       try { d = JSON.parse(e.data); } catch { return; }
       if (d.status) { $('liveStatus').textContent = d.status; return; }
@@ -524,10 +510,21 @@ async function toggleLive() {
         liveNextTime = liveCtx ? liveCtx.currentTime : 0;
       }
       if (d.text) { $('out').textContent += ('\nChappie : ' + d.text); }
-      if (d.audio) { playLiveAudio(d.audio, d.sample_rate || 24000); }
+      if (d.audio) { 
+        // Récupération dynamique du niveau de maturité pour pitcher la voix du Live
+        let maturityLevel = 1.0;
+        try {
+          const skillRes = await fetch('/api/skills/creator', { headers: headers() });
+          if (skillRes.ok) {
+            const skillData = await skillRes.json();
+            if (skillData.average_level) maturityLevel = skillData.average_level;
+          }
+        } catch (err) {}
+        
+        playLiveAudio(d.audio, d.sample_rate || 24000, maturityLevel); 
+      }
       if (d.error) { $('liveStatus').textContent = 'Erreur : ' + d.error; }
 
-      // Rafraîchir les barres d'émotions pendant le live
       if (d.psychology) {
         renderEmotionsDashboard(d.psychology);
       } else {
@@ -546,15 +543,22 @@ async function toggleLive() {
   }
 }
 
-function playLiveAudio(encoded, rate) {
+// --- Lecture Audio Live avec Pitch dynamique selon l'âge de Chappie ---
+function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
   if (!liveCtx) return;
   const bytes = fromB64(encoded);
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), f = new Float32Array(Math.floor(bytes.length / 2));
   for (let i = 0; i < f.length; i++) f[i] = dv.getInt16(i * 2, true) / 32768;
   const buf = liveCtx.createBuffer(1, f.length, rate);
   buf.copyToChannel(f, 0);
+  
   const src = liveCtx.createBufferSource();
   src.buffer = buf;
+
+  // Application du pitch dynamique (Stade 0 = voix aiguë de bébé / Stade 10 = voix normale adulte)
+  const playbackRate = Math.max(1.0, Math.min(1.35, 1.35 - (0.35 * (maturityLevel - 1) / 9)));
+  src.playbackRate.value = playbackRate;
+
   src.connect(liveCtx.destination);
   liveAudioSources.add(src);
   src.onended = () => liveAudioSources.delete(src);
@@ -624,7 +628,6 @@ async function captureVision() {
   }
 
   ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-
   $('visionOut').textContent = 'Chappie observe l’image...';
 
   try {
@@ -642,42 +645,29 @@ async function captureVision() {
     const visionData = await visionResponse.json();
 
     if (!visionResponse.ok) {
-      throw new Error(
-        visionData.detail || 'L’analyse visuelle a échoué.'
-      );
+      throw new Error(visionData.detail || 'L’analyse visuelle a échoué.');
     }
 
     const description = visionData.description;
 
-    $('visionOut').textContent =
-      'Ce que Chappie voit :\n' + description +
-      '\n\nChappie prépare sa réponse...';
+    $('visionOut').textContent = 'Ce que Chappie voit :\n' + description + '\n\nChappie prépare sa réponse...';
 
     const chatResponse = await fetch('/api/chat', {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({
         user_id: 'creator',
-        message:
-          'Tu viens d’analyser une image avec ta caméra. ' +
-          'Voici la description obtenue :\n' +
-          description +
-          '\nRéagis naturellement à ce que tu observes et explique-moi ce que tu en comprends.'
+        message: 'Tu viens d’analyser une image avec ta caméra. Voici la description obtenue :\n' + description + '\nRéagis naturellement à ce que tu observes et explique-moi ce que tu en comprends.'
       })
     });
 
     const chatData = await chatResponse.json();
 
     if (!chatResponse.ok) {
-      throw new Error(
-        chatData.detail ||
-        'Image analysée, mais Chappie ne peut pas répondre.'
-      );
+      throw new Error(chatData.detail || 'Image analysée, mais Chappie ne peut pas répondre.');
     }
 
-    $('visionOut').textContent =
-      'Ce que Chappie voit :\n' + description;
-
+    $('visionOut').textContent = 'Ce que Chappie voit :\n' + description;
     $('out').textContent = chatData.reply;
     if (chatData.psychology) {
       renderEmotionsDashboard(chatData.psychology);
@@ -685,12 +675,10 @@ async function captureVision() {
     }
 
     setStatus('Image analysée et réponse de Chappie reçue.');
-
     await speak(chatData.reply);
 
   } catch (e) {
-    $('visionOut').textContent =
-      'Erreur caméra : ' + e.message;
+    $('visionOut').textContent = 'Erreur caméra : ' + e.message;
     setStatus('Vérifie le jeton et la connexion au serveur.');
   }
 }
@@ -767,7 +755,6 @@ async function recordVoice(mode) {
   }
 }
 
-// Écouteur de touche Entrée
 window.addEventListener('DOMContentLoaded', () => {
   const msgInput = $('msg');
   if (msgInput) {

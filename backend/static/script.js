@@ -533,29 +533,41 @@ async function toggleLive() {
   }
 }
 
-// --- Lecture Audio Live avec Pitch dynamique selon l'âge de Chappie ---
+// --- Lecture Audio Live corrigée, stabilisée et sécurisée ---
 function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
   if (!liveCtx) return;
-  const bytes = fromB64(encoded);
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), f = new Float32Array(Math.floor(bytes.length / 2));
-  for (let i = 0; i < f.length; i++) f[i] = dv.getInt16(i * 2, true) / 32768;
-  const buf = liveCtx.createBuffer(1, f.length, rate);
-  buf.copyToChannel(f, 0);
   
-  const src = liveCtx.createBufferSource();
-  src.buffer = buf;
+  try {
+    const bytes = fromB64(encoded);
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const f = new Float32Array(Math.floor(bytes.length / 2));
+    
+    for (let i = 0; i < f.length; i++) {
+      f[i] = dv.getInt16(i * 2, true) / 32768;
+    }
 
-  // Application du pitch dynamique (Stade 0 = voix aiguë de bébé / Stade 10 = voix normale adulte)
-  const playbackRate = Math.max(1.0, Math.min(1.35, 1.35 - (0.35 * (maturityLevel - 1) / 9)));
-  src.playbackRate.value = playbackRate;
+    const buf = liveCtx.createBuffer(1, f.length, rate || 24000);
+    buf.copyToChannel(f, 0);
+    
+    const src = liveCtx.createBufferSource();
+    src.buffer = buf;
 
-  src.connect(liveCtx.destination);
-  liveAudioSources.add(src);
-  src.onended = () => liveAudioSources.delete(src);
-  const now = liveCtx.currentTime;
-  liveNextTime = Math.max(liveNextTime, now + .04);
-  src.start(liveNextTime);
-  liveNextTime += buf.duration;
+    // Sécurisation stricte du niveau de maturité entre 1 et 10
+    const safeMaturity = Math.max(1, Math.min(10, maturityLevel));
+    const playbackRate = Math.max(1.0, Math.min(1.35, 1.35 - (0.35 * (safeMaturity - 1) / 9)));
+    src.playbackRate.value = playbackRate;
+
+    src.connect(liveCtx.destination);
+    liveAudioSources.add(src);
+    src.onended = () => liveAudioSources.delete(src);
+
+    const now = liveCtx.currentTime;
+    liveNextTime = Math.max(liveNextTime, now + 0.04);
+    src.start(liveNextTime);
+    liveNextTime += buf.duration;
+  } catch (e) {
+    console.error("Erreur lors de la lecture audio live :", e);
+  }
 }
 
 function stopLive(close = true) {
@@ -647,7 +659,7 @@ async function captureVision() {
       headers: headers(),
       body: JSON.stringify({
         user_id: 'creator',
-        message: 'Tu viens d’analyser une image avec ta caméra. Voici la description obtenue :\n' + description + '\nRéagis naturellement à ce que tu observes et explique-moi ce que tu en comprends.'
+        message: 'Tu viens d’analyser une image avec ta caméra. Voici la description obtenue :\n' + description + '\nRéagis خالصement à ce que tu observes et explique-moi ce que tu en comprends.'
       })
     });
 

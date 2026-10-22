@@ -1161,7 +1161,6 @@ async def gemini_live_socket(websocket: WebSocket):
                         continue
                     if data.get("setupComplete") is not None:
                         setup_ready.set()
-                        # Envoi du statut et du niveau de maturité actuel au client connecté
                         skills_summary = get_skills_summary(user_id)
                         await websocket.send_json({
                             "status": "Connecté à Gemini Live. Les transcriptions seront enregistrées dans la mémoire commune.",
@@ -1185,7 +1184,6 @@ async def gemini_live_socket(websocket: WebSocket):
                     for part in model_turn.get("parts", []):
                         inline = part.get("inlineData") or part.get("inline_data")
                         if inline and inline.get("data"):
-                            # Inclusion du niveau de maturité dans chaque flux audio pour un pitch dynamique en temps réel
                             skills_summary = get_skills_summary(user_id)
                             await websocket.send_json({
                                 "audio": inline["data"], 

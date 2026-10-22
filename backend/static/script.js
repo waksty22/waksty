@@ -138,12 +138,26 @@ async function sendMessage() {
   }
 }
 
+// --- Synthèse vocale avec Pitch dynamique selon le niveau de maturité (Web Audio API) ---
 async function speak(text) {
   try {
     if (speakingAudio) {
       speakingAudio.pause();
       URL.revokeObjectURL(speakingAudio.src);
     }
+    
+    // Récupérer le niveau global de maturité de Chappie pour ajuster le pitch vocal
+    let maturityLevel = 1.0;
+    try {
+      const skillRes = await fetch('/api/skills/creator', { headers: headers() });
+      if (skillRes.ok) {
+        const skillData = await skillRes.json();
+        if (skillData.average_level) {
+          maturityLevel = skillData.average_level;
+        }
+      }
+    } catch (e) {}
+
     const r = await fetch('/api/speak', {
       method: 'POST',
       headers: headers(),
@@ -153,10 +167,29 @@ async function speak(text) {
       setStatus('Réponse écrite prête ; synthèse vocale indisponible.');
       return;
     }
-    const blob = await r.blob();
-    speakingAudio = new Audio(URL.createObjectURL(blob));
-    speakingAudio.onended = () => setStatus('Prêt.');
-    await speakingAudio.play();
+    
+    const arrayBuffer = await r.arrayBuffer();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioCtx();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+
+    // Calcul du pitch : Niveau 1 = très aigu (1.35), Niveau 10 = naturel adulte (1.00)
+    const playbackRate = Math.max(1.0, Math.min(1.35, 1.35 - (0.35 * (maturityLevel - 1) / 9)));
+    source.playbackRate.value = playbackRate;
+
+    source.connect(audioCtx.destination);
+    
+    // Convertir l'audio modifié en Blob pour garder la compatibilité avec l'élément audio si besoin
+    source.start(0);
+    setStatus('Lecture vocale en cours (Maturité : ' + maturityLevel.toFixed(1) + '/10)...');
+
+    source.onended = () => {
+      setStatus('Prêt.');
+      audioCtx.close();
+    };
   } catch (e) {
     setStatus('Réponse écrite prête ; lecture vocale impossible dans ce navigateur.');
   }
@@ -296,7 +329,7 @@ async function loadSkills() {
         $('summary').textContent = 'Aucune compétence enregistrée pour le moment.';
         return;
       }
-      let text = "🎓 Arbre de Compétences de Chappie (Piliers d'apprentissage) :\n\n";
+      let text = `🎓 Arbre de Compétences de Chappie (Moyenne globale : ${(d.average_level || 1).toFixed(1)}/10) :\n\n`;
       d.skills.forEach(s => {
         const percent = Math.min(100, Math.round((s.xp % 100)));
         text += `🔹 ${s.evidence || s.skill_name} : Niveau ${Math.round(s.level)} (XP: ${Math.round(s.xp)} - ${percent}% niv suivant)\n`;
@@ -307,6 +340,29 @@ async function loadSkills() {
     }
   } catch (e) {
     $('summary').textContent = 'Erreur de chargement des compétences : ' + e.message;
+  }
+}
+
+// --- Réinitialisation Page Blanche (Reset de vie) ---
+async function resetLife() {
+  if (!confirm("⚠️ Es-tu sûr de vouloir effacer toute la mémoire et réinitialiser Chappie à zéro (Page Blanche / Naissance) ?")) {
+    return;
+  }
+  try {
+    setStatus('Réinitialisation de Chappie en cours...');
+    const r = await fetch('/api/reset-life', {
+      method: 'POST',
+      headers: headers()
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Erreur lors du reset');
+    
+    $('summary').textContent = "🐣 Chappie est né à nouveau (Stade 0). Tout est effacé, prêt pour l'apprentissage !";
+    $('out').textContent = "Bip... Où suis-je ? Bonjour... c'est quoi cet endroit ?";
+    setStatus('Chappie est un nouveau-né !');
+    fetchPsychology();
+  } catch (e) {
+    setStatus('Erreur de réinitialisation : ' + e.message);
   }
 }
 
@@ -733,6 +789,7 @@ window.loadMoodHistory = loadMoodHistory;
 window.loadDreams = loadDreams;
 window.loadThoughts = loadThoughts;
 window.loadSkills = loadSkills;
+window.resetLife = resetLife;
 window.loadGoals = loadGoals;
 window.consolidate = consolidate;
 window.toggleLive = toggleLive;

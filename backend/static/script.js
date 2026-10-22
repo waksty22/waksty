@@ -4,9 +4,11 @@ let speakingAudio = null;
 const $ = id => document.getElementById(id);
 
 function headers() {
+  const tokenField = $('token');
+  const token = tokenField ? tokenField.value.trim() : '';
   return {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer ' + $('token').value.trim()
+    'Authorization': 'Bearer ' + token
   };
 }
 
@@ -70,9 +72,11 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
 
 // --- Polling dynamique pour rafraîchir le tableau de bord émotionnel et les événements ---
 async function fetchPsychology() {
+  const tokenField = $('token');
+  const token = tokenField ? tokenField.value.trim() : '';
+  if (!token) return;
+
   try {
-    const token = $('token') ? $('token').value.trim() : '';
-    if (!token) return;
     const r = await fetch('/api/emotions/creator', { headers: headers() });
     if (r.ok) {
       const d = await r.json();
@@ -93,8 +97,8 @@ async function fetchPsychology() {
   } catch (e) {}
 }
 
-// Correction Erreur 429 : Intervalle élargi à 15 secondes au lieu de 4 secondes pour stopper le spam réseau
-setInterval(fetchPsychology, 15000);
+// Intervalle ajusté à 20 secondes pour éviter le spam et les erreurs 429
+setInterval(fetchPsychology, 20000);
 
 window.addEventListener('DOMContentLoaded', () => {
   setStatus('Interface chargée. Jeton requis pour les fonctions protégées.');
@@ -473,12 +477,20 @@ async function toggleLive() {
     stopLive();
     return;
   }
+
+  const tokenField = $('token');
+  const token = tokenField ? tokenField.value.trim() : '';
+  if (!token) {
+    $('liveStatus').textContent = 'Erreur : Saisis ton jeton API dans le champ en haut avant de démarrer le live.';
+    return;
+  }
+
   try {
     liveStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     liveCtx = new (window.AudioContext || window.webkitAudioContext)();
     await liveCtx.resume();
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    liveSocket = new WebSocket(proto + '//' + location.host + '/ws/live?token=' + encodeURIComponent($('token').value.trim()));
+    liveSocket = new WebSocket(proto + '//' + location.host + '/ws/live?token=' + encodeURIComponent(token));
     window.liveSocket = liveSocket;
     
     liveSocket.onopen = () => {

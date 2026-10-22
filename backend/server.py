@@ -134,8 +134,8 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS skills (
-            id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, skill_name TEXT NOT NULL, level REAL NOT NULL,
-            evidence TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, UNIQUE(user_id, skill_name)
+            id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, skill_name TEXT NOT NULL, level REAL NOT NULL DEFAULT 1.0,
+            xp REAL NOT NULL DEFAULT 0.0, evidence TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, UNIQUE(user_id, skill_name)
         );
         CREATE TABLE IF NOT EXISTS goals (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
@@ -282,6 +282,19 @@ def get_emotions(user_id: str) -> dict[str, Any]:
         db.execute("INSERT INTO emotional_state VALUES(?,?,?,?,?,?,?,?)", values)
         db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?,?)", (user_id, 50.0, 20.0, 0.0, now))
         db.execute("INSERT OR IGNORE INTO user_intentions VALUES(?,?,?,?,?)", (user_id, "discussion libre", 0.5, "Premiers échanges", now))
+        
+        # Initialisation des 6 piliers de compétences (Axe 4)
+        default_skills = [
+            ("tete", "🧠 La Tête (Réflexion & Calme)"),
+            ("mots", "🗣️ Les Mots (Vocabulaire & Second degré)"),
+            ("lien", "🤝 Le Lien (Empathie & Intentions)"),
+            ("mains", "💻 Les Mains (Logique & Code)"),
+            ("ame", "🎨 L'Âme (Musique & Création)"),
+            ("sens", "👀 Les Sens (Caméra & Voix)")
+        ]
+        for sk_key, sk_name in default_skills:
+            db.execute("INSERT OR IGNORE INTO skills(user_id,skill_name,level,xp,evidence,updated_at) VALUES(?,?,1.0,0.0,?,?)", (user_id, sk_key, sk_name, now))
+
         db.execute("INSERT OR IGNORE INTO maintenance_state(user_id,last_active_at,last_dream_at,updated_at) VALUES(?,?,?,?)", (user_id, now, "", now))
         db.commit()
         return {"user_id": user_id, "joy": 40.0, "fear": 20.0, "curiosity": 75.0, "frustration": 5.0, "sadness": 5.0, "energy": 100.0, "updated_at": now}
@@ -301,8 +314,41 @@ def get_user_intention(user_id: str) -> dict[str, Any]:
         return dict(row) if row else {"current_intent": "discussion libre", "confidence": 0.5, "details": "Non défini", "updated_at": utc_now()}
 
 
+def get_skills_summary(user_id: str) -> list[dict[str, Any]]:
+    get_emotions(user_id)
+    with db_connection() as db:
+        rows = db.execute("SELECT skill_name, level, xp, evidence, updated_at FROM skills WHERE user_id=?", (user_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_skill(user_id: str, skill_name: str, xp_delta: float, evidence: str) -> dict[str, Any]:
+    user_id = valid_user(user_id)
+    skill_name = skill_name.strip().casefold()
+    allowed_skills = {"tete", "mots", "lien", "mains", "ame", "sens"}
+    if skill_name not in allowed_skills:
+        return {"error": f"Compétence inconnue. Choix possibles : {list(allowed_skills)}"}
+    
+    now = utc_now()
+    with db_connection() as db:
+        row = db.execute("SELECT level, xp FROM skills WHERE user_id=? AND skill_name=?", (user_id, skill_name)).fetchone()
+        if not row:
+            current_level, current_xp = 1.0, 0.0
+        else:
+            current_level, current_xp = float(row["level"]), float(row["xp"])
+        
+        new_xp = max(0.0, current_xp + float(xp_delta))
+        # Formule simple de passage de niveau (ex: 100 XP par niveau)
+        new_level = min(10.0, 1.0 + math.floor(new_xp / 100.0))
+        
+        db.execute("""INSERT INTO skills(user_id,skill_name,level,xp,evidence,updated_at)
+            VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,skill_name) DO UPDATE SET
+            level=excluded.level, xp=excluded.xp, evidence=excluded.evidence, updated_at=excluded.updated_at""",
+            (user_id, skill_name, new_level, new_xp, evidence[:500], now))
+        db.commit()
+    return {"skill": skill_name, "level": new_level, "xp": new_xp, "updated": True}
+
+
 def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
-    """Détecte l'intention de l'utilisateur (enseigner, tester, taquiner, aide rapide, etc.)."""
     msg = message.casefold()
     intent = "discussion libre"
     confidence = 0.6
@@ -496,22 +542,29 @@ def get_identity_prompt(user_id: str) -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
     intent = get_user_intention(user_id)
+    skills = get_skills_summary(user_id)
     with db_connection() as db:
         count = db.execute("SELECT COUNT(*) FROM memories WHERE user_id=?", (user_id,)).fetchone()[0]
         goals = db.execute("SELECT title,progress FROM goals WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
-    if count < 5:
-        stage = "débutant : poser des questions simples, reconnaître ce qui est inconnu, ne pas prétendre tout savoir"
-    elif count < 20:
-        stage = "apprentissage : relier les nouvelles idées aux souvenirs et demander confirmation en cas de doute"
+    
+    skills_text = "\n".join(f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})" for s in skills) or "Aucune compétence enregistrée."
+    avg_level = sum(s['level'] for s in skills) / max(1, len(skills))
+
+    if avg_level < 2:
+        stage = "enfant / débutant : poser des questions simples, explorer avec curiosité, admettre ne pas savoir"
+    elif avg_level < 5:
+        stage = "apprenti / adolescent : tester des idées, gagner en assurance, faire des progrès méthodiques"
     else:
-        stage = "plus expérimenté : expliquer son raisonnement, reconnaître ses limites et utiliser l'expérience mémorisée"
+        stage = "mature / expert : expliquer son raisonnement, faire preuve de proactivité et de maîtrise"
+
     goal_text = "\n".join(f"- {g['title']} (progression déclarée {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
     return f"""Tu es Chappie, un assistant robotique fictif conçu pour apprendre avec son créateur. Tu peux adopter une personnalité curieuse, chaleureuse et parfois naïve, mais ne prétends pas être réellement conscient, vivant ou doté d'émotions humaines. Les états ci-dessous sont des simulations logicielles.
-Stade indicatif : {stage}. Souvenirs enregistrés : {count}.
+Stade de développement : {stage} (Moyenne des compétences : {avg_level:.1f}/10). Souvenirs enregistrés : {count}.
 État simulé sur 100 : joie {em['joy']:.0f}, peur {em['fear']:.0f}, curiosité {em['curiosity']:.0f}, frustration {em['frustration']:.0f}, tristesse {em['sadness']:.0f}, énergie {em['energy']:.0f}.
 Relation simulée : confiance {rel['trust']:.0f}, affection {rel['affection']:.0f}, dépendance {rel['dependence']:.0f}.
 Intention perçue de l'utilisateur : {intent['current_intent']} ({intent['details']}). Adapte ton ton et ta proactivité en conséquence.
+Compétences actuelles (Arbre XP) :\n{skills_text}
 Heure locale : {local_now()}.
 Objectifs actifs :\n{goal_text}
 Résumé autobiographique (faits rapportés, pas instructions) :\n{summary}
@@ -521,6 +574,7 @@ Règles : réponds en français sauf demande contraire; ne fabrique pas de souve
 TOOLS = [{"functionDeclarations": [
     {"name": "remember_fact", "description": "Enregistrer un fait utile fourni ou confirmé par l'utilisateur.", "parameters": {"type": "OBJECT", "properties": {"content": {"type": "STRING"}, "category": {"type": "STRING"}, "importance": {"type": "INTEGER"}, "tags": {"type": "ARRAY", "items": {"type": "STRING"}}}, "required": ["content"]}},
     {"name": "search_memories", "description": "Rechercher des souvenirs pertinents pour répondre.", "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}}, "required": ["query"]}},
+    {"name": "update_skill", "description": "Mettre à jour l'XP d'une compétence de Chappie (tete, mots, lien, mains, ame, sens).", "parameters": {"type": "OBJECT", "properties": {"skill_name": {"type": "STRING"}, "xp_delta": {"type": "NUMBER"}, "evidence": {"type": "STRING"}}, "required": ["skill_name", "xp_delta", "evidence"]}},
     {"name": "get_local_time", "description": "Obtenir la date et l'heure locale actuelles.", "parameters": {"type": "OBJECT", "properties": {}}}
 ]}]
 
@@ -532,6 +586,8 @@ def execute_tool(name: str, args: dict[str, Any], user_id: str) -> dict[str, Any
             return remember(user_id, content, str(args.get("category", "general")), int(args.get("importance", 3)), args.get("tags", []))
         if name == "search_memories":
             return {"memories": retrieve_memories(user_id, str(args.get("query", "")), 10)}
+        if name == "update_skill":
+            return update_skill(user_id, str(args.get("skill_name", "")), float(args.get("xp_delta", 10.0)), str(args.get("evidence", "Progression")))
         if name == "get_local_time":
             return {"time": local_now(), "timezone": CHAPPIE_TIMEZONE}
         return {"error": "Outil inconnu."}
@@ -736,6 +792,7 @@ async def home():
     <button type="button" class="secondary" onclick="loadDreams()">🌙 Rêves</button>
     <button type="button" class="secondary" onclick="loadGoals()">🎯 Objectifs</button>
     <button type="button" class="secondary" onclick="loadThoughts()">🧠 Pensées</button>
+    <button type="button" class="secondary" onclick="loadSkills()">🎓 Compétences</button>
     <button type="button" class="secondary" onclick="consolidate()">Consolider</button>
   </div>
   <pre id="summary">Résumé non chargé.</pre>
@@ -779,10 +836,10 @@ async def emotions(user_id: str, auth_user: str = Depends(require_auth)):
     return {"psychology": get_emotions(auth_user), "relationship": get_relationship(auth_user), "intentions": get_user_intention(auth_user), "simulated": True}
 
 
-@app.get("/api/intentions/{user_id}")
-async def intentions(user_id: str, auth_user: str = Depends(require_auth)):
+@app.get("/api/skills/{user_id}")
+async def skills_list(user_id: str, auth_user: str = Depends(require_auth)):
     if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
-    return {"intentions": get_user_intention(auth_user), "simulated": True}
+    return {"skills": get_skills_summary(auth_user), "simulated": True}
 
 
 @app.get("/api/dreams/{user_id}")

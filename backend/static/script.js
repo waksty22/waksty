@@ -128,7 +128,7 @@ async function sendMessage() {
   }
 }
 
-// --- Synthèse vocale avec Pitch dynamique selon le niveau de maturité (Web Audio API) ---
+// --- Synthèse vocale standard (Web Audio API) ---
 async function speak(text) {
   try {
     if (speakingAudio) {
@@ -165,12 +165,12 @@ async function speak(text) {
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
 
-    const playbackRate = Math.max(1.0, Math.min(1.35, 1.35 - (0.35 * (maturityLevel - 1) / 9)));
-    source.playbackRate.value = playbackRate;
+    // Pitch fixé à 1.0 (neutre)
+    source.playbackRate.value = 1.0;
 
     source.connect(audioCtx.destination);
     source.start(0);
-    setStatus('Lecture vocale en cours (Maturité : ' + maturityLevel.toFixed(1) + '/10)...');
+    setStatus('Lecture vocale en cours...');
 
     source.onended = () => {
       setStatus('Prêt.');
@@ -542,7 +542,7 @@ async function toggleLive() {
   }
 }
 
-// --- Test temporaire : Marge de sécurité fixée à 5.0 secondes ---
+// --- Lecture Audio Live anti-saccades (Délai 0.15s, Pitch à 1.0 neutre) ---
 function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
   if (!liveCtx) return;
   
@@ -561,19 +561,17 @@ function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
     const src = liveCtx.createBufferSource();
     src.buffer = buf;
 
-    // Sécurisation stricte du niveau de maturité entre 1 et 10
-    const safeMaturity = Math.max(1, Math.min(10, maturityLevel));
-    const playbackRate = Math.max(1.0, Math.min(1.35, 1.35 - (0.35 * (safeMaturity - 1) / 9)));
-    src.playbackRate.value = playbackRate;
+    // Pitch et formant réinitialisés à 1.0 (neutre)
+    src.playbackRate.value = 1.0;
 
     src.connect(liveCtx.destination);
     liveAudioSources.add(src);
     src.onended = () => liveAudioSources.delete(src);
 
-    // Test temporaire à 5.0 secondes de décalage tampon
+    // Synchronisation anti-saccades avec une avance de sécurité de 0.15s
     const now = liveCtx.currentTime;
     if (liveNextTime < now) {
-      liveNextTime = now + 5.0;
+      liveNextTime = now + 0.15;
     }
     src.start(liveNextTime);
     liveNextTime += buf.duration;

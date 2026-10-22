@@ -213,6 +213,31 @@ async function loadSummary() {
   }
 }
 
+// --- Nouveau : Chargement de l'historique des 10 dernières humeurs ---
+async function loadMoodHistory() {
+  try {
+    const r = await fetch('/api/mood/history?limit=10', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.events) {
+      if (d.events.length === 0) {
+        $('summary').textContent = 'Aucun événement d’humeur enregistré pour le moment.';
+        return;
+      }
+      let text = "📜 Historique des 10 dernières humeurs :\n\n";
+      d.events.forEach(e => {
+        const date = new Date(e.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        const valSign = e.valence > 0 ? '+' : '';
+        text += `• [${date}] ${e.event} (Valence: ${valSign}${e.valence})\n`;
+      });
+      $('summary').textContent = text;
+    } else {
+      $('summary').textContent = 'Impossible de charger l’historique des humeurs.';
+    }
+  } catch (e) {
+    $('summary').textContent = 'Erreur de chargement des humeurs : ' + e.message;
+  }
+}
+
 async function consolidate() {
   try {
     const r = await fetch('/api/memory/consolidate', { method: 'POST', headers: headers() });
@@ -602,6 +627,7 @@ window.sendMessage = sendMessage;
 window.stopSpeech = stopSpeech;
 window.toggleMic = toggleMic;
 window.loadSummary = loadSummary;
+window.loadMoodHistory = loadMoodHistory;
 window.consolidate = consolidate;
 window.toggleLive = toggleLive;
 window.startCamera = startCamera;

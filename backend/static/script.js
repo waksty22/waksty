@@ -71,7 +71,7 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
 // --- Polling dynamique pour rafraîchir le tableau de bord émotionnel et les événements ---
 async function fetchPsychology() {
   try {
-    const token = $('token') ? $('token'].value.trim() : '';
+    const token = $('token') ? $('token').value.trim() : '';
     if (!token) return;
     const r = await fetch('/api/emotions/creator', { headers: headers() });
     if (r.ok) {
@@ -511,16 +511,7 @@ async function toggleLive() {
       }
       if (d.text) { $('out').textContent += ('\nChappie : ' + d.text); }
       if (d.audio) { 
-        // Récupération dynamique du niveau de maturité pour pitcher la voix du Live
-        let maturityLevel = 1.0;
-        try {
-          const skillRes = await fetch('/api/skills/creator', { headers: headers() });
-          if (skillRes.ok) {
-            const skillData = await skillRes.json();
-            if (skillData.average_level) maturityLevel = skillData.average_level;
-          }
-        } catch (err) {}
-        
+        let maturityLevel = d.maturity_level || 1.0;
         playLiveAudio(d.audio, d.sample_rate || 24000, maturityLevel); 
       }
       if (d.error) { $('liveStatus').textContent = 'Erreur : ' + d.error; }

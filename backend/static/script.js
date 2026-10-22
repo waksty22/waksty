@@ -542,7 +542,7 @@ async function toggleLive() {
   }
 }
 
-// --- Lecture Audio Live anti-saccades et stabilisée (Marge 0.15s) ---
+// --- Test temporaire : Marge de sécurité fixée à 5.0 secondes ---
 function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
   if (!liveCtx) return;
   
@@ -570,10 +570,10 @@ function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
     liveAudioSources.add(src);
     src.onended = () => liveAudioSources.delete(src);
 
-    // Synchronisation anti-saccades robuste avec une avance de sécurité de 0.15s
+    // Test temporaire à 5.0 secondes de décalage tampon
     const now = liveCtx.currentTime;
     if (liveNextTime < now) {
-      liveNextTime = now + 0.15;
+      liveNextTime = now + 5.0;
     }
     src.start(liveNextTime);
     liveNextTime += buf.duration;

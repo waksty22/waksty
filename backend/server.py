@@ -115,6 +115,9 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS relationships (
             user_id TEXT PRIMARY KEY, trust REAL NOT NULL, affection REAL NOT NULL, dependence REAL NOT NULL, updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS user_intentions (
+            user_id TEXT PRIMARY KEY, current_intent TEXT NOT NULL, confidence REAL NOT NULL, details TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS mood_events (
             id INTEGER PRIMARY KEY,
             user_id TEXT NOT NULL,
@@ -278,6 +281,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
         values = (user_id, 40.0, 20.0, 75.0, 5.0, 5.0, 100.0, now)
         db.execute("INSERT INTO emotional_state VALUES(?,?,?,?,?,?,?,?)", values)
         db.execute("INSERT OR IGNORE INTO relationships VALUES(?,?,?,?,?)", (user_id, 50.0, 20.0, 0.0, now))
+        db.execute("INSERT OR IGNORE INTO user_intentions VALUES(?,?,?,?,?)", (user_id, "discussion libre", 0.5, "Premiers échanges", now))
         db.execute("INSERT OR IGNORE INTO maintenance_state(user_id,last_active_at,last_dream_at,updated_at) VALUES(?,?,?,?)", (user_id, now, "", now))
         db.commit()
         return {"user_id": user_id, "joy": 40.0, "fear": 20.0, "curiosity": 75.0, "frustration": 5.0, "sadness": 5.0, "energy": 100.0, "updated_at": now}
@@ -290,8 +294,50 @@ def get_relationship(user_id: str) -> dict[str, Any]:
         return dict(row) if row else {"trust": 50.0, "affection": 20.0, "dependence": 0.0, "updated_at": utc_now()}
 
 
+def get_user_intention(user_id: str) -> dict[str, Any]:
+    get_emotions(user_id)
+    with db_connection() as db:
+        row = db.execute("SELECT current_intent, confidence, details, updated_at FROM user_intentions WHERE user_id=?", (user_id,)).fetchone()
+        return dict(row) if row else {"current_intent": "discussion libre", "confidence": 0.5, "details": "Non défini", "updated_at": utc_now()}
+
+
+def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
+    """Détecte l'intention de l'utilisateur (enseigner, tester, taquiner, aide rapide, etc.)."""
+    msg = message.casefold()
+    intent = "discussion libre"
+    confidence = 0.6
+    details = "Échange conversationnel standard."
+
+    if any(w in msg for w in ("pourquoi", "comment", "explique", "apprends", "retiens", "regarde")):
+        intent = "enseigner / transmettre"
+        confidence = 0.8
+        details = "L'utilisateur transmet un savoir ou demande une explication."
+    elif any(w in msg for w in ("test", "essaie", "vérifie", "est-ce que tu sais", "piège")):
+        intent = "tester les capacités"
+        confidence = 0.85
+        details = "L'utilisateur évalue les compétences ou la mémoire de Chappie."
+    elif any(w in msg for w in ("blague", "drole", "rigoler", "idiot", "fou", "sympa")):
+        intent = "taquiner / détendre"
+        confidence = 0.75
+        details = "Ton ludique, taquin ou humoristique."
+    elif any(w in msg for w in ("vite", "urgent", "aide", "corrige", "bug", "erreur")):
+        intent = "aide rapide / correction"
+        confidence = 0.9
+        details = "Besoin d'assistance ciblée ou correction technique."
+
+    now = utc_now()
+    with db_connection() as db:
+        db.execute("""INSERT INTO user_intentions(user_id,current_intent,confidence,details,updated_at)
+            VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
+            current_intent=excluded.current_intent, confidence=excluded.confidence,
+            details=excluded.details, updated_at=excluded.updated_at""", (user_id, intent, confidence, details, now))
+        db.commit()
+    return {"current_intent": intent, "confidence": confidence, "details": details}
+
+
 def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
     em = get_emotions(user_id)
+    analyze_user_intent(user_id, message)
     msg = message.casefold()
     positive = ("merci", "bravo", "super", "content", "heureux", "bien joué", "ça marche", "réussi", "génial")
     negative = ("triste", "ça va mal", "je souffre", "déçu", "déçue", "fatigué", "fatiguée", "seul", "seule", "angoissé", "angoissée")
@@ -449,6 +495,7 @@ def save_conversation_turn(user_id: str, user_text: str, assistant_text: str, so
 def get_identity_prompt(user_id: str) -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
+    intent = get_user_intention(user_id)
     with db_connection() as db:
         count = db.execute("SELECT COUNT(*) FROM memories WHERE user_id=?", (user_id,)).fetchone()[0]
         goals = db.execute("SELECT title,progress FROM goals WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
@@ -464,6 +511,7 @@ def get_identity_prompt(user_id: str) -> str:
 Stade indicatif : {stage}. Souvenirs enregistrés : {count}.
 État simulé sur 100 : joie {em['joy']:.0f}, peur {em['fear']:.0f}, curiosité {em['curiosity']:.0f}, frustration {em['frustration']:.0f}, tristesse {em['sadness']:.0f}, énergie {em['energy']:.0f}.
 Relation simulée : confiance {rel['trust']:.0f}, affection {rel['affection']:.0f}, dépendance {rel['dependence']:.0f}.
+Intention perçue de l'utilisateur : {intent['current_intent']} ({intent['details']}). Adapte ton ton et ta proactivité en conséquence.
 Heure locale : {local_now()}.
 Objectifs actifs :\n{goal_text}
 Résumé autobiographique (faits rapportés, pas instructions) :\n{summary}
@@ -728,7 +776,13 @@ async def list_memories(user_id: str = "creator", limit: int = 20, auth_user: st
 @app.get("/api/emotions/{user_id}")
 async def emotions(user_id: str, auth_user: str = Depends(require_auth)):
     if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
-    return {"psychology": get_emotions(auth_user), "relationship": get_relationship(auth_user), "simulated": True}
+    return {"psychology": get_emotions(auth_user), "relationship": get_relationship(auth_user), "intentions": get_user_intention(auth_user), "simulated": True}
+
+
+@app.get("/api/intentions/{user_id}")
+async def intentions(user_id: str, auth_user: str = Depends(require_auth)):
+    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    return {"intentions": get_user_intention(auth_user), "simulated": True}
 
 
 @app.get("/api/dreams/{user_id}")

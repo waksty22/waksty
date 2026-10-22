@@ -262,6 +262,30 @@ async function loadDreams() {
   }
 }
 
+// --- Chargement des dernières pensées / ruminations (Métacognition) ---
+async function loadThoughts() {
+  try {
+    const r = await fetch('/api/thoughts/creator', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.thoughts) {
+      if (d.thoughts.length === 0) {
+        $('summary').textContent = 'Aucune pensée métacognitive enregistrée pour le moment.';
+        return;
+      }
+      let text = "🧠 Dernières pensées et ruminations de Chappie :\n\n";
+      d.thoughts.forEach(t => {
+        const date = new Date(t.created_at).toLocaleString('fr-FR');
+        text += `• [${date}]\n  "${t.content}"\n\n`;
+      });
+      $('summary').textContent = text;
+    } else {
+      $('summary').textContent = 'Impossible de charger les pensées.';
+    }
+  } catch (e) {
+    $('summary').textContent = 'Erreur de chargement des pensées : ' + e.message;
+  }
+}
+
 // --- Chargement des objectifs actifs (Étape 4) ---
 async function loadGoals() {
   try {
@@ -683,6 +707,7 @@ window.toggleMic = toggleMic;
 window.loadSummary = loadSummary;
 window.loadMoodHistory = loadMoodHistory;
 window.loadDreams = loadDreams;
+window.loadThoughts = loadThoughts;
 window.loadGoals = loadGoals;
 window.consolidate = consolidate;
 window.toggleLive = toggleLive;

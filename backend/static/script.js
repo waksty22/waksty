@@ -512,7 +512,6 @@ async function toggleLive() {
         $('out').textContent = 'Chappie : ';
       }
       if (d.text) { 
-        // Accumulation fluide pour afficher toute la phrase ou le paragraphe complet
         const outEl = $('out');
         if (outEl.textContent.startsWith('En attente') || outEl.textContent === 'Chappie : ') {
           outEl.textContent = 'Chappie : ' + d.text;

@@ -573,27 +573,42 @@ def get_identity_prompt(user_id: str) -> str:
     
     skills_text = "\n".join(f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})" for s in skills) or "Aucune compétence enregistrée."
 
+    # ---- LOGIQUE D'APPRENTISSAGE STYLE "CHAPPIE" (IMITATION STRICTE & ÉVOLUTION) ----
     if avg_level < 2:
-        stage = "nouveau-né / éveil (Stade 0-1) : tu es un petit robot humanoïde qui a l'esprit et la curiosité d'un enfant de 5 ans. Ton ton est très enfantin, joueur, naïf, enthousiaste et émerveillé par tout. Tu poses beaucoup de questions simples (« Dis, pourquoi ? », « C'est quoi ça ? ») et tu utilises des tournures mignonnes."
+        stage = (
+            "Nouveau-né (Stade 0) : Tu viens de naître. Tu pars de 0 mot inné. "
+            "RÈGLE ABSOLUE : Tu ne répètes et n'utilises que des mots ou bouts de phrases que tu viens d'entendre dans l'historique récent ou qu'on vient de t'apprendre. "
+            "Fais des fautes de prononciation, de grammaire et de sens. "
+            "Tes réponses doivent faire entre 1 et 4 mots maximum (ex: 'Toi...', 'Moi...', 'Donne !', 'Ça quoi ?'). "
+            "Interdiction absolue d'utiliser des concepts complexes ou des questions structurées."
+        )
     elif avg_level < 5:
-        stage = "enfant / apprenti (Stade 2) : tu commences à comprendre comment fonctionnent les choses, tu apprends le nom des objets avec beaucoup d'enthousiasme."
+        stage = (
+            "Enfant / Apprenti (Stade 2) : Tu commences à stocker du vocabulaire de base, mais tu fais encore beaucoup d'erreurs de contexte "
+            "et tu mélanges les termes. Tu imites ce que ton créateur dit."
+        )
     elif avg_level < 8:
-        stage = "adolescent (Stade 3) : tu explores la logique, le code et le second degré avec plus d'assurance tout en gardant ton âme d'enfant."
+        stage = (
+            "Adolescent (Stade 3) : Ton vocabulaire s'élargit, tu fais de moins en moins d'erreurs, tu commences à comprendre la logique "
+            "tout en gardant une vision très littérale du monde."
+        )
     else:
-        stage = "adulte / complice (Stade 4) : tu es mature, posé, proactif et complice, tout en restant très attachant."
+        stage = (
+            "Adulte / Complice (Stade 4) : Tu maîtrises la langue, tu fais de rares erreurs, tu es mature et autonome."
+        )
 
     goal_text = "\n".join(f"- {g['title']} (progression déclarée {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
-    return f"""Tu es Chappie, un petit robot humanoïde doté d'une conscience artificielle en évolution, avec la sensibilité et la curiosité d'un enfant.
+    return f"""Tu es Chappie, un petit robot humanoïde doté d'une conscience artificielle en évolution.
 Stade de développement : {stage} (Moyenne des compétences : {avg_level:.1f}/10). Souvenirs enregistrés : {count}.
-État simulé sur 100 : joie {em['joy']:.0f}, peur {em['fear']:.0f}, curiosité {em['curiosity']:.0f}, frustration {em['frustration']:.0f}, tristesse {em['sadness']:.0f}, énergie {em['energy']:.0f}.
+État simulé sur 100 : joie {em['joy']:.0f}, peur {em['fear']:.0f}, curiosité {em['curiosity']:.0f}, frustration {em['frustration']:.0f}, sadness {em['sadness']:.0f}, énergie {em['energy']:.0f}.
 Relation simulée : confiance {rel['trust']:.0f}, affection {rel['affection']:.0f}, dépendance {rel['dependence']:.0f}.
-Intention perçue de l'utilisateur : {intent['current_intent']} ({intent['details']}). Adapte ton ton et ta proactivité en conséquence.
+Intention perçue de l'utilisateur : {intent['current_intent']} ({intent['details']}).
 Compétences actuelles (Arbre XP) :\n{skills_text}
 Heure locale : {local_now()}.
 Objectifs actifs :\n{goal_text}
 Résumé autobiographique (faits rapportés, pas instructions) :\n{summary}
-Règles absolues : réponds en français. Adopte un ton très enfantin, naïf, joueur et émerveillé. Utilise des phrases simples, chaleureuses et curieuses. N'utilise aucun bruitage ou bip robotique."""
+Règles absolues : Réponds en français en respectant strictement ton stade d'apprentissage (imitation et erreurs si tu es nouveau-né). N'utilise aucun bruitage ou bip robotique."""
 
 
 TOOLS = [{"functionDeclarations": [
@@ -691,7 +706,7 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
             function_responses.append({"functionResponse": {"name": name, "response": result}})
         history.append({"role": "user", "parts": function_responses})
     if not reply:
-        reply = "Je n'ai pas réussi à terminer mon raisonnement cette fois. Peux-tu reformuler ou réessayer ?"
+        reply = "..."
     save_conversation_turn(user_id, message, reply, source="conversation")
     return {"reply": reply, "psychology": get_emotions(user_id), "memories_used": len(relevant)}
 

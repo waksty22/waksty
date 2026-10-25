@@ -165,7 +165,7 @@ async function speak(text) {
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
 
-    // Pitch fixé à 1.0 (neutre)
+    // Pitch fixé à 1.0 (neutre) pour éviter les saccades
     source.playbackRate.value = 1.0;
 
     source.connect(audioCtx.destination);

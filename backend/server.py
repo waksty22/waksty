@@ -41,8 +41,8 @@ DATA_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = Path(os.getenv("CHAPPIE_DB_PATH", str(DATA_DIR / "chappie_ultimate.sqlite3")))
 API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview").strip()
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
+LIVE_MODEL = os.getenv("GEMINI_LIVE_MODEL", "gemini-3.8-flash-live-preview").strip()
 TOKEN = os.getenv("CHAPPIE_API_TOKEN", "").strip()
 OWNER_ID = os.getenv("CHAPPIE_OWNER_ID", "creator").strip() or "creator"
 MAX_MESSAGE_CHARS = 6000

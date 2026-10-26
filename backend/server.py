@@ -1,4 +1,4 @@
-"""Chappie V19 — architecture cognitive, mémoire épisodique, états contextuels et interface vocale.
+"""Chappie V19 — architecture cognitive, mémoire épisodique, modèle du monde, états contextuels et interface vocale.
 Python 3.11+. Les émotions/rêves sont des simulations logicielles, pas une conscience démontrée.
 """
 from __future__ import annotations
@@ -27,12 +27,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Import des modules cognitifs et de mémoire (V19)
+# Import des modules cognitifs, de mémoire et du modèle du monde (V19)
 from memory import init_memory_tables, save_episodic_memory, search_episodic_memories
+from world import init_world_tables, upsert_world_entity, get_world_entity
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-APP_NAME = "Chappie V19 — architecture cognitive, mémoire épisodique et partagée"
+APP_NAME = "Chappie V19 — architecture cognitive, mémoire et modèle du monde"
 BASE_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).expanduser().resolve()
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"  # conserve la mémoire existante V16; les nouvelles tables sont ajoutées sans effacer les données
@@ -154,9 +155,10 @@ def init_db() -> None:
         """)
         db.commit()
     
-    # Initialisation des tables cognitives V19 (mémoire épisodique enrichie et sources)
+    # Initialisation des tables cognitives V19 (mémoire épisodique enrichie et modèle du monde)
     with db_connection() as db:
         init_memory_tables(db)
+        init_world_tables(db)
 
 init_db()
 
@@ -201,7 +203,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title=APP_NAME, version="19.0.0", description="Compagnon conversationnel Chappie : architecture cognitive, mémoire persistante enrichie, objectifs et interface vocale.", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="19.0.0", description="Compagnon conversationnel Chappie : architecture cognitive, mémoire persistante enrichie, modèle du monde et interface vocale.", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -338,6 +340,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("UPDATE skills SET level=1.0, xp=0.0, evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?", (now, user_id))
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM memories_v19 WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM world_entities WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM world_relations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM memories_fts")
         db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM conversation_summaries WHERE user_id=?", (user_id,))
@@ -470,7 +474,6 @@ def remember(user_id: str, content: str, category: str = "general", importance: 
     safe_tags = [str(t).strip()[:40] for t in (tags or []) if str(t).strip()][:20]
     
     with db_connection() as db:
-        # Enregistrement dans la V19 enrichie
         res = save_episodic_memory(db, user_id, content, category, importance, source_type, confidence, safe_tags)
         now = utc_now()
         db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Souvenir enregistré ({category}, importance {importance}, source {source_type}).", "memory", now))
@@ -489,7 +492,6 @@ def retrieve_memories(user_id: str, query: str = "", limit: int = 10) -> list[di
         if results:
             return results
         
-        # Fallback rétrocompatible sur l'ancienne table `memories` si nécessaire
         rows = db.execute("SELECT id, content, category, importance, tags, access_count, created_at, 0 AS rank FROM memories WHERE user_id=? ORDER BY importance DESC, updated_at DESC LIMIT ?", (user_id, limit)).fetchall()
         fallback_results = []
         for row in rows:
@@ -804,7 +806,7 @@ async def home():
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:850px;margin:0 auto;padding:24px 16px;background:#0b1220;color:#eef4ff}.panel{background:#131f31;border:1px solid #2b3b52;border-radius:16px;padding:18px;margin:14px 0}h1{margin-bottom:4px}.muted{color:#aabbd0;font-size:.9rem}input,textarea,select{width:100%;padding:12px;margin:6px 0;background:#0b1525;color:#fff;border:1px solid #40536e;border-radius:9px;font:inherit}textarea{resize:vertical}button{padding:11px 15px;border:0;border-radius:9px;background:#54d3ee;color:#07131e;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#263850;color:#eef4ff}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1525;padding:14px;border-radius:10px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}.status{font-size:.9rem;color:#9de4f5}
 </style></head><body>
-<h1>🤖 Chappie V19</h1><div class="muted">Architecture cognitive · mémoire épisodique enrichie · états internes simulés · conversation vocale</div>
+<h1>🤖 Chappie V19</h1><div class="muted">Architecture cognitive · mémoire épisodique · modèle du monde · états internes simulés</div>
 <div class="panel"><label for="token">Jeton API</label><input id="token" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN"><div class="muted">Le jeton reste dans cette page. N’expose pas le serveur directement sur Internet.</div></div>
 <div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie…"></textarea><div class="row"><button type="button" id="sendBtn" onclick="sendMessage()">Envoyer</button><button type="button" class="secondary" id="micBtn" onclick="toggleMic()">🎙️ Dicter</button><button type="button" class="secondary" onclick="stopSpeech()">■ Arrêter la voix</button></div><div id="status" class="status">Prêt.</div></div>
 <div class="panel"><strong>Réponse de Chappie</strong><pre id="out">En attente de ton message…</pre><small class="muted">Les émotions et les rêves sont des états logiciels simulés, pas une preuve de conscience.</small></div>

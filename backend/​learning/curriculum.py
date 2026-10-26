@@ -39,7 +39,7 @@ def init_learning_tables(db: sqlite3.Connection) -> None:
 def evaluate_competency_test(
     db: sqlite3.Connection,
     user_id: str,
-    test_name: test_name,
+    test_name: str,
     passed: bool,
     score: float,
     details: dict[str, Any] | None = None

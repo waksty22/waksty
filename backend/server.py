@@ -30,11 +30,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Correction : Imports absolus pour éviter l'erreur d'import relatif sur Render
-from memory import init_memory_tables, save_episodic_memory, search_episodic_memories
-from world import init_world_tables, upsert_world_entity, get_world_entity
-from learning import init_learning_tables, evaluate_competency_test
-from cognition import init_cognition_tables, log_cognitive_trace
+# Correction : Imports vers les sous-dossiers et fichiers réels de ton arborescence
+from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
+from world.world_model import init_world_tables, upsert_world_entity, get_world_entity
+from learning.curriculum import init_learning_tables, evaluate_competency_test
+from cognition.reasoning import init_cognition_tables, log_cognitive_trace
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 

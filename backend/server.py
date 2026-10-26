@@ -6,9 +6,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Force l'ajout explicite du répertoire courant et de son parent dans le chemin Python pour éviter les erreurs d'import
+# Force l'ajout explicite du répertoire courant dans le chemin Python pour éviter les erreurs d'import
 CURRENT_DIR = Path(__file__).resolve().parent
-sys.path.append(str(CURRENT_DIR))
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
 sys.path.append(str(CURRENT_DIR.parent))
 
 import asyncio

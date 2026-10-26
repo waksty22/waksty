@@ -84,7 +84,7 @@ def search_episodic_memories(db: sqlite3.Connection, user_id: str, query: str = 
     limit = max(1, min(30, int(limit)))
     if query.strip():
         cursor = db.execute("""
-            id, category, content, importance, source_type, confidence, tags, access_count, created_at
+            SELECT id, category, content, importance, source_type, confidence, tags, access_count, created_at
             FROM memories_v19
             WHERE user_id = ? AND (content LIKE ? OR category LIKE ?)
             ORDER BY importance DESC, updated_at DESC

@@ -5,7 +5,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent))
+
+# Force l'ajout explicite du répertoire courant et de son parent dans le chemin Python pour éviter les erreurs d'import
+CURRENT_DIR = Path(__file__).resolve().parent
+sys.path.append(str(CURRENT_DIR))
+sys.path.append(str(CURRENT_DIR.parent))
 
 import asyncio
 import ast
@@ -30,7 +34,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Correction des chemins d'importation sans le préfixe backend pour correspondre au Root Directory
+# Importation des modules cognitifs V19
 from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
 from world.world_model import init_world_tables, upsert_world_entity, get_world_entity
 from learning.curriculum import init_learning_tables, evaluate_competency_test

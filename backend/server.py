@@ -6,11 +6,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Force l'ajout explicite du répertoire courant dans le chemin Python pour éviter les erreurs d'import
+# Force l'ajout absolu et prioritaire du répertoire courant et de son parent pour Python 3.11+ / Render
 CURRENT_DIR = Path(__file__).resolve().parent
+PARENT_DIR = CURRENT_DIR.parent
+
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
-sys.path.append(str(CURRENT_DIR.parent))
+if str(PARENT_DIR) not in sys.path:
+    sys.path.insert(0, str(PARENT_DIR))
 
 import asyncio
 import ast
@@ -35,13 +38,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Importation directe des modules cognitifs V19 (adaptée au Root Directory Render)
+# Importation directe des modules cognitifs V19 (sécurisée)
 from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
 from world.world_model import init_world_tables, upsert_world_entity, get_world_entity
 from learning.curriculum import init_learning_tables, evaluate_competency_test
 from cognition.reasoning import init_cognition_tables, log_cognitive_trace
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(CURRENT_DIR / ".env", override=False)
 
 APP_NAME = "Chappie V19.3 — architecture cognitive unifiée"
 BASE_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).expanduser().resolve()
@@ -808,7 +811,7 @@ async def autonomous_maintenance_loop() -> None:
 
 @app.get("/script.js")
 async def serve_script():
-    script_path = Path(__file__).resolve().parent / "static" / "script.js"
+    script_path = CURRENT_DIR / "static" / "script.js"
     if not script_path.is_file():
         raise HTTPException(503, "script.js est absent du déploiement. Place script.js dans le dossier static.")
     return FileResponse(script_path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})

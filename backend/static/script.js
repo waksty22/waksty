@@ -1,41 +1,19 @@
-/* Chappie — Interface Front-End Unifiée & Ultime */
-'use strict';
+let recognition = null;
+let speakingAudio = null;
 
 const $ = id => document.getElementById(id);
-const USER_ID = 'creator';
-let recognition = null;
-let cameraStream = null;
-let activeAudio = null;
 
-// --- Gestion des en-têtes d'authentification ---
-function headers(json = true) {
+function headers() {
   const tokenField = $('token');
   const token = tokenField ? tokenField.value.trim() : '';
-  const h = {};
-  if (json) h['Content-Type'] = 'application/json';
-  if (token) h['Authorization'] = 'Bearer ' + token;
-  return h;
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + token
+  };
 }
 
 function setStatus(s) {
-  const st = $('status');
-  if (st) st.textContent = s;
-}
-
-// --- Requête API centralisée ---
-async function api(path, options = {}) {
-  const response = await fetch(path, { 
-    ...options, 
-    headers: { ...headers(options.json !== false), ...(options.headers || {}) } 
-  });
-  const type = response.headers.get('content-type') || '';
-  const data = type.includes('application/json') ? await response.json() : await response.text();
-  if (!response.ok) throw new Error(typeof data === 'object' ? (data.detail || `Erreur HTTP ${response.status}`) : `Erreur HTTP ${response.status}`);
-  return data;
-}
-
-function jsonOptions(method, body) { 
-  return { method, body: JSON.stringify(body) }; 
+  $('status').textContent = s;
 }
 
 // --- Rendu visuel du tableau de bord émotionnel ---
@@ -43,6 +21,7 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
   const container = $('state');
   if (!container || !psy) return;
 
+  // Si l'élément est une balise PRE, on le remplace par un conteneur stylé
   if (container.tagName === 'PRE') {
     const div = document.createElement('div');
     div.id = 'state';
@@ -91,26 +70,33 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
   stateEl.innerHTML = html;
 }
 
-// --- Polling régulier de l'état psychologique ---
+// --- Polling unique et espacé pour le tableau de bord (toutes les 30 secondes) ---
 let psychologyInterval = null;
+
 async function fetchPsychology() {
   const tokenField = $('token');
   const token = tokenField ? tokenField.value.trim() : '';
   if (!token) return;
 
   try {
-    const d = await api(`/api/emotions/${USER_ID}`, { method: 'GET' });
-    if (d.psychology) renderEmotionsDashboard(d.psychology);
+    const r = await fetch('/api/emotions/creator', { headers: headers() });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.psychology) renderEmotionsDashboard(d.psychology);
+    }
   } catch (e) {}
 }
 
 if (psychologyInterval) clearInterval(psychologyInterval);
 psychologyInterval = setInterval(fetchPsychology, 30000);
 
-// --- Envoi de message standard ---
+window.addEventListener('DOMContentLoaded', () => {
+  setStatus('Interface chargée. Jeton requis pour les fonctions protégées.');
+  console.info('Chappie interface prête');
+});
+
 async function sendMessage() {
-  const msgInput = $('msg');
-  const message = msgInput.value.trim();
+  const message = $('msg').value.trim();
   if (!message) return;
   
   const btn = $('sendBtn');
@@ -119,11 +105,19 @@ async function sendMessage() {
   $('out').textContent = 'Réflexion...';
   
   try {
-    const d = await api('/api/chat', { ...jsonOptions('POST', { user_id: USER_ID, message }) });
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ user_id: 'creator', message })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Erreur API');
     
     $('out').textContent = d.reply;
-    if (d.psychology) renderEmotionsDashboard(d.psychology);
-    msgInput.value = '';
+    if (d.psychology) {
+      renderEmotionsDashboard(d.psychology);
+    }
+    $('msg').value = '';
     setStatus('Réponse reçue.');
     await speak(d.reply);
   } catch (e) {
@@ -134,28 +128,46 @@ async function sendMessage() {
   }
 }
 
-// --- Synthèse vocale standard ---
+// --- Synthèse vocale standard (Web Audio API) ---
 async function speak(text) {
   try {
-    stopSpeech(false);
-    const response = await fetch('/api/speak', {
-      method: 'POST', 
-      headers: headers(), 
+    if (speakingAudio) {
+      speakingAudio.pause();
+      URL.revokeObjectURL(speakingAudio.src);
+    }
+    
+    let maturityLevel = 1.0;
+    try {
+      const skillRes = await fetch('/api/skills/creator', { headers: headers() });
+      if (skillRes.ok) {
+        const skillData = await skillRes.json();
+        if (skillData.average_level) {
+          maturityLevel = skillData.average_level;
+        }
+      }
+    } catch (e) {}
+
+    const r = await fetch('/api/speak', {
+      method: 'POST',
+      headers: headers(),
       body: JSON.stringify({ text, voice: 'fr-FR-HenriNeural' })
     });
-    if (!response.ok) {
+    if (!r.ok) {
       setStatus('Réponse écrite prête ; synthèse vocale indisponible.');
       return;
     }
     
-    const arrayBuffer = await response.arrayBuffer();
+    const arrayBuffer = await r.arrayBuffer();
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioCtx();
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
+
+    // Pitch fixé à 1.0 (neutre)
     source.playbackRate.value = 1.0;
+
     source.connect(audioCtx.destination);
     source.start(0);
     setStatus('Lecture vocale en cours...');
@@ -169,21 +181,19 @@ async function speak(text) {
   }
 }
 
-function stopSpeech(showStatus = true) {
-  if (activeAudio) {
-    activeAudio.pause();
-    activeAudio.currentTime = 0;
-    activeAudio = null;
+function stopSpeech() {
+  if (speakingAudio) {
+    speakingAudio.pause();
+    speakingAudio.currentTime = 0;
   }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
-  if (showStatus) setStatus('Lecture arrêtée.');
+  setStatus('Lecture arrêtée.');
 }
 
-// --- Reconnaissance vocale (Dictée) ---
 function toggleMic() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
-    setStatus('La dictée vocale nécessite un navigateur compatible (ex: Chrome).');
+    setStatus('La dictée vocale nécessite un navigateur compatible, par exemple Chrome.');
     return;
   }
   if (recognition) {
@@ -205,27 +215,32 @@ function toggleMic() {
   recognition.onend = () => {
     $('micBtn').textContent = '🎙️ Dicter';
     recognition = null;
-    setStatus('Dictée terminée.');
+    setStatus('Dictée terminée. Vérifie le texte puis envoie-le.');
   };
   $('micBtn').textContent = '⏹️ Arrêter dictée';
   setStatus('Je t’écoute...');
   recognition.start();
 }
 
-// --- Panneaux de chargement (Mémoire, Humeur, Rêves, Pensées, Compétences) ---
 async function loadSummary() {
   try {
-    const d = await api('/api/memory/summary', { method: 'GET' });
-    $('summary').textContent = d.summary || 'Aucun résumé enregistré.';
+    const r = await fetch('/api/memory/summary', { headers: headers() });
+    const d = await r.json();
+    $('summary').textContent = r.ok ? (d.summary || 'Aucun résumé enregistré pour le moment.') : d.detail;
   } catch (e) {
-    $('summary').textContent = 'Erreur de chargement : ' + e.message;
+    $('summary').textContent = 'Erreur de chargement.';
   }
 }
 
 async function loadMoodHistory() {
   try {
-    const d = await api('/api/mood/history?limit=10', { method: 'GET' });
-    if (d.events && d.events.length > 0) {
+    const r = await fetch('/api/mood/history?limit=10', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.events) {
+      if (d.events.length === 0) {
+        $('summary').textContent = 'Aucun événement d’humeur enregistré pour le moment.';
+        return;
+      }
       let text = "📜 Historique des 10 dernières humeurs :\n\n";
       d.events.forEach(e => {
         const date = new Date(e.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -234,17 +249,22 @@ async function loadMoodHistory() {
       });
       $('summary').textContent = text;
     } else {
-      $('summary').textContent = 'Aucun événement d’humeur enregistré.';
+      $('summary').textContent = 'Impossible de charger l’historique des humeurs.';
     }
   } catch (e) {
-    $('summary').textContent = 'Erreur : ' + e.message;
+    $('summary').textContent = 'Erreur de chargement des humeurs : ' + e.message;
   }
 }
 
 async function loadDreams() {
   try {
-    const d = await api(`/api/dreams/${USER_ID}`, { method: 'GET' });
-    if (d.dreams && d.dreams.length > 0) {
+    const r = await fetch('/api/dreams/creator', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.dreams) {
+      if (d.dreams.length === 0) {
+        $('summary').textContent = 'Aucun rêve simulé enregistré pour le moment.';
+        return;
+      }
       let text = "🌙 Derniers rêves simulés de Chappie :\n\n";
       d.dreams.forEach(dream => {
         const date = new Date(dream.created_at).toLocaleString('fr-FR');
@@ -252,17 +272,22 @@ async function loadDreams() {
       });
       $('summary').textContent = text;
     } else {
-      $('summary').textContent = 'Aucun rêve simulé enregistré.';
+      $('summary').textContent = 'Impossible de charger les rêves.';
     }
   } catch (e) {
-    $('summary').textContent = 'Erreur : ' + e.message;
+    $('summary').textContent = 'Erreur de chargement des rêves : ' + e.message;
   }
 }
 
 async function loadThoughts() {
   try {
-    const d = await api(`/api/thoughts/${USER_ID}`, { method: 'GET' });
-    if (d.thoughts && d.thoughts.length > 0) {
+    const r = await fetch('/api/thoughts/creator', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.thoughts) {
+      if (d.thoughts.length === 0) {
+        $('summary').textContent = 'Aucune pensée métacognitive enregistrée pour le moment.';
+        return;
+      }
       let text = "🧠 Dernières pensées et ruminations de Chappie :\n\n";
       d.thoughts.forEach(t => {
         const date = new Date(t.created_at).toLocaleString('fr-FR');
@@ -270,35 +295,67 @@ async function loadThoughts() {
       });
       $('summary').textContent = text;
     } else {
-      $('summary').textContent = 'Aucune pensée métacognitive enregistrée.';
+      $('summary').textContent = 'Impossible de charger les pensées.';
     }
   } catch (e) {
-    $('summary').textContent = 'Erreur : ' + e.message;
+    $('summary').textContent = 'Erreur de chargement des pensées : ' + e.message;
   }
 }
 
 async function loadSkills() {
   try {
-    const d = await api(`/api/skills/${USER_ID}`, { method: 'GET' });
-    if (d.skills && d.skills.length > 0) {
+    const r = await fetch('/api/skills/creator', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.skills) {
+      if (d.skills.length === 0) {
+        $('summary').textContent = 'Aucune compétence enregistrée pour le moment.';
+        return;
+      }
       let text = `🎓 Arbre de Compétences de Chappie (Moyenne globale : ${(d.average_level || 1).toFixed(1)}/10) :\n\n`;
       d.skills.forEach(s => {
-        text += `🔹 ${s.skill_name} : Niveau ${Math.round(s.level)} (XP: ${Math.round(s.xp)})\n`;
+        const percent = Math.min(100, Math.round((s.xp % 100)));
+        text += `🔹 ${s.evidence || s.skill_name} : Niveau ${Math.round(s.level)} (XP: ${Math.round(s.xp)} - ${percent}% niv suivant)\n`;
       });
       $('summary').textContent = text;
     } else {
-      $('summary').textContent = 'Aucune compétence enregistrée.';
+      $('summary').textContent = 'Impossible de charger les compétences.';
     }
   } catch (e) {
-    $('summary').textContent = 'Erreur : ' + e.message;
+    $('summary').textContent = 'Erreur de chargement des compétences : ' + e.message;
+  }
+}
+
+async function resetLife() {
+  if (!confirm("⚠️ Es-tu sûr de vouloir effacer toute la mémoire et réinitialiser Chappie à zéro (Page Blanche / Naissance) ?")) {
+    return;
+  }
+  try {
+    setStatus('Réinitialisation de Chappie en cours...');
+    const r = await fetch('/api/reset-life', {
+      method: 'POST',
+      headers: headers()
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Erreur lors du reset');
+    
+    $('summary').textContent = "🐣 Chappie est né à nouveau (Stade 0). Tout est effacé, prêt pour l'apprentissage !";
+    $('out').textContent = "Bip... Où suis-je ? Bonjour... c'est quoi cet endroit ?";
+    setStatus('Chappie est un nouveau-né !');
+    fetchPsychology();
+  } catch (e) {
+    setStatus('Erreur de réinitialisation : ' + e.message);
   }
 }
 
 async function loadGoals() {
   try {
-    const d = await api(`/api/goals?user_id=${USER_ID}`, { method: 'GET' });
-    const root = $('goals') || $('summary');
-    if (d.goals && d.goals.length > 0) {
+    const r = await fetch('/api/goals', { headers: headers() });
+    const d = await r.json();
+    if (r.ok && d.goals) {
+      if (d.goals.length === 0) {
+        $('summary').textContent = 'Aucun objectif actif pour le moment.';
+        return;
+      }
       let text = "🎯 Objectifs actifs de Chappie :\n\n";
       d.goals.forEach(g => {
         text += `📌 ${g.title} (Progression : ${Math.round(g.progress)}%)\n`;
@@ -310,40 +367,27 @@ async function loadGoals() {
         }
         text += '\n';
       });
-      root.textContent = text;
+      $('summary').textContent = text;
     } else {
-      root.textContent = 'Aucun objectif actif.';
+      $('summary').textContent = 'Impossible de charger les objectifs.';
     }
   } catch (e) {
-    $('summary').textContent = 'Erreur : ' + e.message;
+    $('summary').textContent = 'Erreur de chargement des objectifs : ' + e.message;
   }
 }
 
 async function consolidate() {
   try {
-    const d = await api('/api/memory/consolidate', { method: 'POST' });
-    $('summary').textContent = d.summary || 'Aucun échange à résumer.';
-    setStatus('Mémoire consolidée.');
+    const r = await fetch('/api/memory/consolidate', { method: 'POST', headers: headers() });
+    const d = await r.json();
+    $('summary').textContent = r.ok ? (d.summary || 'Aucun échange à résumer.') : d.detail;
+    setStatus(r.ok ? 'Mémoire consolidée.' : 'Consolidation impossible.');
   } catch (e) {
     setStatus('Erreur de consolidation.');
   }
 }
 
-async function resetLife() {
-  if (!confirm("⚠️ Es-tu sûr de vouloir effacer toute la mémoire et réinitialiser Chappie à zéro (Page Blanche) ?")) return;
-  try {
-    setStatus('Réinitialisation en cours...');
-    const d = await api('/api/reset-life', { method: 'POST' });
-    $('summary').textContent = "🐣 Chappie est né à nouveau (Stade 0). Tout est effacé !";
-    $('out').textContent = "Bip... Où suis-je ? Bonjour...";
-    setStatus('Chappie est un nouveau-né !');
-    fetchPsychology();
-  } catch (e) {
-    setStatus('Erreur de réinitialisation : ' + e.message);
-  }
-}
-
-// --- Gemini Live & Vision Temps Réel ---
+// --- Gemini Live ---
 let liveSocket = null, liveStream = null, liveCtx = null, liveProcessor = null, liveSource = null, liveNextTime = 0, liveActive = false, liveAudioSources = new Set();
 let visionInterval = null;
 
@@ -374,7 +418,10 @@ function resample(input, fromRate, toRate) {
   for (let i = 0; i < len; i++) {
     const start = Math.floor(i * ratio), end = Math.min(input.length, Math.floor((i + 1) * ratio));
     let sum = 0, n = 0;
-    for (let j = start; j < end; j++) { sum += input[j]; n++; }
+    for (let j = start; j < end; j++) {
+      sum += input[j];
+      n++;
+    }
     out[i] = n ? sum / n : input[start] || 0;
   }
   return out;
@@ -399,7 +446,10 @@ function startLiveVision() {
     if (!base64Image) return;
 
     liveSocket.send(JSON.stringify({
-      video: { mimeType: 'image/jpeg', data: base64Image }
+      video: {
+        mimeType: 'image/jpeg',
+        data: base64Image
+      }
     }));
   }, 1500);
 }
@@ -420,7 +470,7 @@ async function toggleLive() {
   const tokenField = $('token');
   const token = tokenField ? tokenField.value.trim() : '';
   if (!token) {
-    $('liveStatus').textContent = 'Erreur : Saisis ton jeton API avant de démarrer le live.';
+    $('liveStatus').textContent = 'Erreur : Saisis ton jeton API dans le champ en haut avant de démarrer le live.';
     return;
   }
 
@@ -430,6 +480,7 @@ async function toggleLive() {
     await liveCtx.resume();
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     liveSocket = new WebSocket(proto + '//' + location.host + '/ws/live?token=' + encodeURIComponent(token));
+    window.liveSocket = liveSocket;
     
     liveSocket.onopen = () => {
       liveActive = true;
@@ -445,7 +496,9 @@ async function toggleLive() {
       liveSource.connect(liveProcessor);
       liveProcessor.connect(liveCtx.destination);
 
-      if (cameraStream) startLiveVision();
+      if (cameraStream) {
+        startLiveVision();
+      }
     };
     
     liveSocket.onmessage = async e => {
@@ -459,6 +512,7 @@ async function toggleLive() {
         $('out').textContent = 'Chappie : ';
       }
       if (d.text) { 
+        // Accumulation fluide pour afficher toute la phrase ou le paragraphe complet
         const outEl = $('out');
         if (outEl.textContent.startsWith('En attente') || outEl.textContent === 'Chappie : ') {
           outEl.textContent = 'Chappie : ' + d.text;
@@ -467,10 +521,14 @@ async function toggleLive() {
         }
       }
       if (d.audio) { 
-        playLiveAudio(d.audio, d.sample_rate || 24000); 
+        let maturityLevel = d.maturity_level || 1.0;
+        playLiveAudio(d.audio, d.sample_rate || 24000, maturityLevel); 
       }
       if (d.error) { $('liveStatus').textContent = 'Erreur : ' + d.error; }
-      if (d.psychology) renderEmotionsDashboard(d.psychology);
+
+      if (d.psychology) {
+        renderEmotionsDashboard(d.psychology);
+      }
     };
     
     liveSocket.onerror = () => { $('liveStatus').textContent = 'Erreur WebSocket.'; };
@@ -484,8 +542,10 @@ async function toggleLive() {
   }
 }
 
-function playLiveAudio(encoded, rate) {
+// --- Lecture Audio Live anti-saccades (Délai 0.15s, Pitch à 1.0 neutre) ---
+function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
   if (!liveCtx) return;
+  
   try {
     const bytes = fromB64(encoded);
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -500,17 +560,23 @@ function playLiveAudio(encoded, rate) {
     
     const src = liveCtx.createBufferSource();
     src.buffer = buf;
+
+    // Pitch et formant réinitialisés à 1.0 (neutre)
     src.playbackRate.value = 1.0;
+
     src.connect(liveCtx.destination);
     liveAudioSources.add(src);
     src.onended = () => liveAudioSources.delete(src);
 
+    // Synchronisation anti-saccades avec une avance de sécurité de 0.15s
     const now = liveCtx.currentTime;
-    if (liveNextTime < now) liveNextTime = now + 0.15;
+    if (liveNextTime < now) {
+      liveNextTime = now + 0.15;
+    }
     src.start(liveNextTime);
     liveNextTime += buf.duration;
   } catch (e) {
-    console.error("Erreur lecture audio live :", e);
+    console.error("Erreur lors de la lecture audio live :", e);
   }
 }
 
@@ -524,19 +590,24 @@ function stopLive(close = true) {
   try { if (liveCtx) liveCtx.close(); } catch {}
   for (const a of liveAudioSources) { try { a.stop(); } catch {} }
   liveAudioSources.clear();
-  liveSocket = null; liveStream = null; liveCtx = null; liveProcessor = null; liveSource = null; liveNextTime = 0;
-  if ($('liveBtn')) $('liveBtn').textContent = '▶ Démarrer la conversation live';
+  liveSocket = null; window.liveSocket = null; liveStream = null; liveCtx = null; liveProcessor = null; liveSource = null; liveNextTime = 0;
+  $('liveBtn').textContent = '▶ Démarrer la conversation live';
 }
 
-// --- Gestion Caméra Standard ---
+// --- Vision ---
+let cameraStream = null;
+
 async function startCamera() {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     $('camera').srcObject = cameraStream;
-    $('visionOut').textContent = 'Caméra active.';
-    if (liveActive && liveSocket) startLiveVision();
+    $('visionOut').textContent = 'Caméra active. Chappie peut vous observer en direct si Gemini Live est lancé.';
+    
+    if (liveActive && liveSocket) {
+      startLiveVision();
+    }
   } catch (e) {
-    $('visionOut').textContent = 'Accès caméra refusé : ' + e.message;
+    $('visionOut').textContent = 'Accès caméra refusé ou indisponible : ' + e.message;
   }
 }
 
@@ -544,46 +615,102 @@ function stopCamera() {
   stopLiveVision();
   if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
   cameraStream = null;
-  if ($('camera')) $('camera').srcObject = null;
+  $('camera').srcObject = null;
   $('visionOut').textContent = 'Caméra inactive.';
 }
 
 async function captureVision() {
   const v = $('camera');
+
   if (!cameraStream || !v.videoWidth || !v.videoHeight) {
-    $('visionOut').textContent = 'Active la caméra d’abord.';
+    $('visionOut').textContent = 'Active la caméra et attends que l’image apparaisse.';
     return;
   }
+
   const canvas = document.createElement('canvas');
   const scale = Math.min(1, 960 / v.videoWidth);
+
   canvas.width = Math.round(v.videoWidth * scale);
   canvas.height = Math.round(v.videoHeight * scale);
+
   const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    $('visionOut').textContent = 'Impossible de préparer l’image.';
+    return;
+  }
+
   ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-  $('visionOut').textContent = 'Analyse de l’image...';
+  $('visionOut').textContent = 'Chappie observe l’image...';
 
   try {
     const imageData = canvas.toDataURL('image/jpeg', 0.65);
-    const d = await api('/api/vision/analyze', { ...jsonOptions('POST', { user_id: USER_ID, image_data_url: imageData, prompt: 'Décris ce que tu vois.' }) });
-    $('visionOut').textContent = 'Ce que Chappie voit :\n' + d.description;
-    
-    const answer = await api('/api/chat', { ...jsonOptions('POST', { user_id: USER_ID, message: `Voici ce que tu vois par ta caméra : ${d.description}. Réagis naturellement.` }) });
-    $('out').textContent = answer.reply;
-    if (answer.psychology) renderEmotionsDashboard(answer.psychology);
-    await speak(answer.reply);
+
+    const visionResponse = await fetch('/api/vision/analyze', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        image_data_url: imageData,
+        prompt: 'Décris ce que tu vois. Distingue les éléments certains des suppositions. Si une personne est visible, décris son apparence sans chercher à déterminer son identité.'
+      })
+    });
+
+    const visionData = await visionResponse.json();
+
+    if (!visionResponse.ok) {
+      throw new Error(visionData.detail || 'L’analyse visuelle a échoué.');
+    }
+
+    const description = visionData.description;
+
+    $('visionOut').textContent = 'Ce que Chappie voit :\n' + description + '\n\nChappie prépare sa réponse...';
+
+    const chatResponse = await fetch('/api/chat', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        user_id: 'creator',
+        message: 'Tu viens d’analyser une image avec ta caméra. Voici la description obtenue :\n' + description + '\nRéagis naturellement à ce que tu observes et explique-moi ce que tu en comprends.'
+      })
+    });
+
+    const chatData = await chatResponse.json();
+
+    if (!chatResponse.ok) {
+      throw new Error(chatData.detail || 'Image analysée, mais Chappie ne peut pas répondre.');
+    }
+
+    $('visionOut').textContent = 'Ce que Chappie voit :\n' + description;
+    $('out').textContent = chatData.reply;
+    if (chatData.psychology) {
+      renderEmotionsDashboard(chatData.psychology);
+    }
+
+    setStatus('Image analysée et réponse de Chappie reçue.');
+    await speak(chatData.reply);
+
   } catch (e) {
-    $('visionOut').textContent = 'Erreur vision : ' + e.message;
+    $('visionOut').textContent = 'Erreur caméra : ' + e.message;
+    setStatus('Vérifie le jeton et la connexion au serveur.');
   }
 }
 
-// --- Enregistrement Profils Vocaux ---
+// --- Profils Vocaux ---
 function wavBlob(floatSamples, sampleRate) {
   const rate = 16000, s = resample(floatSamples, sampleRate, rate), buf = new ArrayBuffer(44 + s.length * 2), v = new DataView(buf);
   const write = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
-  write(0, 'RIFF'); v.setUint32(4, 36 + s.length * 2, true); write(8, 'WAVE');
-  write(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-  write(36, 'data'); v.setUint32(40, s.length * 2, true);
+  write(0, 'RIFF');
+  v.setUint32(4, 36 + s.length * 2, true);
+  write(8, 'WAVE');
+  write(12, 'fmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  write(36, 'data');
+  v.setUint32(40, s.length * 2, true);
   for (let i = 0; i < s.length; i++) {
     const x = Math.max(-1, Math.min(1, s[i]));
     v.setInt16(44 + i * 2, x < 0 ? x * 32768 : x * 32767, true);
@@ -592,10 +719,14 @@ function wavBlob(floatSamples, sampleRate) {
 }
 
 async function recordVoice(mode) {
-  if (!navigator.mediaDevices?.getUserMedia) { $('voiceStatus').textContent = 'Micro non disponible.'; return; }
-  const vName = $('voiceName');
-  if (mode === 'enroll' && (!vName || !vName.value.trim())) { $('voiceStatus').textContent = 'Saisis un nom de profil.'; return; }
-  
+  if (!navigator.mediaDevices?.getUserMedia) {
+    $('voiceStatus').textContent = 'Micro non disponible.';
+    return;
+  }
+  if (mode === 'enroll' && !$('voiceName').value.trim()) {
+    $('voiceStatus').textContent = 'Saisis un nom de profil.';
+    return;
+  }
   let stream, ctx, src, proc, samples = [], sr;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
@@ -605,33 +736,37 @@ async function recordVoice(mode) {
     src = ctx.createMediaStreamSource(stream);
     proc = ctx.createScriptProcessor(4096, 1, 1);
     proc.onaudioprocess = e => samples.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-    src.connect(proc); proc.connect(ctx.destination);
+    src.connect(proc);
+    proc.connect(ctx.destination);
     
-    $('voiceStatus').textContent = 'Enregistrement en cours... Parle.';
+    $('voiceStatus').textContent = 'Enregistrement ' + (mode === 'enroll' ? 'du profil' : 'de comparaison') + '... parle naturellement.';
     await new Promise(resolve => setTimeout(resolve, (mode === 'enroll' ? 8 : 5) * 1000));
     
-    proc.disconnect(); src.disconnect(); stream.getTracks().forEach(t => t.stop()); await ctx.close();
+    proc.disconnect();
+    src.disconnect();
+    stream.getTracks().forEach(t => t.stop());
+    await ctx.close();
     
     const n = samples.reduce((a, b) => a + b.length, 0), all = new Float32Array(n);
     let pos = 0;
-    for (const a of samples) { all.set(a, pos); pos += a.length; }
+    for (const a of samples) {
+      all.set(a, pos);
+      pos += a.length;
+    }
     const blob = wavBlob(all, sr);
-    
-    const endpoint = mode === 'enroll' ? '/api/voice-profiles/' + encodeURIComponent(vName.value.trim()) : '/api/voice-profiles-identify';
-    const r = await fetch(endpoint, { method: 'POST', headers: { ...headers(false), 'Content-Type': 'audio/wav' }, body: blob });
+    const formHeaders = { 'Authorization': 'Bearer ' + $('token').value.trim(), 'Content-Type': 'audio/wav' };
+    const endpoint = mode === 'enroll' ? '/api/voice-profiles/' + encodeURIComponent($('voiceName').value.trim()) : '/api/voice-profiles-identify';
+    const r = await fetch(endpoint, { method: 'POST', headers: formHeaders, body: blob });
     const d = await r.json();
     if (!r.ok) throw Error(d.detail || 'Erreur profils vocaux');
     
-    $('voiceStatus').textContent = mode === 'enroll' ? 'Profil enregistré : ' + d.profile_name : ('Résultat : ' + (d.profile_name || 'Inconnu') + ' (score ' + (d.score ?? '—') + ')');
+    $('voiceStatus').textContent = mode === 'enroll' ? 'Profil enregistré : ' + d.profile_name : ('Résultat : ' + (d.profile_name || 'personne non reconnue') + ' (score ' + (d.score ?? '—') + ')');
   } catch (e) {
-    $('voiceStatus').textContent = 'Erreur : ' + e.message;
+    $('voiceStatus').textContent = 'Profils vocaux : ' + e.message;
   }
 }
 
-// --- Initialisation globale ---
 window.addEventListener('DOMContentLoaded', () => {
-  setStatus('Interface chargée.');
-  fetchPsychology();
   const msgInput = $('msg');
   if (msgInput) {
     msgInput.addEventListener('keydown', e => {
@@ -643,7 +778,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Exposer globalement pour le HTML
+// --- Exposer globalement les fonctions pour le HTML ---
 window.sendMessage = sendMessage;
 window.stopSpeech = stopSpeech;
 window.toggleMic = toggleMic;

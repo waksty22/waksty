@@ -20,7 +20,6 @@ import sqlite3
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 

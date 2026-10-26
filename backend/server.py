@@ -34,11 +34,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Importation directe des modules cognitifs V19 (sécurisée)
-from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
-from world.world_model import init_world_tables, upsert_world_entity, get_world_entity
-from learning.curriculum import init_learning_tables, evaluate_competency_test
-from cognition.reasoning import init_cognition_tables, log_cognitive_trace
+# Importation directe des modules cognitifs V19 (via le package backend)
+from backend.memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
+from backend.world.world_model import init_world_tables, upsert_world_entity, get_world_entity
+from backend.learning.curriculum import init_learning_tables, evaluate_competency_test
+from backend.cognition.reasoning import init_cognition_tables, log_cognitive_trace
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 

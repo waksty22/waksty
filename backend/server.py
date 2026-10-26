@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Correction : Imports vers les sous-dossiers et fichiers réels de ton arborescence
+# Correction : Import correct pointant vers le fichier curriculum.py dans le dossier learning
 from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
 from world.world_model import init_world_tables, upsert_world_entity, get_world_entity
 from learning.curriculum import init_learning_tables, evaluate_competency_test
@@ -1083,7 +1083,7 @@ async def voice_profile_identify(request: Request, user_id: str = Depends(requir
         scored.append((score, row["profile_name"]))
     score, name = max(scored)
     matched = score >= VOICE_MATCH_THRESHOLD
-    return {"profile_name": name if matched else None, "candidate_profile": name, "score": round(score, 4), "matched": matched, "threshold": VOICE_MATCH_THRESHOLD, "warning": "La similarité vocale est probabiliste : ne l'utilise jamais comme authentification ou contrôle d'accès."}
+    return {"profile_name": name if matched else None, "candidate_profile": name, "score": round(score, 4), "matched": matched, "threshold": VOICE_MATCH_THRESHOLD, "warning": "La similarité vocale est probabiliste : ne l'utilisais jamais comme authentification ou contrôle d'accès."}
 
 
 @app.get("/api/voice-profiles")

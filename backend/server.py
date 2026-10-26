@@ -3,6 +3,10 @@ Python 3.11+. Les émotions/rêves sont des simulations logicielles, pas une con
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent))
+
 import asyncio
 import ast
 import hmac

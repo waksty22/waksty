@@ -6,14 +6,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Force l'ajout absolu et prioritaire du répertoire courant et de son parent pour Python 3.11+ / Render
+# Le répertoire courant est défini par le dossier backend sur Render
 CURRENT_DIR = Path(__file__).resolve().parent
-PARENT_DIR = CURRENT_DIR.parent
-
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
-if str(PARENT_DIR) not in sys.path:
-    sys.path.insert(0, str(PARENT_DIR))
 
 import asyncio
 import ast

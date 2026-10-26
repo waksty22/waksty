@@ -1,4 +1,4 @@
-"""Chappie V18 - mémoire autobiographique, états contextuels et interface vocale.
+"""Chappie V19 — architecture cognitive, mémoire épisodique, états contextuels et interface vocale.
 Python 3.11+. Les émotions/rêves sont des simulations logicielles, pas une conscience démontrée.
 """
 from __future__ import annotations
@@ -27,9 +27,12 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# Import des modules cognitifs et de mémoire (V19)
+from memory import init_memory_tables, save_episodic_memory, search_episodic_memories
+
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-APP_NAME = "Chappie V18.9 — mémoire partagée écrit, voix et vision"
+APP_NAME = "Chappie V19 — architecture cognitive, mémoire épisodique et partagée"
 BASE_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).expanduser().resolve()
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"  # conserve la mémoire existante V16; les nouvelles tables sont ajoutées sans effacer les données
@@ -150,6 +153,10 @@ def init_db() -> None:
         );
         """)
         db.commit()
+    
+    # Initialisation des tables cognitives V19 (mémoire épisodique enrichie et sources)
+    with db_connection() as db:
+        init_memory_tables(db)
 
 init_db()
 
@@ -194,7 +201,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title=APP_NAME, version="18.9.0", description="Compagnon conversationnel Chappie : mémoire persistante, objectifs, états simulés et interface vocale.", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="19.0.0", description="Compagnon conversationnel Chappie : architecture cognitive, mémoire persistante enrichie, objectifs et interface vocale.", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -233,6 +240,8 @@ class MemoryRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     category: str = Field(default="general", min_length=1, max_length=60)
     importance: int = Field(default=3, ge=1, le=5)
+    source_type: str = Field(default="taught", pattern=r"^(observed|taught|inferred|confirmed)$")
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list, max_length=20)
 
 
@@ -328,6 +337,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
     with db_connection() as db:
         db.execute("UPDATE skills SET level=1.0, xp=0.0, evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?", (now, user_id))
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM memories_v19 WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM memories_fts")
         db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM conversation_summaries WHERE user_id=?", (user_id,))
@@ -450,53 +460,46 @@ def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
     return vals
 
 
-def remember(user_id: str, content: str, category: str = "general", importance: int = 3, tags: list[str] | None = None) -> dict[str, Any]:
+def remember(user_id: str, content: str, category: str = "general", importance: int = 3, source_type: str = "taught", confidence: float = 0.8, tags: list[str] | None = None) -> dict[str, Any]:
     user_id = valid_user(user_id)
     content = content.strip()
     if not content:
         raise HTTPException(422, "Un souvenir ne peut pas être vide.")
     importance = max(1, min(5, int(importance)))
+    confidence = max(0.0, min(1.0, float(confidence)))
     safe_tags = [str(t).strip()[:40] for t in (tags or []) if str(t).strip()][:20]
-    tags_json = json.dumps(safe_tags, ensure_ascii=False)
-    now = utc_now()
+    
     with db_connection() as db:
-        db.execute("""INSERT INTO memories(user_id,category,content,importance,tags,access_count,created_at,updated_at)
-          VALUES(?,?,?,?,?,0,?,?) ON CONFLICT(user_id,content) DO UPDATE SET
-          category=excluded.category, importance=MAX(memories.importance,excluded.importance),
-          tags=excluded.tags, updated_at=excluded.updated_at""", (user_id, category.strip()[:60], content, importance, tags_json, now, now))
-        row = db.execute("SELECT id FROM memories WHERE user_id=? AND content=?", (user_id, content)).fetchone()
-        db.execute("DELETE FROM memories_fts WHERE rowid=?", (row["id"],))
-        db.execute("INSERT INTO memories_fts(rowid,content,category,tags) VALUES(?,?,?,?)", (row["id"], content, category, " ".join(safe_tags)))
-        db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Souvenir enregistré ({category}, importance {importance}).", "memory", now))
+        # Enregistrement dans la V19 enrichie
+        res = save_episodic_memory(db, user_id, content, category, importance, source_type, confidence, safe_tags)
+        now = utc_now()
+        db.execute("INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)", (user_id, f"Souvenir enregistré ({category}, importance {importance}, source {source_type}).", "memory", now))
         db.commit()
-    return {"saved": True, "content": content, "category": category, "importance": importance, "tags": safe_tags}
+    return res
 
 
 def retrieve_memories(user_id: str, query: str = "", limit: int = 10) -> list[dict[str, Any]]:
     user_id = valid_user(user_id)
     limit = max(1, min(30, int(limit)))
     with db_connection() as db:
-        rows: list[sqlite3.Row] = []
-        terms = [t for t in re.findall(r"[\wÀ-ÿ'-]+", query.casefold()) if len(t) > 1][:10]
-        if terms:
-            fts_query = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
-            try:
-                rows = db.execute("""SELECT m.id,m.content,m.category,m.importance,m.tags,m.access_count,m.created_at,
-                    bm25(memories_fts) AS rank FROM memories_fts JOIN memories m ON m.id=memories_fts.rowid
-                    WHERE memories_fts MATCH ? AND m.user_id=? ORDER BY rank ASC, m.importance DESC LIMIT ?""", (fts_query, user_id, limit)).fetchall()
-            except sqlite3.OperationalError:
-                rows = []
-        if not rows and not terms:
-            rows = db.execute("SELECT id,content,category,importance,tags,access_count,created_at,0 AS rank FROM memories WHERE user_id=? ORDER BY importance DESC, updated_at DESC LIMIT ?", (user_id, limit)).fetchall()
-        results = []
+        results = search_episodic_memories(db, user_id, query, limit)
+        for item in results:
+            db.execute("UPDATE memories_v19 SET access_count = access_count + 1 WHERE id = ?", (item.get("id"),))
+        db.commit()
+        if results:
+            return results
+        
+        # Fallback rétrocompatible sur l'ancienne table `memories` si nécessaire
+        rows = db.execute("SELECT id, content, category, importance, tags, access_count, created_at, 0 AS rank FROM memories WHERE user_id=? ORDER BY importance DESC, updated_at DESC LIMIT ?", (user_id, limit)).fetchall()
+        fallback_results = []
         for row in rows:
             item = dict(row)
             try: item["tags"] = json.loads(item["tags"])
             except Exception: item["tags"] = []
-            results.append(item)
-            db.execute("UPDATE memories SET access_count=access_count+1 WHERE id=?", (item["id"],))
-        db.commit()
-        return results
+            item["source_type"] = "taught"
+            item["confidence"] = 0.8
+            fallback_results.append(item)
+        return fallback_results
 
 
 def get_latest_summary(user_id: str) -> str:
@@ -568,7 +571,7 @@ def get_identity_prompt(user_id: str) -> str:
     avg_level = skills_data["average_level"]
 
     with db_connection() as db:
-        count = db.execute("SELECT COUNT(*) FROM memories WHERE user_id=?", (user_id,)).fetchone()[0]
+        count = db.execute("SELECT COUNT(*) FROM memories_v19 WHERE user_id=?", (user_id,)).fetchone()[0]
         goals = db.execute("SELECT title,progress FROM goals WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 5", (user_id,)).fetchall()
     
     skills_text = "\n".join(f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})" for s in skills) or "Aucune compétence enregistrée."
@@ -597,7 +600,7 @@ Règles absolues : réponds en français. Si tu es au stade nouveau-né, sois ex
 
 
 TOOLS = [{"functionDeclarations": [
-    {"name": "remember_fact", "description": "Enregistrer un fait utile fourni ou confirmé par l'utilisateur.", "parameters": {"type": "OBJECT", "properties": {"content": {"type": "STRING"}, "category": {"type": "STRING"}, "importance": {"type": "INTEGER"}, "tags": {"type": "ARRAY", "items": {"type": "STRING"}}}, "required": ["content"]}},
+    {"name": "remember_fact", "description": "Enregistrer un fait utile fourni ou confirmé par l'utilisateur.", "parameters": {"type": "OBJECT", "properties": {"content": {"type": "STRING"}, "category": {"type": "STRING"}, "importance": {"type": "INTEGER"}, "source_type": {"type": "STRING", "enum": ["observed", "taught", "inferred", "confirmed"]}, "confidence": {"type": "NUMBER"}, "tags": {"type": "ARRAY", "items": {"type": "STRING"}}}, "required": ["content"]}},
     {"name": "search_memories", "description": "Rechercher des souvenirs pertinents pour répondre.", "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}}, "required": ["query"]}},
     {"name": "update_skill", "description": "Mettre à jour l'XP d'une compétence de Chappie (tete, mots, lien, mains, ame, sens).", "parameters": {"type": "OBJECT", "properties": {"skill_name": {"type": "STRING"}, "xp_delta": {"type": "NUMBER"}, "evidence": {"type": "STRING"}}, "required": ["skill_name", "xp_delta", "evidence"]}},
     {"name": "get_local_time", "description": "Obtenir la date et l'heure locale actuelles.", "parameters": {"type": "OBJECT", "properties": {}}}
@@ -608,7 +611,7 @@ def execute_tool(name: str, args: dict[str, Any], user_id: str) -> dict[str, Any
     try:
         if name == "remember_fact":
             content = str(args.get("content", ""))[:4000]
-            return remember(user_id, content, str(args.get("category", "general")), int(args.get("importance", 3)), args.get("tags", []))
+            return remember(user_id, content, str(args.get("category", "general")), int(args.get("importance", 3)), str(args.get("source_type", "taught")), float(args.get("confidence", 0.8)), args.get("tags", []))
         if name == "search_memories":
             return {"memories": retrieve_memories(user_id, str(args.get("query", "")), 10)}
         if name == "update_skill":
@@ -662,7 +665,7 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         raise HTTPException(413, f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).")
     update_emotions_once(user_id, message)
     relevant = retrieve_memories(user_id, message, 6)
-    memory_context = "\n".join(f"- [{m['category']}, importance {m['importance']}] {m['content']}" for m in relevant)
+    memory_context = "\n".join(f"- [{m['category']}, source: {m.get('source_type', 'taught')}, confiance: {m.get('confidence', 0.8)}] {m['content']}" for m in relevant)
     autobiographical_summary = get_latest_summary(user_id)
     with db_connection() as db:
         rows = db.execute("SELECT role,content FROM conversations WHERE user_id=? ORDER BY id DESC LIMIT 12", (user_id,)).fetchall()
@@ -797,11 +800,11 @@ async def serve_script():
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse("""<!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chappie V18</title>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chappie V19</title>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:850px;margin:0 auto;padding:24px 16px;background:#0b1220;color:#eef4ff}.panel{background:#131f31;border:1px solid #2b3b52;border-radius:16px;padding:18px;margin:14px 0}h1{margin-bottom:4px}.muted{color:#aabbd0;font-size:.9rem}input,textarea,select{width:100%;padding:12px;margin:6px 0;background:#0b1525;color:#fff;border:1px solid #40536e;border-radius:9px;font:inherit}textarea{resize:vertical}button{padding:11px 15px;border:0;border-radius:9px;background:#54d3ee;color:#07131e;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#263850;color:#eef4ff}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1525;padding:14px;border-radius:10px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}.status{font-size:.9rem;color:#9de4f5}
 </style></head><body>
-<h1>🤖 Chappie V18</h1><div class="muted">Mémoire autobiographique · états internes simulés · conversation vocale</div>
+<h1>🤖 Chappie V19</h1><div class="muted">Architecture cognitive · mémoire épisodique enrichie · états internes simulés · conversation vocale</div>
 <div class="panel"><label for="token">Jeton API</label><input id="token" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN"><div class="muted">Le jeton reste dans cette page. N’expose pas le serveur directement sur Internet.</div></div>
 <div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie…"></textarea><div class="row"><button type="button" id="sendBtn" onclick="sendMessage()">Envoyer</button><button type="button" class="secondary" id="micBtn" onclick="toggleMic()">🎙️ Dicter</button><button type="button" class="secondary" onclick="stopSpeech()">■ Arrêter la voix</button></div><div id="status" class="status">Prêt.</div></div>
 <div class="panel"><strong>Réponse de Chappie</strong><pre id="out">En attente de ton message…</pre><small class="muted">Les émotions et les rêves sont des états logiciels simulés, pas une preuve de conscience.</small></div>
@@ -841,7 +844,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(require_auth)):
 @app.post("/api/memories")
 async def add_memory(req: MemoryRequest, user_id: str = Depends(require_auth)):
     if valid_user(req.user_id) != user_id: raise HTTPException(403, "Utilisateur non autorisé.")
-    return remember(user_id, req.content, req.category, req.importance, req.tags)
+    return remember(user_id, req.content, req.category, req.importance, req.source_type, req.confidence, req.tags)
 
 
 @app.post("/api/memories/search")

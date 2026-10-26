@@ -1,4 +1,4 @@
-"""Chappie V19 — architecture cognitive complète, mémoire, monde, apprentissage et interface vocale.
+"""Chappie V19.3 — architecture cognitive complète (mémoire, monde, apprentissage, cognition, voix et vision).
 Python 3.11+. Les émotions/rêves sont des simulations logicielles, pas une conscience démontrée.
 """
 from __future__ import annotations
@@ -27,14 +27,15 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Import des modules cognitifs V19 (mémoire, monde, apprentissage)
+# Import de tous les modules de l'architecture cognitive V19
 from memory import init_memory_tables, save_episodic_memory, search_episodic_memories
 from world import init_world_tables, upsert_world_entity, get_world_entity
 from learning import init_learning_tables, evaluate_competency_test
+from cognition import init_cognition_tables, log_cognitive_trace
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-APP_NAME = "Chappie V19.2 — architecture cognitive complète"
+APP_NAME = "Chappie V19.3 — architecture cognitive unifiée"
 BASE_DIR = Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")).expanduser().resolve()
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"  # conserve la mémoire existante V16; les nouvelles tables sont ajoutées sans effacer les données
@@ -156,11 +157,12 @@ def init_db() -> None:
         """)
         db.commit()
     
-    # Initialisation des tables cognitives V19 (mémoire, monde et curriculum d'apprentissage)
+    # Initialisation de tous les modules cognitifs V19 (mémoire, monde, apprentissage, cognition)
     with db_connection() as db:
         init_memory_tables(db)
         init_world_tables(db)
         init_learning_tables(db)
+        init_cognition_tables(db)
 
 init_db()
 
@@ -205,7 +207,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title=APP_NAME, version="19.2.0", description="Compagnon conversationnel Chappie : architecture cognitive complète.", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="19.3.0", description="Compagnon conversationnel Chappie : architecture cognitive unifiée et complète.", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -345,6 +347,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM world_entities WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM world_relations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM competency_tests WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM cognitive_traces WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM metacognition_logs WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM memories_fts")
         db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM conversation_summaries WHERE user_id=?", (user_id,))
@@ -805,17 +809,17 @@ async def serve_script():
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse("""<!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chappie V19.2</title>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chappie V19.3</title>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:850px;margin:0 auto;padding:24px 16px;background:#0b1220;color:#eef4ff}.panel{background:#131f31;border:1px solid #2b3b52;border-radius:16px;padding:18px;margin:14px 0}h1{margin-bottom:4px}.muted{color:#aabbd0;font-size:.9rem}input,textarea,select{width:100%;padding:12px;margin:6px 0;background:#0b1525;color:#fff;border:1px solid #40536e;border-radius:9px;font:inherit}textarea{resize:vertical}button{padding:11px 15px;border:0;border-radius:9px;background:#54d3ee;color:#07131e;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#263850;color:#eef4ff}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1525;padding:14px;border-radius:10px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}.status{font-size:.9rem;color:#9de4f5}
 </style></head><body>
-<h1>🤖 Chappie V19.2</h1><div class="muted">Architecture cognitive complète · mémoire, monde, curriculum et états internes</div>
+<h1>🤖 Chappie V19.3</h1><div class="muted">Architecture cognitive unifiée · mémoire, monde, apprentissage, cognition et interface vocale</div>
 <div class="panel"><label for="token">Jeton API</label><input id="token" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN"><div class="muted">Le jeton reste dans cette page. N’expose pas le serveur directement sur Internet.</div></div>
 <div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie…"></textarea><div class="row"><button type="button" id="sendBtn" onclick="sendMessage()">Envoyer</button><button type="button" class="secondary" id="micBtn" onclick="toggleMic()">🎙️ Dicter</button><button type="button" class="secondary" onclick="stopSpeech()">■ Arrêter la voix</button></div><div id="status" class="status">Prêt.</div></div>
 <div class="panel"><strong>Réponse de Chappie</strong><pre id="out">En attente de ton message…</pre><small class="muted">Les émotions et les rêves sont des états logiciels simulés, pas une preuve de conscience.</small></div>
 <div class="panel"><strong>🗣️ Conversation vocale en temps réel</strong><p class="muted">Audio en continu via Gemini Live. Tu peux parler pendant que Chappie répond ; le navigateur doit autoriser le micro.</p><div class="row"><button type="button" id="liveBtn" onclick="toggleLive()">▶ Démarrer la conversation live</button><button type="button" class="secondary" onclick="stopLive()">■ Arrêter</button></div><div id="liveStatus" class="status">Session non démarrée.</div></div>
 <div class="panel"><strong>👁️ Vision par caméra</strong><p class="muted">La caméra n’est activée qu’après ton clic. Une image fixe est envoyée à Gemini pour analyse ; pas de surveillance continue.</p><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button type="button" onclick="startCamera()">Activer la caméra</button><button type="button" class="secondary" onclick="captureVision()">Que vois-tu ?</button><button type="button" class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
-<div class="panel"><strong>🎙️ Profils vocaux facultatifs</strong><p class="muted">Enregistre un profil avec un extrait de voix, puis compare un nouvel extrait. L’identification biométrique est optionnelle et reste locale dans la base de Chappie. Demande le consentement explicite de la personne. Nécessite l’installation du module optionnel resemblyzer.</p><label>Nom du profil</label><input id="voiceName" maxlength="80" placeholder="Ex. Julien"><div class="row"><button type="button" onclick="recordVoice('enroll')">Enregistrer un profil (8 s)</button><button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5 s)</button></div><div id="voiceStatus" class="status">Aucun enregistrement en cours.</div></div>
+<div class="panel"><strong>🎙️ Profils vocaux facultatifs</strong><p class="muted">Enregistre un profil avec un extrait de voix, puis compare un nouvel extrait. L’identification biométrique est optionnelle et reste locale dans la base de Chappie. Demande le consentement explicite de la personne. Nécessite l’installation du module optionnel resemblyzer.</p><label>Nom du profil</label><input id="voiceName" maxlength="80" placeholder="Ex. Julien"><div class="row"><button type="button" recordVoice('enroll')">Enregistrer un profil (8 s)</button><button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5 s)</button></div><div id="voiceStatus" class="status">Aucun enregistrement en cours.</div></div>
 <div class="panel">
   <strong>État interne simulé & Métacognition</strong>
   <pre id="state">En attente…</pre>

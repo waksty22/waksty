@@ -695,6 +695,11 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
     if len(message) > MAX_MESSAGE_CHARS:
         raise HTTPException(413, f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).")
     update_emotions_once(user_id, message)
+    
+    # Automatisation de la progression autonome lors des échanges textuels
+    update_skill(user_id, "mots", 5.0, "Progression conversationnelle")
+    update_skill(user_id, "lien", 5.0, "Échange avec le créateur")
+
     relevant = retrieve_memories(user_id, message, 6)
     memory_context = "\n".join(f"- [{m['category']}, source: {m.get('source_type', 'taught')}, confiance: {m.get('confidence', 0.8)}] {m['content']}" for m in relevant)
     autobiographical_summary = get_latest_summary(user_id)
@@ -941,7 +946,7 @@ async def thoughts(user_id: str, auth_user: str = Depends(require_auth)):
 
 @app.post("/api/thoughts")
 async def thought_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    if valid_user(req.user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
     return generate_rumination(auth_user)
 
 
@@ -1044,6 +1049,11 @@ async def gemini_vision(image_data_url: str, prompt: str) -> str:
 async def vision_analyze(req: VisionRequest, user_id: str = Depends(require_auth)):
     description = await gemini_vision(req.image_data_url, req.prompt)
     observation = "Observation caméra de Chappie : " + description[:6000]
+    
+    # Automatisation de l'XP sensorielle lors de l'utilisation de la caméra
+    update_skill(user_id, "sens", 15.0, "Analyse visuelle de l'environnement")
+    update_skill(user_id, "tete", 10.0, "Observation et analyse d'un objet")
+
     save_conversation_turn(user_id, observation, "J'ai analysé l'image et enregistré mon observation dans notre historique commun.", source="vision")
     return {"description": description, "model": GEMINI_MODEL, "continuous_stream": False, "saved_to_shared_history": True}
 

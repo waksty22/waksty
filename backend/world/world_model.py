@@ -1,4 +1,6 @@
-"""Module de gestion du modèle du monde pour Chappie (entités, propriétés, relations)."""
+"""Module de gestion du modèle du monde pour Chappie (entités, propriétés, relations).
+Permet de cartographier l'environnement, les objets, les projets et les interactions.
+"""
 from __future__ import annotations
 
 import json
@@ -94,3 +96,54 @@ def get_world_entity(db: sqlite3.Connection, user_id: str, entity_id: str) -> di
         item["properties"] = {}
     del item["properties_json"]
     return item
+
+
+def add_world_relation(
+    db: sqlite3.Connection,
+    user_id: str,
+    subject_id: str,
+    predicate: str,
+    object_id: str,
+    source_type: str = "observed",
+    confidence: float = 0.8
+) -> dict[str, Any]:
+    """Établit ou met à jour une relation orientée entre deux entités (Sujet -> Prédicat -> Objet)."""
+    subject_id = subject_id.strip()
+    predicate = predicate.strip().casefold()
+    object_id = object_id.strip()
+
+    if not subject_id or not predicate or not object_id:
+        raise ValueError("Le sujet, le prédicat et l'objet sont obligatoires.")
+
+    confidence = max(0.0, min(1.0, float(confidence)))
+    now = utc_now()
+
+    db.execute("""
+        INSERT INTO world_relations (user_id, subject_id, predicate, object_id, source_type, confidence, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, subject_id, predicate, object_id) DO UPDATE SET
+            source_type = excluded.source_type,
+            confidence = MAX(world_relations.confidence, excluded.confidence),
+            updated_at = excluded.updated_at
+    """, (user_id, subject_id, predicate, object_id, source_type, confidence, now))
+    db.commit()
+
+    return {
+        "subject_id": subject_id,
+        "predicate": predicate,
+        "object_id": object_id,
+        "confidence": confidence,
+        "updated_at": now
+    }
+
+
+def get_entity_relations(db: sqlite3.Connection, user_id: str, entity_id: str) -> list[dict[str, Any]]:
+    """Récupère toutes les relations dont l'entité est soit le sujet, soit l'objet."""
+    rows = db.execute("""
+        SELECT subject_id, predicate, object_id, confidence, updated_at
+        FROM world_relations
+        WHERE user_id = ? AND (subject_id = ? OR object_id = ?)
+        ORDER BY updated_at DESC
+    """, (user_id, entity_id, entity_id)).fetchall()
+
+    return [dict(r) for r in rows]

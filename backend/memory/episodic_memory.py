@@ -1,4 +1,6 @@
-"""Module de gestion de la mémoire épisodique et des sources de connaissances pour Chappie."""
+"""Module de gestion de la mémoire épisodique et des sources de connaissances pour Chappie.
+Gère la traçabilité des sources, la recherche et la simulation de la courbe de l'oubli.
+"""
 from __future__ import annotations
 
 import json
@@ -80,22 +82,22 @@ def save_episodic_memory(
 
 
 def search_episodic_memories(db: sqlite3.Connection, user_id: str, query: str = "", limit: int = 10) -> list[dict[str, Any]]:
-    """Recherche des souvenirs dans la mémoire épisodique."""
+    """Recherche des souvenirs dans la mémoire épisodique et incrémente leur compteur d'accès."""
     limit = max(1, min(30, int(limit)))
     if query.strip():
         cursor = db.execute("""
             SELECT id, category, content, importance, source_type, confidence, tags, access_count, created_at
             FROM memories_v19
-            WHERE user_id = ? AND (content LIKE ? OR category LIKE ?)
-            ORDER BY importance DESC, updated_at DESC
+            WHERE user_id = ? AND (content LIKE ? OR category LIKE ? OR tags LIKE ?)
+            ORDER BY importance DESC, access_count DESC, updated_at DESC
             LIMIT ?
-        """, (user_id, f"%{query}%", f"%{query}%", limit))
+        """, (user_id, f"%{query}%", f"%{query}%", f"%{query}%", limit))
     else:
         cursor = db.execute("""
             SELECT id, category, content, importance, source_type, confidence, tags, access_count, created_at
             FROM memories_v19
             WHERE user_id = ?
-            ORDER BY importance DESC, updated_at DESC
+            ORDER BY importance DESC, access_count DESC, updated_at DESC
             LIMIT ?
         """, (user_id, limit))
 
@@ -108,3 +110,19 @@ def search_episodic_memories(db: sqlite3.Connection, user_id: str, query: str = 
             item["tags"] = []
         results.append(item)
     return results
+
+
+def apply_memory_decay(db: sqlite3.Connection, user_id: str) -> int:
+    """Simule la courbe de l'oubli : réduit légèrement l'importance des souvenirs 
+    très anciens peu consultés (importance 2 minimum pour les faits non vitaux).
+    """
+    cursor = db.execute("""
+        UPDATE memories_v19
+        SET importance = importance - 1
+        WHERE user_id = ? 
+          AND importance > 1 
+          AND access_count < 2
+          AND datetime(updated_at) < datetime('now', '-30 days')
+    """, (user_id,))
+    db.commit()
+    return cursor.rowcount

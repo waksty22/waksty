@@ -59,7 +59,6 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
   });
 
   if (lastEvent) {
-    // Utilisation d'un élément sécurisé ou échappé pour éviter les injections en cas de données non fiables
     const safeEvent = document.createElement('div');
     safeEvent.textContent = lastEvent;
     html += `

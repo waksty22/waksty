@@ -44,11 +44,11 @@ print(
 print("Contenu du dossier backend :", [p.name for p in CURRENT_DIR.iterdir()])
 print("=== FIN DIAGNOSTIC ===")
 
-# Importation directe des modules cognitifs V19 (sans le préfixe backend, car Root Directory = backend)
-from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
-from world.world_model import init_world_tables, upsert_world_entity, get_world_entity
-from learning.curriculum import init_learning_tables, evaluate_competency_test
-from cognition.reasoning import init_cognition_tables, log_cognitive_trace
+# Importation directe des modules cognitifs V19 et de leurs nouvelles fonctions avancées
+from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories, apply_memory_decay
+from world.world_model import init_world_tables, upsert_world_entity, get_world_entity, add_world_relation, get_entity_relations
+from learning.curriculum import init_learning_tables, evaluate_competency_test, update_cognitive_milestones
+from cognition.reasoning import init_cognition_tables, log_cognitive_trace, evaluate_decision_doubt, run_metacognitive_audit
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
@@ -366,6 +366,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM competency_tests WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM cognitive_traces WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM metacognition_logs WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM cognitive_milestones WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM memories_fts")
         db.execute("DELETE FROM conversations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM conversation_summaries WHERE user_id=?", (user_id,))
@@ -403,6 +404,10 @@ def update_skill(user_id: str, skill_name: str, xp_delta: float, evidence: str) 
             VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,skill_name) DO UPDATE SET
             level=excluded.level, xp=excluded.xp, evidence=excluded.evidence, updated_at=excluded.updated_at""",
             (user_id, skill_name, new_level, new_xp, evidence[:500], now))
+        
+        # Mise à jour automatique des jalons cognitifs (learning)
+        skills_summary = get_skills_summary(user_id)
+        update_cognitive_milestones(db, user_id, skills_summary["average_level"])
         db.commit()
     return {"skill": skill_name, "level": new_level, "xp": new_xp, "updated": True}
 
@@ -797,6 +802,10 @@ async def autonomous_maintenance_loop() -> None:
                     energy = min(100.0, float(em["energy"]) + 3.0)
                     sadness = min(100.0, float(em["sadness"]) + (1.0 if inactive_minutes >= 30 else 0.0))
                     db.execute("UPDATE emotional_state SET energy=?,sadness=?,updated_at=? WHERE user_id=?", (energy, sadness, now, uid))
+                
+                # Application de la courbe de l'oubli en tâche de fond (Memory Decay)
+                apply_memory_decay(db, uid)
+
                 last_dream = state["last_dream_at"]
                 dream_due = inactive_minutes >= 480
                 if last_dream:
@@ -897,6 +906,12 @@ async def skills_list(user_id: str, auth_user: str = Depends(require_auth)):
     return {**get_skills_summary(auth_user), "simulated": True}
 
 
+@app.get("/api/cognition/audit")
+async def cognition_audit(auth_user: str = Depends(require_auth)):
+    with db_connection() as db:
+        return run_metacognitive_audit(db, auth_user)
+
+
 @app.post("/api/reset-life")
 async def reset_life(auth_user: str = Depends(require_auth)):
     return reset_chappie_life(auth_user)
@@ -926,7 +941,7 @@ async def thoughts(user_id: str, auth_user: str = Depends(require_auth)):
 
 @app.post("/api/thoughts")
 async def thought_now(req: DreamRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(req.user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
     return generate_rumination(auth_user)
 
 

@@ -59,9 +59,12 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
   });
 
   if (lastEvent) {
+    // Utilisation d'un élément sécurisé ou échappé pour éviter les injections en cas de données non fiables
+    const safeEvent = document.createElement('div');
+    safeEvent.textContent = lastEvent;
     html += `
       <div style="margin-top: 6px; padding-top: 8px; border-top: 1px solid #2b3b52; font-size: 0.8rem; color: #9de4f5;">
-        🧠 <strong>Dernier événement :</strong> ${lastEvent}
+        🧠 <strong>Dernier événement :</strong> ${safeEvent.innerHTML}
       </div>
     `;
   }
@@ -134,6 +137,7 @@ async function speak(text) {
     if (speakingAudio) {
       speakingAudio.pause();
       URL.revokeObjectURL(speakingAudio.src);
+      speakingAudio = null;
     }
     
     let maturityLevel = 1.0;
@@ -158,26 +162,31 @@ async function speak(text) {
     }
     
     const arrayBuffer = await r.arrayBuffer();
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const audioCtx = new AudioCtx();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+    const audioUrl = URL.createObjectURL(blob);
+    
+    speakingAudio = new Audio(audioUrl);
+    speakingAudio.playbackRate = 1.0;
 
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-
-    // Pitch fixé à 1.0 (neutre)
-    source.playbackRate.value = 1.0;
-
-    source.connect(audioCtx.destination);
-    source.start(0);
     setStatus('Lecture vocale en cours...');
-
-    source.onended = () => {
+    
+    speakingAudio.onended = () => {
       setStatus('Prêt.');
-      audioCtx.close();
+      URL.revokeObjectURL(audioUrl);
+      speakingAudio = null;
     };
+
+    speakingAudio.onerror = () => {
+      setStatus('Erreur de lecture audio.');
+      URL.revokeObjectURL(audioUrl);
+      speakingAudio = null;
+    };
+
+    await speakingAudio.play();
+
   } catch (e) {
     setStatus('Réponse écrite prête ; lecture vocale impossible dans ce navigateur.');
+    speakingAudio = null;
   }
 }
 
@@ -185,6 +194,7 @@ function stopSpeech() {
   if (speakingAudio) {
     speakingAudio.pause();
     speakingAudio.currentTime = 0;
+    speakingAudio = null;
   }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   setStatus('Lecture arrêtée.');
@@ -512,7 +522,6 @@ async function toggleLive() {
         $('out').textContent = 'Chappie : ';
       }
       if (d.text) { 
-        // Accumulation fluide pour afficher toute la phrase ou le paragraphe complet
         const outEl = $('out');
         if (outEl.textContent.startsWith('En attente') || outEl.textContent === 'Chappie : ') {
           outEl.textContent = 'Chappie : ' + d.text;
@@ -542,7 +551,7 @@ async function toggleLive() {
   }
 }
 
-// --- Lecture Audio Live anti-saccades (Délai 0.15s, Pitch à 1.0 neutre) ---
+// --- Lecture Audio Live anti-saccades ---
 function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
   if (!liveCtx) return;
   
@@ -560,15 +569,12 @@ function playLiveAudio(encoded, rate, maturityLevel = 1.0) {
     
     const src = liveCtx.createBufferSource();
     src.buffer = buf;
-
-    // Pitch et formant réinitialisés à 1.0 (neutre)
     src.playbackRate.value = 1.0;
 
     src.connect(liveCtx.destination);
     liveAudioSources.add(src);
     src.onended = () => liveAudioSources.delete(src);
 
-    // Synchronisation anti-saccades avec une avance de sécurité de 0.15s
     const now = liveCtx.currentTime;
     if (liveNextTime < now) {
       liveNextTime = now + 0.15;

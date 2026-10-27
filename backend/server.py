@@ -34,6 +34,16 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+print("=== DIAGNOSTIC CHAPPIE ===")
+print("Dossier serveur :", CURRENT_DIR)
+print("Dossier learning existe :", (CURRENT_DIR / "learning").is_dir())
+print(
+    "Fichier curriculum existe :",
+    (CURRENT_DIR / "learning" / "curriculum.py").is_file()
+)
+print("Contenu du dossier backend :", [p.name for p in CURRENT_DIR.iterdir()])
+print("=== FIN DIAGNOSTIC ===")
+
 # Importation directe des modules cognitifs V19 (sans le préfixe backend, car Root Directory = backend)
 from memory.episodic_memory import init_memory_tables, save_episodic_memory, search_episodic_memories
 from world.world_model import init_world_tables, upsert_world_entity, get_world_entity

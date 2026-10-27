@@ -1,4 +1,6 @@
-"""Module de gestion du curriculum cognitif et de l'apprentissage progressif de Chappie."""
+"""Module de gestion du curriculum cognitif et de l'apprentissage progressif de Chappie.
+Gère les tests de compétences et le suivi des jalons de développement (milestones).
+"""
 
 from __future__ import annotations
 
@@ -25,7 +27,8 @@ def init_learning_tables(db: sqlite3.Connection) -> None:
             status TEXT NOT NULL
                 CHECK(status IN ('locked', 'in_progress', 'achieved'))
                 DEFAULT 'locked',
-            achieved_at TEXT
+            achieved_at TEXT,
+            UNIQUE(user_id, stage_name)
         );
 
         CREATE TABLE IF NOT EXISTS competency_tests (
@@ -39,6 +42,25 @@ def init_learning_tables(db: sqlite3.Connection) -> None:
         );
         """
     )
+    
+    # Initialisation des paliers par défaut pour chaque utilisateur s'ils n'existent pas
+    default_stages = [
+        ("Nouveau-né (Éveil)", 1.0),
+        ("Enfant (Apprenti)", 3.0),
+        ("Adolescent (Explorateur)", 5.0),
+        ("Adulte (Complice)", 8.0)
+    ]
+    
+    # On vérifie les utilisateurs existants dans emotional_state ou skills pour peupler les jalons
+    users = db.execute("SELECT DISTINCT user_id FROM skills").fetchall()
+    for row in users:
+        uid = row["user_id"]
+        for stage_name, min_mat in default_stages:
+            db.execute("""
+                INSERT OR IGNORE INTO cognitive_milestones (user_id, stage_name, min_maturity, status)
+                VALUES (?, ?, ?, ?)
+            """, (uid, stage_name, min_mat, "achieved" if min_mat == 1.0 else "locked"))
+            
     db.commit()
 
 
@@ -88,4 +110,39 @@ def evaluate_competency_test(
     }
 
 
+def update_cognitive_milestones(db: sqlite3.Connection, user_id: str, current_maturity: float) -> list[dict[str, Any]]:
+    """Met à jour le statut des jalons de développement de Chappie en fonction de sa maturité moyenne."""
+    now = utc_now()
+    
+    # Récupère tous les jalons de l'utilisateur
+    milestones = db.execute("""
+        id, stage_name, min_maturity, status FROM cognitive_milestones WHERE user_id = ?
+    """, (user_id,)).fetchall()
+    
+    updated_milestones = []
+    for m in milestones:
+        m_id = m["id"]
+        min_mat = m["min_maturity"]
+        status = m["status"]
+        
+        new_status = status
+        achieved_at = None
+        
+        if current_maturity >= min_mat and status == "locked":
+            new_status = "achieved"
+            achieved_at = now
+            db.execute("""
+                UPDATE cognitive_milestones SET status = ?, achieved_at = ? WHERE id = ?
+            """, (new_status, achieved_at, m_id))
+        elif current_maturity < min_mat and status == "achieved":
+            # Sécurité (si reset par exemple)
+            pass
 
+        updated_milestones.append({
+            "stage_name": m["stage_name"],
+            "min_maturity": min_mat,
+            "status": new_status
+        })
+        
+    db.commit()
+    return updated_milestones

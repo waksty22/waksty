@@ -1,4 +1,6 @@
-"""Module de cognition, de boucle de décision et de métacognition pour Chappie."""
+"""Module de cognition, de boucle de décision et de métacognition pour Chappie.
+Gère les traces de raisonnement, l'évaluation du doute et l'auto-critique.
+"""
 from __future__ import annotations
 
 import json
@@ -58,4 +60,66 @@ def log_cognitive_trace(
         "decision_made": decision_made,
         "confidence": confidence,
         "recorded_at": now
+    }
+
+
+def evaluate_decision_doubt(confidence: float, threshold: float = 0.6) -> dict[str, Any]:
+    """Évalue si Chappie est en situation de doute cognitive.
+    Permet à Chappie de ralentir son raisonnement s'il n'est pas sûr de lui.
+    """
+    confidence = max(0.0, min(1.0, float(confidence)))
+    is_uncertain = confidence < threshold
+
+    if is_uncertain:
+        action = "ask_clarification" if confidence < 0.4 else "proceed_with_caution"
+    else:
+        action = "proceed_confidently"
+
+    return {
+        "confidence": confidence,
+        "is_uncertain": is_uncertain,
+        "recommended_action": action
+    }
+
+
+def run_metacognitive_audit(db: sqlite3.Connection, user_id: str, limit: int = 10) -> dict[str, Any]:
+    """Analyse les dernières traces de raisonnement pour en tirer une réflexion métacognitive
+    et adapter son attitude sans altérer son historique ou son évolution.
+    """
+    rows = db.execute("""
+        SELECT thought_type, decision_made, confidence, created_at
+        FROM cognitive_traces
+        WHERE user_id = ?
+        ORDER BY id DESC LIMIT ?
+    """, (user_id, limit)).fetchall()
+
+    if not rows:
+        return {"reflection": "Pas assez de données pour l'audit.", "adjustment": "aucun"}
+
+    traces = [dict(r) for r in rows]
+    avg_confidence = sum(t["confidence"] for t in traces) / len(traces)
+
+    if avg_confidence < 0.5:
+        reflection = f"Doute fréquent détecté sur les {len(traces)} dernières réflexions (Confiance moy. : {avg_confidence:.2f})."
+        adjustment = "Augmenter la prudence et demander confirmation avant d'affirmer des faits."
+    elif avg_confidence > 0.85:
+        reflection = f"Excellente assurance sur les raisonnements récents (Confiance moy. : {avg_confidence:.2f})."
+        adjustment = "Prendre davantage d'initiatives autonomes."
+    else:
+        reflection = f"Niveau de certitude équilibré (Confiance moy. : {avg_confidence:.2f})."
+        adjustment = "Conserver la posture actuelle."
+
+    now = utc_now()
+    db.execute("""
+        INSERT INTO metacognition_logs (user_id, reflection, adjustment_made, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, reflection, adjustment, now))
+    db.commit()
+
+    return {
+        "user_id": user_id,
+        "average_confidence": round(avg_confidence, 2),
+        "reflection": reflection,
+        "adjustment_made": adjustment,
+        "created_at": now
     }

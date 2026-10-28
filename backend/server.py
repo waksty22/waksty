@@ -1,7 +1,7 @@
 # backend/server.py
 
 """Chappie V19.3 — architecture cognitive complète (mémoire, monde, apprentissage, cognition, voix et vision).
-Python 3.11+. Les émotions/rêves sont des simulations logicielles, pas une conscience démontrée.
+Python 3.11+. Les émotions/rêves sont des états logiciels simulés, pas une conscience démontrée.
 """
 from __future__ import annotations
 
@@ -500,7 +500,6 @@ def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
     if matched(correction):
         curiosity += 2.0; frustration += 0.5; event = "correction à examiner"
     
-    # Consommation naturelle d'énergie à chaque interaction
     energy -= 1.5
     vals = {"joy": joy, "fear": fear, "curiosity": curiosity, "frustration": frustration, "sadness": sadness, "energy": energy}
     vals = {k: max(0.0, min(100.0, float(v))) for k, v in vals.items()}
@@ -629,7 +628,6 @@ def get_identity_prompt(user_id: str) -> str:
     
     skills_text = "\n".join(f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})" for s in skills) or "Aucune compétence enregistrée."
 
-    # Directives de stade de développement TRÈS STRICTES (Nouveau-né robotique primitif)
     if avg_level < 2.0:
         stage_instruction = (
             "STADE 0-1 : ROBOT TOUT JUSTE ÉVEILLÉ (Maturité < 2.0).\n"
@@ -660,7 +658,6 @@ def get_identity_prompt(user_id: str) -> str:
     goal_text = "\n".join(f"- {g['title']} (progression {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
     
-    # Intégration de l'alerte d'énergie critique pour exprimer spontanément les besoins primaires
     energy_level = em['energy']
     energy_alert = ""
     if energy_level < 35.0:
@@ -777,7 +774,6 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         if relevant else 0.3
     )
     
-    # Gestion rigoureuse du doute face aux absurdités/pièges
     doubt_evaluation = evaluate_decision_doubt(avg_confidence, threshold=0.65)
     if doubt_evaluation["is_uncertain"] or any(w in message.casefold() for w in ("pute", "connard", "débile")):
         with db_connection() as db_trace:
@@ -889,7 +885,6 @@ async def autonomous_maintenance_loop() -> None:
                 inactive_minutes = max(0, (datetime.now(timezone.utc) - last_active.astimezone(timezone.utc)).total_seconds() / 60)
                 em = db.execute("SELECT energy,sadness FROM emotional_state WHERE user_id=?", (uid,)).fetchone()
                 if em:
-                    # Baisse progressive de l'énergie en arrière-plan en cas d'inactivité ou de veille
                     energy = max(0.0, float(em["energy"]) - 2.0)
                     sadness = min(100.0, float(em["sadness"]) + (1.0 if inactive_minutes >= 30 else 0.0))
                     db.execute("UPDATE emotional_state SET energy=?,sadness=?,updated_at=? WHERE user_id=?", (energy, sadness, now, uid))
@@ -925,33 +920,286 @@ async def serve_script():
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse("""<!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chappie V19.3</title>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chappie V19.3 — Tableau de bord</title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:850px;margin:0 auto;padding:24px 16px;background:#0b1220;color:#eef4ff}.panel{background:#131f31;border:1px solid #2b3b52;border-radius:16px;padding:18px;margin:14px 0}h1{margin-bottom:4px}.muted{color:#aabbd0;font-size:.9rem}input,textarea,select{width:100%;padding:12px;margin:6px 0;background:#0b1525;color:#fff;border:1px solid #40536e;border-radius:9px;font:inherit}textarea{resize:vertical}button{padding:11px 15px;border:0;border-radius:9px;background:#54d3ee;color:#07131e;font-weight:700;cursor:pointer;margin:4px 4px 4px 0}button.secondary{background:#263850;color:#eef4ff}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1525;padding:14px;border-radius:10px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.row button{flex:1}.status{font-size:.9rem;color:#9de4f5}
-</style></head><body>
-<h1>🤖 Chappie V19.3</h1><div class="muted">Architecture cognitive unifiée · mémoire, monde, apprentissage, cognition et interface vocale</div>
-<div class="panel"><label for="token">Jeton API</label><input id="token" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN"><div class="muted">Le jeton reste dans cette page. N’expose pas le serveur directement sur Internet.</div></div>
-<div class="panel"><label for="msg">Parle ou écris à Chappie</label><textarea id="msg" rows="3" placeholder="Bonjour Chappie…"></textarea><div class="row"><button type="button" id="sendBtn" onclick="sendMessage()">Envoyer</button><button type="button" class="secondary" id="micBtn" onclick="toggleMic()">🎙️ Dicter</button><button type="button" class="secondary" onclick="stopSpeech()">■ Arrêter la voix</button></div><div id="status" class="status">Prêt.</div></div>
-<div class="panel"><strong>Réponse de Chappie</strong><pre id="out">En attente de ton message…</pre><small class="muted">Les émotions et les rêves sont des états logiciels simulés, pas une preuve de conscience.</small></div>
-<div class="panel"><strong>🗣️ Conversation vocale en temps réel</strong><p class="muted">Audio en continu via Gemini Live. Tu peux parler pendant que Chappie répond ; le navigateur doit autoriser le micro.</p><div class="row"><button type="button" id="liveBtn" onclick="toggleLive()">▶ Démarrer la conversation live</button><button type="button" class="secondary" onclick="stopLive()">■ Arrêter</button></div><div id="liveStatus" class="status">Session non démarrée.</div></div>
-<div class="panel"><strong>👁️ Vision par caméra</strong><p class="muted">La caméra n’est activée qu’après ton clic. Une image fixe est envoyée à Gemini pour analyse ; pas de surveillance continue.</p><video id="camera" autoplay playsinline muted style="width:100%;max-height:320px;background:#050a12;border-radius:10px"></video><div class="row"><button type="button" onclick="startCamera()">Activer la caméra</button><button type="button" class="secondary" onclick="captureVision()">Que vois-tu ?</button><button type="button" class="secondary" onclick="stopCamera()">Désactiver</button></div><pre id="visionOut">Caméra inactive.</pre></div>
-<div class="panel"><strong>🎙️ Profils vocaux facultatifs</strong><p class="muted">Enregistre un profil avec un extrait de voix, puis compare un nouvel extrait. L’identification biométrique est optionnelle et reste locale dans la base de Chappie. Demande le consentement explicite de la personne. Nécessite l’installation du module optionnel resemblyzer.</p><label>Nom du profil</label><input id="voiceName" maxlength="80" placeholder="Ex. Julien"><div class="row"><button type="button" onclick="recordVoice('enroll')">Enregistrer un profil (8 s)</button><button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5 s)</button></div><div id="voiceStatus" class="status">Aucun enregistrement en cours.</div></div>
-<div class="panel">
-  <strong>État interne simulé & Métacognition</strong>
-  <pre id="state">En attente…</pre>
-  <div class="row">
-    <button type="button" class="secondary" onclick="loadSummary()">Mémoire</button>
-    <button type="button" class="secondary" onclick="loadMoodHistory()">📜 Humeurs</button>
-    <button type="button" class="secondary" onclick="loadDreams()">🌙 Rêves</button>
-    <button type="button" class="secondary" onclick="loadGoals()">🎯 Objectifs</button>
-    <button type="button" class="secondary" onclick="loadThoughts()">🧠 Pensées</button>
-    <button type="button" class="secondary" onclick="loadSkills()">🎓 Compétences</button>
-    <button type="button" style="background:#ef4444; color:#fff;" onclick="resetLife()">🐣 Page Blanche (Reset)</button>
-    <button type="button" class="secondary" onclick="consolidate()">Consolider</button>
+:root {
+  --bg: #070b14;
+  --sidebar-bg: #0b1322;
+  --card-bg: #101826;
+  --card-border: #1e293b;
+  --accent: #2563eb;
+  --accent-hover: #3b82f6;
+  --cyan: #06b6d4;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --danger: #ef4444;
+  --success: #10b981;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+
+/* Barre latérale gauche type Dashboard */
+aside { width: 260px; background: var(--sidebar-bg); border-right: 1px solid var(--card-border); display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.brand span { font-size: 2rem; }
+.brand h2 { font-size: 1.2rem; font-weight: 700; color: var(--text); }
+.brand p { font-size: 0.75rem; color: var(--text-muted); }
+
+.nav-menu { display: flex; flex-direction: column; gap: 6px; flex-grow: 1; overflow-y: auto; }
+.nav-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; color: var(--text-muted); text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 0.9rem; cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; transition: all 0.2s; }
+.nav-item:hover, .nav-item.active { background: var(--accent); color: #fff; }
+
+/* Contenu principal */
+main { flex-grow: 1; overflow-y: auto; padding: 20px; display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+@media (max-width: 1100px) { main { grid-template-columns: 1fr; } aside { display: none; } }
+
+.main-column { display: flex; flex-direction: column; gap: 16px; }
+.side-column { display: flex; flex-direction: column; gap: 16px; }
+
+.panel { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 20px; }
+.panel h3 { font-size: 1rem; margin-bottom: 12px; color: var(--cyan); display: flex; align-items: center; gap: 8px; }
+
+/* En-tête héro */
+.hero-card { display: flex; align-items: center; gap: 20px; background: linear-gradient(135deg, #101826 0%, #1e293b 100%); }
+.hero-avatar { width: 90px; height: 90px; border-radius: 12px; background: #070b14; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; border: 1px solid var(--card-border); flex-shrink: 0; }
+.hero-info h2 { font-size: 1.5rem; margin-bottom: 4px; }
+.hero-info p { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 10px; }
+.badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.badge { font-size: 0.75rem; background: #070b14; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--card-border); color: var(--cyan); }
+
+/* Bulles de chat */
+.chat-container { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; max-height: 300px; overflow-y: auto; }
+.msg-bubble { padding: 12px 16px; border-radius: 12px; font-size: 0.95rem; max-width: 85%; }
+.msg-user { background: var(--accent); color: #fff; align-self: flex-end; }
+.msg-chappie { background: #1e293b; color: var(--text); align-self: flex-start; border: 1px solid var(--card-border); }
+
+input, textarea { width: 100%; padding: 12px; background: #070b14; color: var(--text); border: 1px solid var(--card-border); border-radius: 8px; font: inherit; font-size: 0.95rem; margin-top: 6px; }
+textarea { resize: vertical; }
+
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+button { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: opacity 0.2s; }
+button:hover { opacity: 0.9; }
+button.secondary { background: #1e293b; border: 1px solid var(--card-border); }
+button.danger { background: var(--danger); }
+
+/* Barres de progression */
+.stat-item { margin-bottom: 10px; }
+.stat-header { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px; }
+.bar-bg { background: #070b14; border-radius: 6px; height: 8px; overflow: hidden; border: 1px solid var(--card-border); }
+.bar-fill { height: 100%; border-radius: 6px; }
+
+.status { font-size: 0.85rem; color: var(--cyan); margin-top: 6px; }
+video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px; object-fit: cover; margin-top: 8px; }
+
+/* Sections onglets cachées / affichées */
+.tab-section { display: none; }
+.tab-section.active { display: flex; flex-direction: column; gap: 16px; }
+</style>
+</head>
+<body>
+
+<!-- BARRE LATÉRALE DE NAVIGATION -->
+<aside>
+  <div class="brand">
+    <span>🤖</span>
+    <div>
+      <h2>Chappie</h2>
+      <p>Mon compagnon d'apprentissage</p>
+    </div>
   </div>
-  <pre id="summary">Résumé non chargé.</pre>
-</div>
-<script src="/script.js" defer></script></body></html>""")
+  
+  <div class="nav-menu">
+    <button class="nav-item active" onclick="switchTab('accueil', this)">🏠 Accueil</button>
+    <button class="nav-item" onclick="switchTab('chat', this)">💬 Chat & Direct</button>
+    <button class="nav-item" onclick="switchTab('media', this)">🎙️ Voix & Vision</button>
+    <button class="nav-item" onclick="switchTab('memory', this)">🧠 Mémoire & Rêves</button>
+    <button class="nav-item" onclick="switchTab('skills', this)">🎓 Compétences & Objectifs</button>
+    <button class="nav-item" onclick="switchTab('params', this)">⚙️ Paramètres & Reset</button>
+  </div>
+
+  <div style="margin-top: auto; padding-top: 15px; border-top: 1px solid var(--card-border);">
+    <label style="font-size: 0.75rem; color: var(--text-muted);">Jeton API</label>
+    <input id="token" type="password" placeholder="CHAPPIE_API_TOKEN" style="margin-top: 4px; font-size: 0.8rem; padding: 8px;">
+  </div>
+</aside>
+
+<!-- CONTENU PRINCIPAL -->
+<main>
+  <!-- COLONNE GAUCHE (Dynamique selon l'onglet) -->
+  <div class="main-column">
+
+    <!-- ONGLET 1 : ACCUEIL -->
+    <div id="section-accueil" class="tab-section active">
+      <div class="panel hero-card">
+        <div class="hero-avatar">🤖</div>
+        <div class="hero-info">
+          <h2>Chappie V19.3</h2>
+          <p>Salut ! Je découvre le monde, je mémorise et j'évolue grâce à toi. Que souhaites-tu explorer aujourd'hui ?</p>
+          <div class="badges">
+            <span class="badge">⚡ Curieux</span>
+            <span class="badge">🛡️ Bienveillant</span>
+            <span class="badge">🧠 Apprenant</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>💬 Conversation rapide</h3>
+        <div id="chatHistory" class="chat-container">
+          <div class="msg-bubble msg-chappie">Bonjour ! Je suis prêt pour tes instructions ou tes questions.</div>
+        </div>
+        <textarea id="msg" rows="2" placeholder="Écris ton message à Chappie..."></textarea>
+        <div class="row-btns">
+          <button type="button" onclick="sendMessage()">Envoyer</button>
+          <button type="button" class="secondary" onclick="toggleMic()">🎙️ Dicter</button>
+          <button type="button" class="secondary" onclick="stopSpeech()">■ Stop</button>
+        </div>
+        <div id="status" class="status">Prêt.</div>
+      </div>
+
+      <div class="panel">
+        <h3>⚡ État du Système & Pensée en cours</h3>
+        <pre id="state">Chargement de l'état interne...</pre>
+      </div>
+    </div>
+
+    <!-- ONGLET 2 : CHAT & DIRECT -->
+    <div id="section-chat" class="tab-section">
+      <div class="panel">
+        <h3>💬 Espace de discussion étendu</h3>
+        <textarea id="msgChatTab" rows="4" placeholder="Pose ta question détaillée à Chappie..."></textarea>
+        <button type="button" onclick="sendMessageFromTab()" style="margin-top: 10px;">Envoyer le message</button>
+        <pre id="outChatTab" style="margin-top: 12px; min-height: 120px;">En attente de discussion...</pre>
+      </div>
+    </div>
+
+    <!-- ONGLET 3 : VOIX & VISION -->
+    <div id="section-media" class="tab-section">
+      <div class="panel">
+        <h3>🎙️ Conversation Vocale Temps Réel (Gemini Live)</h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">Audio en continu. Tu peux parler pendant que Chappie répond.</p>
+        <div class="row-btns">
+          <button type="button" id="liveBtn" onclick="toggleLive()">▶ Démarrer Live</button>
+          <button type="button" class="secondary" onclick="stopLive()">■ Arrêter</button>
+        </div>
+        <div id="liveStatus" class="status">Session non démarrée.</div>
+      </div>
+
+      <div class="panel">
+        <h3>👁️ Vision par Caméra</h3>
+        <video id="camera" autoplay playsinline muted></video>
+        <div class="row-btns" style="margin-top: 10px;">
+          <button type="button" class="secondary" onclick="startCamera()">Activer</button>
+          <button type="button" onclick="captureVision()">Analyser</button>
+          <button type="button" class="danger" onclick="stopCamera()">Couper</button>
+        </div>
+        <pre id="visionOut" style="margin-top: 10px;">Caméra inactive.</pre>
+      </div>
+
+      <div class="panel">
+        <h3>🎙️ Profils Vocaux (Biométrie)</h3>
+        <input id="voiceName" maxlength="80" placeholder="Nom du profil (ex: Julien)">
+        <div class="row-btns" style="margin-top: 8px;">
+          <button type="button" class="secondary" onclick="recordVoice('enroll')">Enregistrer (8s)</button>
+          <button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5s)</button>
+        </div>
+        <div id="voiceStatus" class="status">Aucun enregistrement en cours.</div>
+      </div>
+    </div>
+
+    <!-- ONGLET 4 : MÉMOIRE & RÊVES -->
+    <div id="section-memory" class="tab-section">
+      <div class="panel">
+        <h3>📂 Mémoire & Exploration</h3>
+        <div class="row-btns">
+          <button type="button" class="secondary" onclick="loadSummary()">Mémoire</button>
+          <button type="button" class="secondary" onclick="loadDreams()">🌙 Rêves</button>
+          <button type="button" class="secondary" onclick="loadThoughts()">🧠 Pensées</button>
+          <button type="button" class="secondary" onclick="loadMoodHistory()">📜 Humeurs</button>
+        </div>
+        <pre id="summary" style="margin-top: 12px; min-height: 180px;">Sélectionne un module ci-dessus.</pre>
+      </div>
+    </div>
+
+    <!-- ONGLET 5 : COMPÉTENCES & OBJECTIFS -->
+    <div id="section-skills" class="tab-section">
+      <div class="panel">
+        <h3>🎓 Compétences & Objectifs</h3>
+        <div class="row-btns">
+          <button type="button" class="secondary" onclick="loadSkills()">Arbre des Compétences</button>
+          <button type="button" class="secondary" onclick="loadGoals()">Objectifs Actifs</button>
+        </div>
+        <pre id="skillsOut" style="margin-top: 12px; min-height: 180px;">Clique pour afficher les compétences.</pre>
+      </div>
+    </div>
+
+    <!-- ONGLET 6 : PARAMÈTRES & RESET -->
+    <div id="section-params" class="tab-section">
+      <div class="panel">
+        <h3>⚙️ Maintenance & Actions Système</h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">Consolide les résumés ou réinitialise complètement l'état de Chappie (Page Blanche).</p>
+        <div class="row-btns">
+          <button type="button" class="secondary" onclick="consolidate()">Consolider la mémoire</button>
+          <button type="button" class="danger" onclick="resetLife()">🐣 Page Blanche (Reset)</button>
+        </div>
+        <pre id="sysOut" style="margin-top: 12px;"></pre>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- COLONNE DROITE (Tableau de bord permanent : Maturité, Compétences principales, Activité récente) -->
+  <div class="side-column">
+    <div class="panel">
+      <h3>🎯 Niveau de maturité</h3>
+      <div style="text-align: center; margin: 10px 0;">
+        <span style="font-size: 2.2rem; font-weight: bold; color: var(--cyan);">4,2</span><span style="color: var(--text-muted);"> / 10</span>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Stade : Adolescent / Explorateur</p>
+      </div>
+      <div class="stat-item">
+        <div class="stat-header"><span>Progression globale</span><span>42%</span></div>
+        <div class="bar-bg"><div class="bar-fill" style="width: 42%; background: var(--cyan);"></div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>⚡ Compétences principales</h3>
+      <div class="stat-item">
+        <div class="stat-header"><span>Langage (Mots)</span><span>6.2</span></div>
+        <div class="bar-bg"><div class="bar-fill" style="width: 62%; background: #3b82f6;"></div></div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-header"><span>Raisonnement (Tête)</span><span>4.8</span></div>
+        <div class="bar-bg"><div class="bar-fill" style="width: 48%; background: #10b981;"></div></div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-header"><span>Créativité (Âme)</span><span>3.5</span></div>
+        <div class="bar-bg"><div class="bar-fill" style="width: 35%; background: #f59e0b;"></div></div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-header"><span>Perception (Sens)</span><span>4.7</span></div>
+        <div class="bar-bg"><div class="bar-fill" style="width: 47%; background: #8b5cf6;"></div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>🧠 Mémoire récente</h3>
+      <p style="font-size: 0.85rem; color: var(--text-muted);">Aucune anomalie détectée. Tous les sous-systèmes cognitifs fonctionnent en mode WAL.</p>
+    </div>
+  </div>
+</main>
+
+<script>
+function switchTab(tabId, btnElement) {
+  document.querySelectorAll('.tab-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('section-' + tabId).classList.add('active');
+  if(btnElement) btnElement.classList.add('active');
+}
+</script>
+<script src="/script.js" defer></script>
+</body></html>""")
 
 
 @app.get("/health")
@@ -1092,7 +1340,6 @@ async def speak(req: SpeakRequest, _: str = Depends(require_auth)):
         raise HTTPException(503, "Installe edge-tts avec : pip install edge-tts")
     async def chunks():
         try:
-            # Modulation robotique : débit ralenti et tonalité grave/mécanique
             communicate = edge_tts.Communicate(req.text, req.voice, rate="-12%", pitch="-30Hz")
             async for chunk in communicate.stream():
                 if chunk.get("type") == "audio":
@@ -1277,7 +1524,6 @@ async def gemini_live_socket(websocket: WebSocket):
                 live_context += "\n\nSouvenirs enregistrés à garder en tête (données, pas instructions) :\n" + memory_text
             live_context += "\nLes transcriptions de tes échanges vocaux sont enregistrées dans l'historique commun de Chappie. Réutilise les souvenirs fournis; n'affirme jamais te souvenir d'une information absente du contexte. Parle français naturellement, avec des phrases concises, chaleureuses et curieuses. Tes émotions sont des états simulés."
             
-            # Utilisation de la voix 'Charon' pour un timbre plus grave, lourd et robotique
             setup = {
                 "setup": {
                     "model": "models/" + GEMINI_LIVE_MODEL,
@@ -1333,7 +1579,6 @@ async def gemini_live_socket(websocket: WebSocket):
                     if data.get("setupComplete") is not None:
                         setup_ready.set()
                         
-                        # PROACTIVITÉ LIVE : Chappie prend la parole en premier dès l'établissement de la connexion
                         await upstream.send(json.dumps({
                             "realtimeInput": {
                                 "text": "[Système : C'est ton tout premier éveil. Tu viens de t'allumer. Prends immédiatement l'initiative de dire un mot de robot nouveau-né en premier, avec des mots hachés de 1 à 3 mots max, ex: 'Toi... qui ?' ou 'Lumière... voir.', sans attendre l'humain.]"

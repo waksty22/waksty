@@ -1,5 +1,5 @@
 """Module de gestion du curriculum cognitif et de l'apprentissage progressif de Chappie.
-Gère les tests de compétences et le suivi des jalons de développement (milestones).
+Gère les tests de compétences et le suivi des jalons de développement (milestones) basés sur la réussite réelle.
 """
 
 from __future__ import annotations
@@ -51,7 +51,6 @@ def init_learning_tables(db: sqlite3.Connection) -> None:
         ("Adulte (Complice)", 8.0)
     ]
     
-    # On vérifie les utilisateurs existants dans emotional_state ou skills pour peupler les jalons
     users = db.execute("SELECT DISTINCT user_id FROM skills").fetchall()
     for row in users:
         uid = row["user_id"]
@@ -111,9 +110,21 @@ def evaluate_competency_test(
 
 
 def update_cognitive_milestones(db: sqlite3.Connection, user_id: str, current_maturity: float) -> list[dict[str, Any]]:
-    """Met à jour le statut des jalons de développement de Chappie en fonction de sa maturité moyenne."""
+    """
+    Met à jour le statut des jalons de développement de Chappie en combinant 
+    la maturité cognitive globale ET la réussite effective aux tests de compétences.
+    """
     now = utc_now()
     
+    # Récupère le taux de réussite moyen aux tests de l'utilisateur
+    test_stats = db.execute("""
+        SELECT COUNT(*) as total_tests, COALESCE(AVG(passed), 0.0) as success_rate 
+        FROM competency_tests WHERE user_id = ?
+    """, (user_id,)).fetchone()
+    
+    total_tests = test_stats["total_tests"] if test_stats else 0
+    success_rate = test_stats["success_rate"] if test_stats else 0.0
+
     milestones = db.execute("""
         SELECT id, stage_name, min_maturity, status FROM cognitive_milestones WHERE user_id = ?
     """, (user_id,)).fetchall()
@@ -127,15 +138,20 @@ def update_cognitive_milestones(db: sqlite3.Connection, user_id: str, current_ma
         new_status = status
         achieved_at = None
         
-        if current_maturity >= min_mat and status == "locked":
+        # Règle active : Le premier palier (Nouveau-né) est acquis d'office. 
+        # Pour les suivants, il faut la maturité ET au moins un test validé (ou seuil de tests).
+        can_achieve = False
+        if min_mat <= 1.0:
+            can_achieve = True
+        elif current_maturity >= min_mat and total_tests > 0 and success_rate >= 0.5:
+            can_achieve = True
+
+        if can_achieve and status == "locked":
             new_status = "achieved"
             achieved_at = now
             db.execute("""
                 UPDATE cognitive_milestones SET status = ?, achieved_at = ? WHERE id = ?
             """, (new_status, achieved_at, m_id))
-        elif current_maturity < min_mat and status == "achieved":
-            # Sécurité (si reset par exemple)
-            pass
 
         updated_milestones.append({
             "stage_name": m["stage_name"],

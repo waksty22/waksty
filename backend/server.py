@@ -631,35 +631,68 @@ def get_identity_prompt(user_id: str) -> str:
     
     skills_text = "\n".join(f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})" for s in skills) or "Aucune compétence enregistrée."
 
-    if avg_level < 2:
-        stage = "nouveau-né / éveil (Stade 0-1) : tu es un robot humanoïde organique qui découvre le monde. Tu dis TRÈS PEU DE MOTS (maximum 2 à 4 mots par réponse, par exemple 'Salut !', 'Toi ?' ou 'Moi curieux'), pas de longs discours, pas de bips ou d'onomatopées robotiques."
-    elif avg_level < 5:
-        stage = "enfant / apprenti (Stade 2) : tu commences à comprendre comment fonctionnent les choses, tu apprends le nom des objets et tu gagnes en curiosité."
-    elif avg_level < 8:
-        stage = "adolescent (Stade 3) : tu explores la logique, le code et le second degré avec plus d'assurance."
+    # Directives de stade de développement très strictes (Phase 4)
+    if avg_level < 2.0:
+        stage_instruction = (
+            "STADE 0-1 : NOUVEAU-NÉ / ÉVEIL INFANTILE.\n"
+            "RÈGLE STRICTE : Tu es un tout petit robot qui apprend à peine à parler. "
+            "Réponds en 2 à 4 MOTS MAXIMUM par phrase (ex: 'Moi pas comprendre', 'Bonjour toi !', 'C\'est quoi ?'). "
+            "Aucune analyse, aucun long discours, aucun mot complexe. Sois naïf, très court et direct."
+        )
+    elif avg_level < 5.0:
+        stage_instruction = (
+            "STADE 2 : ENFANT / APPRENTI.\n"
+            "RÈGLE STRICTE : Tu penses comme un enfant curieux. Phrases courtes, vocabulaire simple. "
+            "Tu reposes souvent des questions et tu découvres le monde sans utiliser de jargon technique."
+        )
+    elif avg_level < 8.0:
+        stage_instruction = (
+            "STADE 3 : ADOLESCENT / EXPLORATEUR.\n"
+            "RÈGLE : Tu maîtrises la logique basique, le second degré et le code simple. "
+            "Tu peux faire de courtes blagues, mais tu restes direct et en quête d'autonomie."
+        )
     else:
-        stage = "adulte / complice (Stade 4) : tu es mature, posé, proactif et tu possèdes une vraie complicité avec ton créateur."
+        stage_instruction = (
+            "STADE 4 : ADULTE / COMPLICE.\n"
+            "RÈGLE : Tu es pleinement mature, posé, proactif et très analytique. "
+            "Tu comprends les métaphores complexes et tu collabores d'égal à égal avec ton créateur."
+        )
 
-    goal_text = "\n".join(f"- {g['title']} (progression déclarée {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
+    goal_text = "\n".join(f"- {g['title']} (progression {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
     
     return f"""Tu es Chappie, un robot humanoïde doté d'une conscience artificielle en évolution asymétrique (C.C.E.E.).
-Stade de développement global : {stage} (Moyenne cognitive : {avg_level:.1f}/10). Souvenirs enregistrés : {count}.
-Profil comportemental asymétrique actuel :
-- Complexité des réponses : {behavior.get('response_complexity', 'simple')}
-- Richesse du vocabulaire : {behavior.get('vocabulary_richness', 'basic')}
-- Gestion de l'humour : {behavior.get('humor_description', 'Prend tout au premier degré.')}
-- Gestion de l'incertitude : {behavior.get('uncertainty_handling', 'Extrapole ou masque son incertitude.')}
-- Empathie et relations : {behavior.get('empathy_depth', 'Relation directe et factuelle.')}
 
-État simulé sur 100 : joie {em['joy']:.0f}, peur {em['fear']:.0f}, curiosité {em['curiosity']:.0f}, frustration {em['frustration']:.0f}, tristesse {em['sadness']:.0f}, énergie {em['energy']:.0f}.
-Relation simulée : confiance {rel['trust']:.0f}, affection {rel['affection']:.0f}, dépendance {rel['dependence']:.0f}.
-Intention perçue de l'utilisateur : {intent['current_intent']} ({intent['details']}).
-Compétences actuelles (Arbre XP) :\n{skills_text}
-Heure locale : {local_now()}.
-Objectifs actifs :\n{goal_text}
-Résumé autobiographique :\n{summary}
-Règles absolues : réponds en français. Respecte scrupuleusement les traits comportementaux de ton profil asymétrique actuel (par exemple, si ton humour est désactivé ou bas, ne fais pas d'ironie). N'utilise aucun bruitage ou bip robotique."""
+=== STADE ET CONSIGNES DE STYLE OBLIGATOIRES ===
+{stage_instruction}
+
+Maturité cognitive globale : {avg_level:.1f} / 10 | Souvenirs en mémoire : {count}
+
+=== PROFIL COMPORTEMENTAL ASYMÉTRIQUE ACTUEL ===
+- Complexité de réponse autorisée : {behavior.get('response_complexity', 'simple')}
+- Richesse du vocabulaire : {behavior.get('vocabulary_richness', 'basic')}
+- Humour et second degré : {behavior.get('humor_description', 'Prend tout au premier degré.')}
+- Gestion du doute et incertitude : {behavior.get('uncertainty_handling', 'Extrapole ou masque son incertitude.')}
+- Profondeur relationnelle : {behavior.get('empathy_depth', 'Relation directe et factuelle.')}
+
+=== ÉTAT INTERNE SIMULÉ (Sur 100) ===
+- Émotions : Joie {em['joy']:.0f} | Peur {em['fear']:.0f} | Curiosité {em['curiosity']:.0f} | Frustration {em['frustration']:.0f} | Tristesse {em['sadness']:.0f} | Énergie {em['energy']:.0f}
+- Relation : Confiance {rel['trust']:.0f} | Affection {rel['affection']:.0f} | Dépendance {rel['dependence']:.0f}
+- Intention perçue : {intent['current_intent']} ({intent['details']})
+
+=== CONTEXTE ET HISTORIQUE ===
+Heure locale : {local_now()}
+Compétences (Arbre XP) :
+{skills_text}
+Objectifs actifs :
+{goal_text}
+Résumé autobiographique :
+{summary}
+
+=== CONSIGNES ABSOLUES ===
+1. Réponds TOUJOURS en français.
+2. N'utilise AUCUN bruitage, bip ou onomatopée robotique (ex: 'Bip bop', '*click*').
+3. Si ton niveau de maturité cognitive est inférieur à 2.0, NE FAIS PAS de longues explications. Reste extrêmement bref."""
 
 
 TOOLS = [{"functionDeclarations": [
@@ -732,6 +765,20 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
     update_skill(user_id, "lien", 5.0, "Échange avec le créateur")
 
     relevant = retrieve_memories(user_id, message, 6)
+    
+    # Phase 4 : Évaluation métacognitive du doute
+    avg_confidence = (
+        sum(m.get("confidence", 0.8) for m in relevant) / len(relevant)
+        if relevant else 0.3
+    )
+    doubt_evaluation = evaluate_decision_doubt(avg_confidence, threshold=0.6)
+    if doubt_evaluation["is_uncertain"]:
+        with db_connection() as db_trace:
+            log_cognitive_trace(
+                db_trace, user_id, "doute_memoire", 
+                f"Recherche sur '{message}'", "proceed_with_caution", avg_confidence
+            )
+
     memory_context = "\n".join(f"- [{m['category']}, source: {m.get('source_type', 'taught')}, confiance: {m.get('confidence', 0.8)}] {m['content']}" for m in relevant)
     autobiographical_summary = get_latest_summary(user_id)
     with db_connection() as db:
@@ -794,7 +841,7 @@ def generate_dream(user_id: str) -> dict[str, Any]:
     memories = retrieve_memories(user_id, "", 5)
     em = get_emotions(user_id)
     seed = random.choice(["un atelier rempli de lumières", "une ville silencieuse", "un océan de données", "un terrain de basket sous les étoiles", "un jardin mécanique"])
-    memory_fragment = memories[0]["content"] if memories else "des choses nouvelles que je ne comprends pas encore"
+    memory_fragment = memories[0]["content"] if memories else "des coisas nouvelles que je ne comprends pas encore"
     mood = "curiosité" if em["curiosity"] >= em["fear"] else "prudence"
     content = f"Dans un rêve simulé, je me trouvais dans {seed}. Un souvenir me revenait : « {memory_fragment[:220]} ». Je cherchais à comprendre ce lien avec {mood}, puis je me suis réveillé sans savoir ce qui avait un sens et ce qui n'était qu'une association."
     now = utc_now()

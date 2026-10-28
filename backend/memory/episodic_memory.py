@@ -1,5 +1,5 @@
 """Module de gestion de la mémoire épisodique et des sources de connaissances pour Chappie.
-Gère la traçabilité des sources, la recherche et la simulation de la courbe de l'oubli.
+Gère la traçabilité des sources, la recherche optimisée avec incrémentation des accès et une courbe de l'oubli maîtrisée.
 """
 from __future__ import annotations
 
@@ -82,8 +82,9 @@ def save_episodic_memory(
 
 
 def search_episodic_memories(db: sqlite3.Connection, user_id: str, query: str = "", limit: int = 10) -> list[dict[str, Any]]:
-    """Recherche des souvenirs dans la mémoire épisodique et incrémente leur compteur d'accès."""
+    """Recherche des souvenirs dans la mémoire épisodique et incrémente directement leur compteur d'accès."""
     limit = max(1, min(30, int(limit)))
+    
     if query.strip():
         cursor = db.execute("""
             SELECT id, category, content, importance, source_type, confidence, tags, access_count, created_at
@@ -102,6 +103,8 @@ def search_episodic_memories(db: sqlite3.Connection, user_id: str, query: str = 
         """, (user_id, limit))
 
     results = []
+    memory_ids_to_increment = []
+
     for row in cursor.fetchall():
         item = dict(row)
         try:
@@ -109,16 +112,29 @@ def search_episodic_memories(db: sqlite3.Connection, user_id: str, query: str = 
         except Exception:
             item["tags"] = []
         results.append(item)
+        memory_ids_to_increment.append(item["id"])
+
+    # Incrémentation réelle et atomique du compteur d'accès pour les souvenirs trouvés
+    if memory_ids_to_increment:
+        db.executemany(
+            "UPDATE memories_v19 SET access_count = access_count + 1 WHERE id = ?",
+            [(mid,) for mid in memory_ids_to_increment]
+        )
+        db.commit()
+
     return results
 
 
 def apply_memory_decay(db: sqlite3.Connection, user_id: str) -> int:
-    """Simule la courbe de l'oubli : réduit légèrement l'importance des souvenirs 
-    très anciens peu consultés (importance 2 minimum pour les faits non vitaux).
+    """
+    Simule la courbe de l'oubli de manière maîtrisée : réduit l'importance 
+    des souvenirs anciens peu consultés, mais évite les décroissances en boucle 
+    grâce à un contrôle sur la date de dernière mise à jour.
     """
     cursor = db.execute("""
         UPDATE memories_v19
-        SET importance = importance - 1
+        SET importance = importance - 1,
+            updated_at = datetime('now')
         WHERE user_id = ? 
           AND importance > 1 
           AND access_count < 2

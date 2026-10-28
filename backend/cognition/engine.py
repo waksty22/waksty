@@ -3,6 +3,7 @@
 """
 Moteur de calcul cognitif, asymétrique et de mise en cache pour Chappie V19.3.
 Conçu pour fonctionner de manière asynchrone sans perturber Gemini Live.
+Intègre la pondération des sous-branches et l'isolation par utilisateur.
 """
 
 import time
@@ -12,34 +13,43 @@ from cognition.catalog import COGNITIVE_CATALOG
 
 class CognitiveEngine:
     def __init__(self):
-        # Cache intelligent en mémoire pour éviter les requêtes SQLite répétées
-        self._profile_cache: Optional[Dict[str, Any]] = None
-        self._cache_timestamp: float = 0.0
+        # Cache intelligent en mémoire isolé par utilisateur pour éviter les conflits
+        # Structure : { user_id: { "profile": {...}, "timestamp": 0.0 } }
+        self._user_caches: Dict[str, Dict[str, Any]] = {}
         self._cache_ttl: float = 60.0  # Durée de vie du cache en secondes
 
-    def invalidate_cache(self):
-        """Invalide le cache lorsqu'une compétence ou une preuve est validée."""
-        self._profile_cache = None
-        self._cache_timestamp = 0.0
+    def invalidate_cache(self, user_id: Optional[str] = None):
+        """Invalide le cache pour un utilisateur spécifique ou pour tout le monde."""
+        if user_id and user_id in self._user_caches:
+            del self._user_caches[user_id]
+        else:
+            self._user_caches.clear()
 
-    def compute_cognitive_profile(self, db_skills_data: Dict[str, Any], force_recompute: bool = False) -> Dict[str, Any]:
+    def compute_cognitive_profile(self, user_id: str, db_skills_data: Dict[str, Any], force_recompute: bool = False) -> Dict[str, Any]:
         """
-        Calcule le profil cognitif complet, les niveaux des 12 systèmes, 
-        et les tendances comportementales asymétriques.
+        Calcule le profil cognitif complet, les niveaux pondérés des 12 systèmes, 
+        et les tendances comportementales asymétriques pour un utilisateur donné.
         """
         current_time = time.time()
-        if not force_recompute and self._profile_cache and (current_time - self._cache_timestamp < self._cache_ttl):
-            return self._profile_cache
+        
+        # Vérification du cache par utilisateur
+        if not force_recompute and user_id in self._user_caches:
+            cached = self._user_caches[user_id]
+            if current_time - cached["timestamp"] < self._cache_ttl:
+                return cached["profile"]
 
         systems_profile = {}
-        total_mastery = 0.0
-        total_sub_count = 0
+        total_weighted_mastery = 0.0
+        total_weights_sum = 0.0
 
         for sys_key, sys_info in COGNITIVE_CATALOG.items():
             sub_branches_scores = {}
-            sys_total_score = 0.0
+            sys_weighted_sum = 0.0
+            sys_weight_total = 0.0
             
-            for sub_key in sys_info["sub_branches"].keys():
+            for sub_key, sub_meta in sys_info["sub_branches"].items():
+                weight = sub_meta.get("weight", 1.0)
+                
                 # Récupère les données depuis la DB (niveau, maîtrise, confiance) ou valeurs par défaut (Niveau 1)
                 sub_data = db_skills_data.get(sys_key, {}).get(sub_key, {
                     "level": 1,
@@ -49,12 +59,13 @@ class CognitiveEngine:
                 })
                 
                 sub_branches_scores[sub_key] = sub_data
-                sys_total_score += sub_data.get("level", 1)
-                total_mastery += sub_data.get("level", 1)
-                total_sub_count += 1
+                
+                lvl = float(sub_data.get("level", 1))
+                sys_weighted_sum += lvl * weight
+                sys_weight_total += weight
 
-            # Moyenne du système
-            avg_sys_level = sys_total_score / len(sys_info["sub_branches"]) if sys_info["sub_branches"] else 1.0
+            # Moyenne pondérée du système
+            avg_sys_level = sys_weighted_sum / sys_weight_total if sys_weight_total > 0 else 1.0
             
             systems_profile[sys_key] = {
                 "name": sys_info["name"],
@@ -62,8 +73,11 @@ class CognitiveEngine:
                 "sub_branches": sub_branches_scores
             }
 
-        # Calcul global de maturité cognitive
-        global_maturity_score = total_mastery / total_sub_count if total_sub_count > 0 else 1.0
+            total_weighted_mastery += sys_weighted_sum
+            total_weights_sum += sys_weight_total
+
+        # Calcul global de maturité cognitive pondéré
+        global_maturity_score = total_weighted_mastery / total_weights_sum if total_weights_sum > 0 else 1.0
 
         # Détermination des comportements dynamiques (Asymétrie savant/novice)
         behavior_traits = self._derive_behavioral_traits(systems_profile)
@@ -76,9 +90,11 @@ class CognitiveEngine:
             "updated_at": current_time
         }
 
-        # Mise en cache
-        self._profile_cache = profile
-        self._cache_timestamp = current_time
+        # Mise en cache isolée par utilisateur
+        self._user_caches[user_id] = {
+            "profile": profile,
+            "timestamp": current_time
+        }
 
         return profile
 

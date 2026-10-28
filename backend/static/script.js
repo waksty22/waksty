@@ -320,11 +320,23 @@ async function loadSkills() {
         $('summary').textContent = 'Aucune compétence enregistrée pour le moment.';
         return;
       }
-      let text = `🎓 Arbre de Compétences de Chappie (Moyenne globale : ${(d.average_level || 1).toFixed(1)}/10) :\n\n`;
+      const maturity = d.cognitive_profile ? d.cognitive_profile.global_maturity : (d.average_level || 1.0);
+      let text = `🎓 Écosystème Cognitif de Chappie (Maturité globale : ${Number(maturity).toFixed(1)}/10) :\n\n`;
+      
       d.skills.forEach(s => {
         const percent = Math.min(100, Math.round((s.xp % 100)));
-        text += `🔹 ${s.evidence || s.skill_name} : Niveau ${Math.round(s.level)} (XP: ${Math.round(s.xp)} - ${percent}% niv suivant)\n`;
+        text += `🔹 ${s.skill_name.toUpperCase()} — Niveau ${Math.round(s.level)} (XP: ${Math.round(s.xp)} - ${percent}% niv suivant) | Preuve : ${s.evidence || 'Aucune'}\n`;
       });
+
+      if (d.cognitive_profile && d.cognitive_profile.behavior) {
+        const b = d.cognitive_profile.behavior;
+        text += `\n⚙️ Profil Comportemental Asymétrique :\n`;
+        text += `• Complexité : ${b.response_complexity}\n`;
+        text += `• Vocabulaire : ${b.vocabulary_richness}\n`;
+        text += `• Humour : ${b.humor_description}\n`;
+        text += `• Incertitude : ${b.uncertainty_handling}\n`;
+      }
+
       $('summary').textContent = text;
     } else {
       $('summary').textContent = 'Impossible de charger les compétences.';

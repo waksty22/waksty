@@ -1,3 +1,5 @@
+# backend/server.py
+
 """Chappie V19.3 — architecture cognitive complète (mémoire, monde, apprentissage, cognition, voix et vision).
 Python 3.11+. Les émotions/rêves sont des simulations logicielles, pas une conscience démontrée.
 """
@@ -361,7 +363,8 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
                 "default": {"level": s["level"], "xp": s["xp"], "confidence": 0.8}
             }
         
-        computed_profile = cognitive_engine.compute_cognitive_profile(db_skills_data)
+        # CORRECTION : Passage de user_id pour respecter l'isolation du cache cognitif
+        computed_profile = cognitive_engine.compute_cognitive_profile(user_id, db_skills_data)
         avg_level = computed_profile.get("global_maturity", 1.0)
         
         return {
@@ -374,7 +377,8 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
 def reset_chappie_life(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
     now = utc_now()
-    cognitive_engine.invalidate_cache()
+    # CORRECTION : Invalidation ciblée du cache pour l'utilisateur
+    cognitive_engine.invalidate_cache(user_id)
     with db_connection() as db:
         db.execute("UPDATE skills SET level=1.0, xp=0.0, evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?", (now, user_id))
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
@@ -408,7 +412,7 @@ def update_skill(user_id: str, skill_name: str, xp_delta: float, evidence: str) 
         skill_name = "tete"  # Fallback sécurisé vers un socle valide
     
     now = utc_now()
-    cognitive_engine.invalidate_cache()
+    cognitive_engine.invalidate_cache(user_id)
     with db_connection() as db:
         row = db.execute("SELECT level, xp FROM skills WHERE user_id=? AND skill_name=?", (user_id, skill_name)).fetchone()
         if not row:

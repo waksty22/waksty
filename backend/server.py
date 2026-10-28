@@ -921,7 +921,7 @@ async def serve_script():
 async def home():
     return HTMLResponse("""<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Chappie V19.3 — Tableau de bord</title>
+<title>Chappie V19.3 — Dashboard</title>
 <style>
 :root {
   --bg: #070b14;
@@ -929,7 +929,6 @@ async def home():
   --card-bg: #101826;
   --card-border: #1e293b;
   --accent: #2563eb;
-  --accent-hover: #3b82f6;
   --cyan: #06b6d4;
   --text: #f8fafc;
   --text-muted: #94a3b8;
@@ -939,73 +938,86 @@ async def home():
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
 
-/* Barre latérale gauche type Dashboard */
-aside { width: 260px; background: var(--sidebar-bg); border-right: 1px solid var(--card-border); display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
-.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-.brand span { font-size: 2rem; }
-.brand h2 { font-size: 1.2rem; font-weight: 700; color: var(--text); }
-.brand p { font-size: 0.75rem; color: var(--text-muted); }
+/* --- MODE PC (Par défaut : Barre latérale gauche) --- */
+aside { width: 250px; background: var(--sidebar-bg); border-right: 1px solid var(--card-border); display: flex; flex-direction: column; padding: 16px; flex-shrink: 0; overflow-y: auto; }
+.brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.brand span { font-size: 1.8rem; }
+.brand h2 { font-size: 1.1rem; font-weight: 700; }
+.brand p { font-size: 0.7rem; color: var(--text-muted); }
 
-.nav-menu { display: flex; flex-direction: column; gap: 6px; flex-grow: 1; overflow-y: auto; }
-.nav-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; color: var(--text-muted); text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 0.9rem; cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; transition: all 0.2s; }
+.nav-menu { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; color: var(--text-muted); text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 0.85rem; cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; transition: all 0.2s; }
 .nav-item:hover, .nav-item.active { background: var(--accent); color: #fff; }
 
-/* Contenu principal */
+/* Contenu principal en grille PC */
 main { flex-grow: 1; overflow-y: auto; padding: 20px; display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
-@media (max-width: 1100px) { main { grid-template-columns: 1fr; } aside { display: none; } }
-
-.main-column { display: flex; flex-direction: column; gap: 16px; }
 .side-column { display: flex; flex-direction: column; gap: 16px; }
 
-.panel { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 20px; }
-.panel h3 { font-size: 1rem; margin-bottom: 12px; color: var(--cyan); display: flex; align-items: center; gap: 8px; }
+/* --- MODE MOBILE (Écrans de moins de 1000px) --- */
+@media (max-width: 1000px) {
+  body { flex-direction: column; height: auto; overflow: auto; }
+  aside { width: 100%; height: auto; flex-direction: row; align-items: center; justify-content: space-between; padding: 10px 14px; overflow-x: auto; flex-shrink: unset; }
+  .brand div, .nav-menu { display: none; }
+  
+  .mobile-nav { display: flex; gap: 6px; overflow-x: auto; width: 100%; background: var(--sidebar-bg); padding: 8px 12px; border-bottom: 1px solid var(--card-border); }
+  .mobile-tab { background: #1e293b; color: var(--text-muted); border: 1px solid var(--card-border); padding: 6px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+  .mobile-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  
+  main { display: flex; flex-direction: column; padding: 12px; gap: 12px; overflow: visible; }
+  .side-column { order: 2; }
+}
+
+@media (min-width: 1001px) {
+  .mobile-nav { display: none; }
+}
+
+.panel { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 16px; }
+.panel h3 { font-size: 0.95rem; margin-bottom: 10px; color: var(--cyan); display: flex; align-items: center; gap: 8px; }
 
 /* En-tête héro */
-.hero-card { display: flex; align-items: center; gap: 20px; background: linear-gradient(135deg, #101826 0%, #1e293b 100%); }
-.hero-avatar { width: 90px; height: 90px; border-radius: 12px; background: #070b14; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; border: 1px solid var(--card-border); flex-shrink: 0; }
-.hero-info h2 { font-size: 1.5rem; margin-bottom: 4px; }
-.hero-info p { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 10px; }
-.badges { display: flex; gap: 8px; flex-wrap: wrap; }
-.badge { font-size: 0.75rem; background: #070b14; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--card-border); color: var(--cyan); }
+.hero-card { display: flex; align-items: center; gap: 16px; background: linear-gradient(135deg, #101826 0%, #1e293b 100%); }
+.hero-avatar { width: 70px; height: 70px; border-radius: 12px; background: #070b14; display: flex; align-items: center; justify-content: center; font-size: 2rem; border: 1px solid var(--card-border); flex-shrink: 0; }
+.hero-info h2 { font-size: 1.2rem; margin-bottom: 4px; }
+.hero-info p { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 6px; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { font-size: 0.65rem; background: #070b14; padding: 3px 8px; border-radius: 20px; border: 1px solid var(--card-border); color: var(--cyan); }
 
-/* Bulles de chat */
-.chat-container { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; max-height: 300px; overflow-y: auto; }
-.msg-bubble { padding: 12px 16px; border-radius: 12px; font-size: 0.95rem; max-width: 85%; }
+/* Chat et formulaires */
+.chat-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; max-height: 220px; overflow-y: auto; }
+.msg-bubble { padding: 10px 12px; border-radius: 10px; font-size: 0.85rem; max-width: 85%; }
 .msg-user { background: var(--accent); color: #fff; align-self: flex-end; }
 .msg-chappie { background: #1e293b; color: var(--text); align-self: flex-start; border: 1px solid var(--card-border); }
 
-input, textarea { width: 100%; padding: 12px; background: #070b14; color: var(--text); border: 1px solid var(--card-border); border-radius: 8px; font: inherit; font-size: 0.95rem; margin-top: 6px; }
+input, textarea { width: 100%; padding: 10px; background: #070b14; color: var(--text); border: 1px solid var(--card-border); border-radius: 8px; font: inherit; font-size: 0.85rem; margin-top: 4px; outline: none; }
 textarea { resize: vertical; }
 
-.row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-button { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: opacity 0.2s; }
-button:hover { opacity: 0.9; }
+.row-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+button { padding: 8px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; font-size: 0.8rem; cursor: pointer; }
 button.secondary { background: #1e293b; border: 1px solid var(--card-border); }
 button.danger { background: var(--danger); }
 
 /* Barres de progression */
-.stat-item { margin-bottom: 10px; }
-.stat-header { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px; }
-.bar-bg { background: #070b14; border-radius: 6px; height: 8px; overflow: hidden; border: 1px solid var(--card-border); }
-.bar-fill { height: 100%; border-radius: 6px; }
+.stat-item { margin-bottom: 8px; }
+.stat-header { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 2px; color: var(--text-muted); }
+.bar-bg { background: #070b14; border-radius: 4px; height: 6px; overflow: hidden; border: 1px solid var(--card-border); }
+.bar-fill { height: 100%; border-radius: 4px; }
 
-.status { font-size: 0.85rem; color: var(--cyan); margin-top: 6px; }
-video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px; object-fit: cover; margin-top: 8px; }
+.status { font-size: 0.75rem; color: var(--cyan); margin-top: 4px; }
+video { width: 100%; max-height: 180px; background: #070b14; border-radius: 8px; object-fit: cover; margin-top: 6px; }
 
-/* Sections onglets cachées / affichées */
 .tab-section { display: none; }
 .tab-section.active { display: flex; flex-direction: column; gap: 16px; }
 </style>
 </head>
 <body>
 
-<!-- BARRE LATÉRALE DE NAVIGATION -->
+<!-- BARRE LATÉRALE (PC) -->
 <aside>
   <div class="brand">
     <span>🤖</span>
     <div>
       <h2>Chappie</h2>
-      <p>Mon compagnon d'apprentissage</p>
+      <p>Compagnon V19.3</p>
     </div>
   </div>
   
@@ -1014,20 +1026,29 @@ video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px;
     <button class="nav-item" onclick="switchTab('chat', this)">💬 Chat & Direct</button>
     <button class="nav-item" onclick="switchTab('media', this)">🎙️ Voix & Vision</button>
     <button class="nav-item" onclick="switchTab('memory', this)">🧠 Mémoire & Rêves</button>
-    <button class="nav-item" onclick="switchTab('skills', this)">🎓 Compétences & Objectifs</button>
-    <button class="nav-item" onclick="switchTab('params', this)">⚙️ Paramètres & Reset</button>
+    <button class="nav-item" onclick="switchTab('skills', this)">🎓 Compétences</button>
+    <button class="nav-item" onclick="switchTab('params', this)">⚙️ Paramètres</button>
   </div>
 
-  <div style="margin-top: auto; padding-top: 15px; border-top: 1px solid var(--card-border);">
-    <label style="font-size: 0.75rem; color: var(--text-muted);">Jeton API</label>
-    <input id="token" type="password" placeholder="CHAPPIE_API_TOKEN" style="margin-top: 4px; font-size: 0.8rem; padding: 8px;">
+  <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-border);">
+    <label style="font-size: 0.7rem; color: var(--text-muted);">🔑 Jeton API</label>
+    <input id="token" type="password" placeholder="CHAPPIE_API_TOKEN" style="font-size: 0.75rem; padding: 6px;">
   </div>
 </aside>
 
+<!-- BARRE D'ONGLETS HORIZONTALE (MOBILE UNIQUEMENT) -->
+<div class="mobile-nav">
+  <button class="mobile-tab active" onclick="switchTab('accueil', this)">🏠 Accueil</button>
+  <button class="mobile-tab" onclick="switchTab('chat', this)">💬 Chat</button>
+  <button class="mobile-tab" onclick="switchTab('media', this)">🎙️ Voix/Vision</button>
+  <button class="mobile-tab" onclick="switchTab('memory', this)">🧠 Mémoire</button>
+  <button class="mobile-tab" onclick="switchTab('skills', this)">🎓 Stats</button>
+  <button class="mobile-tab" onclick="switchTab('params', this)">⚙️ Options</button>
+</div>
+
 <!-- CONTENU PRINCIPAL -->
 <main>
-  <!-- COLONNE GAUCHE (Dynamique selon l'onglet) -->
-  <div class="main-column">
+  <div style="display: flex; flex-direction: column; gap: 16px;">
 
     <!-- ONGLET 1 : ACCUEIL -->
     <div id="section-accueil" class="tab-section active">
@@ -1035,11 +1056,10 @@ video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px;
         <div class="hero-avatar">🤖</div>
         <div class="hero-info">
           <h2>Chappie V19.3</h2>
-          <p>Salut ! Je découvre le monde, je mémorise et j'évolue grâce à toi. Que souhaites-tu explorer aujourd'hui ?</p>
+          <p>Je découvre le monde et j'évolue grâce à toi.</p>
           <div class="badges">
             <span class="badge">⚡ Curieux</span>
             <span class="badge">🛡️ Bienveillant</span>
-            <span class="badge">🧠 Apprenant</span>
           </div>
         </div>
       </div>
@@ -1047,9 +1067,9 @@ video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px;
       <div class="panel">
         <h3>💬 Conversation rapide</h3>
         <div id="chatHistory" class="chat-container">
-          <div class="msg-bubble msg-chappie">Bonjour ! Je suis prêt pour tes instructions ou tes questions.</div>
+          <div class="msg-bubble msg-chappie">Bonjour ! Je suis prêt.</div>
         </div>
-        <textarea id="msg" rows="2" placeholder="Écris ton message à Chappie..."></textarea>
+        <textarea id="msg" rows="2" placeholder="Écris ton message..."></textarea>
         <div class="row-btns">
           <button type="button" onclick="sendMessage()">Envoyer</button>
           <button type="button" class="secondary" onclick="toggleMic()">🎙️ Dicter</button>
@@ -1057,108 +1077,90 @@ video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px;
         </div>
         <div id="status" class="status">Prêt.</div>
       </div>
-
-      <div class="panel">
-        <h3>⚡ État du Système & Pensée en cours</h3>
-        <pre id="state">Chargement de l'état interne...</pre>
-      </div>
     </div>
 
-    <!-- ONGLET 2 : CHAT & DIRECT -->
+    <!-- ONGLET 2 : CHAT -->
     <div id="section-chat" class="tab-section">
       <div class="panel">
         <h3>💬 Espace de discussion étendu</h3>
-        <textarea id="msgChatTab" rows="4" placeholder="Pose ta question détaillée à Chappie..."></textarea>
-        <button type="button" onclick="sendMessageFromTab()" style="margin-top: 10px;">Envoyer le message</button>
-        <pre id="outChatTab" style="margin-top: 12px; min-height: 120px;">En attente de discussion...</pre>
+        <textarea id="msgChatTab" rows="4" placeholder="Pose ta question..."></textarea>
+        <button type="button" onclick="sendMessageFromTab()" style="margin-top: 8px;">Envoyer</button>
+        <pre id="outChatTab" style="margin-top: 8px; min-height: 100px; font-size: 0.8rem; background: #070b14; padding: 8px; border-radius: 6px;">En attente...</pre>
       </div>
     </div>
 
     <!-- ONGLET 3 : VOIX & VISION -->
     <div id="section-media" class="tab-section">
       <div class="panel">
-        <h3>🎙️ Conversation Vocale Temps Réel (Gemini Live)</h3>
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">Audio en continu. Tu peux parler pendant que Chappie répond.</p>
+        <h3>🎙️ Gemini Live (Voix temps réel)</h3>
         <div class="row-btns">
           <button type="button" id="liveBtn" onclick="toggleLive()">▶ Démarrer Live</button>
-          <button type="button" class="secondary" onclick="stopLive()">■ Arrêter</button>
+          <button type="button" class="danger" onclick="stopLive()">■ Arrêter</button>
         </div>
-        <div id="liveStatus" class="status">Session non démarrée.</div>
+        <div id="liveStatus" class="status">Non connecté.</div>
       </div>
 
       <div class="panel">
         <h3>👁️ Vision par Caméra</h3>
         <video id="camera" autoplay playsinline muted></video>
-        <div class="row-btns" style="margin-top: 10px;">
+        <div class="row-btns" style="margin-top: 6px;">
           <button type="button" class="secondary" onclick="startCamera()">Activer</button>
           <button type="button" onclick="captureVision()">Analyser</button>
           <button type="button" class="danger" onclick="stopCamera()">Couper</button>
         </div>
-        <pre id="visionOut" style="margin-top: 10px;">Caméra inactive.</pre>
-      </div>
-
-      <div class="panel">
-        <h3>🎙️ Profils Vocaux (Biométrie)</h3>
-        <input id="voiceName" maxlength="80" placeholder="Nom du profil (ex: Julien)">
-        <div class="row-btns" style="margin-top: 8px;">
-          <button type="button" class="secondary" onclick="recordVoice('enroll')">Enregistrer (8s)</button>
-          <button type="button" class="secondary" onclick="recordVoice('identify')">Identifier (5s)</button>
-        </div>
-        <div id="voiceStatus" class="status">Aucun enregistrement en cours.</div>
+        <pre id="visionOut" style="margin-top: 6px; font-size: 0.75rem;">Caméra inactive.</pre>
       </div>
     </div>
 
-    <!-- ONGLET 4 : MÉMOIRE & RÊVES -->
+    <!-- ONGLET 4 : MÉMOIRE -->
     <div id="section-memory" class="tab-section">
       <div class="panel">
-        <h3>📂 Mémoire & Exploration</h3>
+        <h3>🧠 Mémoire & Activité</h3>
         <div class="row-btns">
           <button type="button" class="secondary" onclick="loadSummary()">Mémoire</button>
           <button type="button" class="secondary" onclick="loadDreams()">🌙 Rêves</button>
-          <button type="button" class="secondary" onclick="loadThoughts()">🧠 Pensées</button>
-          <button type="button" class="secondary" onclick="loadMoodHistory()">📜 Humeurs</button>
+          <button type="button" class="secondary" onclick="loadThoughts()">💭 Pensées</button>
         </div>
-        <pre id="summary" style="margin-top: 12px; min-height: 180px;">Sélectionne un module ci-dessus.</pre>
+        <pre id="summary" style="margin-top: 8px; min-height: 120px; font-size: 0.75rem; background: #070b14; padding: 8px; border-radius: 6px;">Sélectionne une option.</pre>
       </div>
     </div>
 
-    <!-- ONGLET 5 : COMPÉTENCES & OBJECTIFS -->
+    <!-- ONGLET 5 : COMPÉTENCES -->
     <div id="section-skills" class="tab-section">
       <div class="panel">
         <h3>🎓 Compétences & Objectifs</h3>
         <div class="row-btns">
-          <button type="button" class="secondary" onclick="loadSkills()">Arbre des Compétences</button>
-          <button type="button" class="secondary" onclick="loadGoals()">Objectifs Actifs</button>
+          <button type="button" class="secondary" onclick="loadSkills()">Arbre des compétences</button>
+          <button type="button" class="secondary" onclick="loadGoals()">Objectifs</button>
         </div>
-        <pre id="skillsOut" style="margin-top: 12px; min-height: 180px;">Clique pour afficher les compétences.</pre>
+        <pre id="skillsOut" style="margin-top: 8px; font-size: 0.75rem; background: #070b14; padding: 8px; border-radius: 6px;"></pre>
       </div>
     </div>
 
-    <!-- ONGLET 6 : PARAMÈTRES & RESET -->
+    <!-- ONGLET 6 : PARAMÈTRES -->
     <div id="section-params" class="tab-section">
       <div class="panel">
-        <h3>⚙️ Maintenance & Actions Système</h3>
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">Consolide les résumés ou réinitialise complètement l'état de Chappie (Page Blanche).</p>
+        <h3>⚙️ Options Système</h3>
         <div class="row-btns">
-          <button type="button" class="secondary" onclick="consolidate()">Consolider la mémoire</button>
+          <button type="button" class="secondary" onclick="consolidate()">Consolider</button>
           <button type="button" class="danger" onclick="resetLife()">🐣 Page Blanche (Reset)</button>
         </div>
-        <pre id="sysOut" style="margin-top: 12px;"></pre>
+        <pre id="sysOut" style="margin-top: 8px; font-size: 0.75rem; background: #070b14; padding: 8px; border-radius: 6px;"></pre>
       </div>
     </div>
 
   </div>
 
-  <!-- COLONNE DROITE (Tableau de bord permanent : Maturité, Compétences principales, Activité récente) -->
+  <!-- COLONNE LATÉRALE DE DROITE (Statistiques et maturité) -->
   <div class="side-column">
     <div class="panel">
       <h3>🎯 Niveau de maturité</h3>
-      <div style="text-align: center; margin: 10px 0;">
-        <span style="font-size: 2.2rem; font-weight: bold; color: var(--cyan);">4,2</span><span style="color: var(--text-muted);"> / 10</span>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">Stade : Adolescent / Explorateur</p>
+      <div style="text-align: center; margin: 6px 0;">
+        <span style="font-size: 1.8rem; font-weight: bold; color: var(--cyan);">4,2</span><span style="color: var(--text-muted);"> / 10</span>
+        <p style="font-size: 0.7rem; color: var(--text-muted);">Adolescent / Explorateur</p>
       </div>
       <div class="stat-item">
-        <div class="stat-header"><span>Progression globale</span><span>42%</span></div>
+        <div class="stat-header"><span>Progression</span><span>42%</span></div>
         <div class="bar-bg"><div class="bar-fill" style="width: 42%; background: var(--cyan);"></div></div>
       </div>
     </div>
@@ -1177,15 +1179,6 @@ video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px;
         <div class="stat-header"><span>Créativité (Âme)</span><span>3.5</span></div>
         <div class="bar-bg"><div class="bar-fill" style="width: 35%; background: #f59e0b;"></div></div>
       </div>
-      <div class="stat-item">
-        <div class="stat-header"><span>Perception (Sens)</span><span>4.7</span></div>
-        <div class="bar-bg"><div class="bar-fill" style="width: 47%; background: #8b5cf6;"></div></div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h3>🧠 Mémoire récente</h3>
-      <p style="font-size: 0.85rem; color: var(--text-muted);">Aucune anomalie détectée. Tous les sous-systèmes cognitifs fonctionnent en mode WAL.</p>
     </div>
   </div>
 </main>
@@ -1193,9 +1186,9 @@ video { width: 100%; max-height: 200px; background: #070b14; border-radius: 8px;
 <script>
 function switchTab(tabId, btnElement) {
   document.querySelectorAll('.tab-section').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item, .mobile-tab').forEach(el => el.classList.remove('active'));
   document.getElementById('section-' + tabId).classList.add('active');
-  if(btnElement) btnElement.classList.add('active');
+  document.querySelectorAll(`[onclick*="'${tabId}'"]`).forEach(el => el.classList.add('active'));
 }
 </script>
 <script src="/script.js" defer></script>

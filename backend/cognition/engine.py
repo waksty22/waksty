@@ -7,7 +7,8 @@ Conçu pour fonctionner de manière asynchrone sans perturber Gemini Live.
 
 import time
 from typing import Dict, Any, Optional
-from backend.cognition.catalog import COGNITIVE_CATALOG
+# CORRECTION : Utilisation de l'import relatif direct depuis le dossier courant
+from cognition.catalog import COGNITIVE_CATALOG
 
 class CognitiveEngine:
     def __init__(self):
@@ -89,7 +90,6 @@ class CognitiveEngine:
         tete_lvl = systems.get("tete", {}).get("average_level", 1.0)
         mots_lvl = systems.get("mots", {}).get("average_level", 1.0)
         lien_lvl = systems.get("lien", {}).get("average_level", 1.0)
-        metacog_lvl = systems.get("metacognition", {}).get("average_level", 1.0)
         
         # Exemple d'asymétrie : Extraction de sous-branches spécifiques
         humour_lvl = systems.get("mots", {}).get("sub_branches", {}).get("humour_ironie", {}).get("level", 1)

@@ -92,9 +92,40 @@ async function fetchPsychology() {
 if (psychologyInterval) clearInterval(psychologyInterval);
 psychologyInterval = setInterval(fetchPsychology, 30000);
 
+// --- Proactivité au premier lancement ---
+async function checkInitialGreeting() {
+  const outEl = $('out');
+  if (outEl && (outEl.textContent.includes('En attente de ton message') || outEl.textContent.trim() === '')) {
+    const tokenField = $('token');
+    const token = tokenField ? tokenField.value.trim() : '';
+    if (!token) return; // Attend que le jeton soit présent
+
+    setStatus('Chappie s’éveille...');
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ user_id: 'creator', message: '[Système : C\'est la toute première fois que tu t\'éveilles. Prends l\'initiative de parler en premier avec tes mots de robot nouveau-né, sans attendre l\'humain.]' })
+      });
+      const d = await r.json();
+      if (r.ok && d.reply) {
+        outEl.textContent = d.reply;
+        if (d.psychology) renderEmotionsDashboard(d.psychology);
+        setStatus('Chappie a pris l\'initiative !');
+        await speak(d.reply);
+      }
+    } catch (e) {
+      // Ignore si le jeton n'est pas encore saisi ou valide
+    }
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   setStatus('Interface chargée. Jeton requis pour les fonctions protégées.');
   console.info('Chappie interface prête');
+  
+  // Tente d'initialiser Chappie après 1 seconde si le jeton est déjà mémorisé
+  setTimeout(checkInitialGreeting, 1000);
 });
 
 async function sendMessage() {
@@ -363,6 +394,9 @@ async function resetLife() {
     $('out').textContent = "Bip... Où suis-je ? Bonjour... c'est quoi cet endroit ?";
     setStatus('Chappie est un nouveau-né !');
     fetchPsychology();
+    
+    // Déclenche la proactivité immédiatement après le reset
+    setTimeout(checkInitialGreeting, 500);
   } catch (e) {
     setStatus('Erreur de réinitialisation : ' + e.message);
   }

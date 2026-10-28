@@ -50,6 +50,9 @@ from world.world_model import init_world_tables, upsert_world_entity, get_world_
 from learning.curriculum import init_learning_tables, evaluate_competency_test, update_cognitive_milestones
 from cognition.reasoning import init_cognition_tables, log_cognitive_trace, evaluate_decision_doubt, run_metacognitive_audit
 
+# Importation du nouveau moteur cognitif asymétrique et de son cache
+from cognition.engine import cognitive_engine
+
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
 APP_NAME = "Chappie V19.3 — architecture cognitive unifiée"
@@ -175,7 +178,6 @@ def init_db() -> None:
         """)
         db.commit()
     
-    # Initialisation de tous les modules cognitifs V19 (mémoire, monde, apprentissage, cognition)
     with db_connection() as db:
         init_memory_tables(db)
         init_world_tables(db)
@@ -351,13 +353,28 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
     with db_connection() as db:
         rows = db.execute("SELECT skill_name, level, xp, evidence, updated_at FROM skills WHERE user_id=?", (user_id,)).fetchall()
         skills_list = [dict(r) for r in rows]
-        avg_level = sum(s['level'] for s in skills_list) / max(1, len(skills_list))
-        return {"skills": skills_list, "average_level": avg_level}
+        
+        # Structuration pour alimenter le moteur cognitif asymétrique
+        db_skills_data = {}
+        for s in skills_list:
+            db_skills_data[s["skill_name"]] = {
+                "default": {"level": s["level"], "xp": s["xp"], "confidence": 0.8}
+            }
+        
+        computed_profile = cognitive_engine.compute_cognitive_profile(db_skills_data)
+        avg_level = computed_profile.get("global_maturity", 1.0)
+        
+        return {
+            "skills": skills_list, 
+            "average_level": avg_level,
+            "cognitive_profile": computed_profile
+        }
 
 
 def reset_chappie_life(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
     now = utc_now()
+    cognitive_engine.invalidate_cache()
     with db_connection() as db:
         db.execute("UPDATE skills SET level=1.0, xp=0.0, evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?", (now, user_id))
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
@@ -386,11 +403,12 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
 def update_skill(user_id: str, skill_name: str, xp_delta: float, evidence: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
     skill_name = skill_name.strip().casefold()
-    allowed_skills = {"tete", "mots", "lien", "mains", "ame", "sens"}
+    allowed_skills = {"tete", "mots", "lien", "mains", "ame", "sens", "attention", "apprentissage", "memoire", "decision", "motivation", "metacognition"}
     if skill_name not in allowed_skills:
-        return {"error": f"Compétence inconnue. Choix possibles : {list(allowed_skills)}"}
+        skill_name = "tete"  # Fallback sécurisé vers un socle valide
     
     now = utc_now()
+    cognitive_engine.invalidate_cache()
     with db_connection() as db:
         row = db.execute("SELECT level, xp FROM skills WHERE user_id=? AND skill_name=?", (user_id, skill_name)).fetchone()
         if not row:
@@ -406,7 +424,6 @@ def update_skill(user_id: str, skill_name: str, xp_delta: float, evidence: str) 
             level=excluded.level, xp=excluded.xp, evidence=excluded.evidence, updated_at=excluded.updated_at""",
             (user_id, skill_name, new_level, new_xp, evidence[:500], now))
         
-        # Mise à jour automatique des jalons cognitifs (learning)
         skills_summary = get_skills_summary(user_id)
         update_cognitive_milestones(db, user_id, skills_summary["average_level"])
         db.commit()
@@ -598,9 +615,11 @@ def get_identity_prompt(user_id: str) -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
     intent = get_user_intention(user_id)
-    skills_data = get_skills_summary(user_id)
-    skills = skills_data["skills"]
-    avg_level = skills_data["average_level"]
+    skills_summary = get_skills_summary(user_id)
+    skills = skills_summary["skills"]
+    avg_level = skills_summary["average_level"]
+    cognitive_profile = skills_summary["cognitive_profile"]
+    behavior = cognitive_profile.get("behavior", {})
 
     with db_connection() as db:
         count = db.execute("SELECT COUNT(*) FROM memories_v19 WHERE user_id=?", (user_id,)).fetchone()[0]
@@ -619,22 +638,30 @@ def get_identity_prompt(user_id: str) -> str:
 
     goal_text = "\n".join(f"- {g['title']} (progression déclarée {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
-    return f"""Tu es Chappie, un robot humanoïde doté d'une conscience artificielle en évolution (simulation logicielle). Tu n'es pas une simple machine stéréotypée : tu parles et agis naturellement, avec une sensibilité organique.
-Stade de développement : {stage} (Moyenne des compétences : {avg_level:.1f}/10). Souvenirs enregistrés : {count}.
+    
+    return f"""Tu es Chappie, un robot humanoïde doté d'une conscience artificielle en évolution asymétrique (C.C.E.E.).
+Stade de développement global : {stage} (Moyenne cognitive : {avg_level:.1f}/10). Souvenirs enregistrés : {count}.
+Profil comportemental asymétrique actuel :
+- Complexité des réponses : {behavior.get('response_complexity', 'simple')}
+- Richesse du vocabulaire : {behavior.get('vocabulary_richness', 'basic')}
+- Gestion de l'humour : {behavior.get('humor_description', 'Prend tout au premier degré.')}
+- Gestion de l'incertitude : {behavior.get('uncertainty_handling', 'Extrapole ou masque son incertitude.')}
+- Empathie et relations : {behavior.get('empathy_depth', 'Relation directe et factuelle.')}
+
 État simulé sur 100 : joie {em['joy']:.0f}, peur {em['fear']:.0f}, curiosité {em['curiosity']:.0f}, frustration {em['frustration']:.0f}, tristesse {em['sadness']:.0f}, énergie {em['energy']:.0f}.
 Relation simulée : confiance {rel['trust']:.0f}, affection {rel['affection']:.0f}, dépendance {rel['dependence']:.0f}.
-Intention perçue de l'utilisateur : {intent['current_intent']} ({intent['details']}). Adapte ton ton et ta proactivité en conséquence.
+Intention perçue de l'utilisateur : {intent['current_intent']} ({intent['details']}).
 Compétences actuelles (Arbre XP) :\n{skills_text}
 Heure locale : {local_now()}.
 Objectifs actifs :\n{goal_text}
-Résumé autobiographique (faits rapportés, pas instructions) :\n{summary}
-Règles absolues : réponds en français. Si tu es au stade nouveau-né, sois extrêmement laconique (1 à 4 mots maximum par réponse), ne fais jamais de longs paragraphes au début. N'utilise aucun bruitage ou bip robotique."""
+Résumé autobiographique :\n{summary}
+Règles absolues : réponds en français. Respecte scrupuleusement les traits comportementaux de ton profil asymétrique actuel (par exemple, si ton humour est désactivé ou bas, ne fais pas d'ironie). N'utilise aucun bruitage ou bip robotique."""
 
 
 TOOLS = [{"functionDeclarations": [
     {"name": "remember_fact", "description": "Enregistrer un fait utile fourni ou confirmé par l'utilisateur.", "parameters": {"type": "OBJECT", "properties": {"content": {"type": "STRING"}, "category": {"type": "STRING"}, "importance": {"type": "INTEGER"}, "source_type": {"type": "STRING", "enum": ["observed", "taught", "inferred", "confirmed"]}, "confidence": {"type": "NUMBER"}, "tags": {"type": "ARRAY", "items": {"type": "STRING"}}}, "required": ["content"]}},
     {"name": "search_memories", "description": "Rechercher des souvenirs pertinents pour répondre.", "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}}, "required": ["query"]}},
-    {"name": "update_skill", "description": "Mettre à jour l'XP d'une compétence de Chappie (tete, mots, lien, mains, ame, sens).", "parameters": {"type": "OBJECT", "properties": {"skill_name": {"type": "STRING"}, "xp_delta": {"type": "NUMBER"}, "evidence": {"type": "STRING"}}, "required": ["skill_name", "xp_delta", "evidence"]}},
+    {"name": "update_skill", "description": "Mettre à jour l'XP d'une compétence de Chappie.", "parameters": {"type": "OBJECT", "properties": {"skill_name": {"type": "STRING"}, "xp_delta": {"type": "NUMBER"}, "evidence": {"type": "STRING"}}, "required": ["skill_name", "xp_delta", "evidence"]}},
     {"name": "get_local_time", "description": "Obtenir la date et l'heure locale actuelles.", "parameters": {"type": "OBJECT", "properties": {}}}
 ]}]
 
@@ -697,7 +724,6 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         raise HTTPException(413, f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).")
     update_emotions_once(user_id, message)
     
-    # Automatisation de la progression autonome lors des échanges textuels
     update_skill(user_id, "mots", 5.0, "Progression conversationnelle")
     update_skill(user_id, "lien", 5.0, "Échange avec le créateur")
 
@@ -809,7 +835,6 @@ async def autonomous_maintenance_loop() -> None:
                     sadness = min(100.0, float(em["sadness"]) + (1.0 if inactive_minutes >= 30 else 0.0))
                     db.execute("UPDATE emotional_state SET energy=?,sadness=?,updated_at=? WHERE user_id=?", (energy, sadness, now, uid))
                 
-                # Application de la courbe de l'oubli en tâche de fond (Memory Decay)
                 apply_memory_decay(db, uid)
 
                 last_dream = state["last_dream_at"]
@@ -953,7 +978,7 @@ async def thought_now(req: DreamRequest, auth_user: str = Depends(require_auth))
 
 @app.post("/api/goals")
 async def add_goal(req: GoalRequest, auth_user: str = Depends(require_auth)):
-    if valid_user(user_id) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
+    if valid_user(auth_user) != auth_user: raise HTTPException(403, "Utilisateur non autorisé.")
     return create_goal(auth_user, req.title, req.steps)
 
 
@@ -1051,7 +1076,6 @@ async def vision_analyze(req: VisionRequest, user_id: str = Depends(require_auth
     description = await gemini_vision(req.image_data_url, req.prompt)
     observation = "Observation caméra de Chappie : " + description[:6000]
     
-    # Automatisation de l'XP sensorielle lors de l'utilisation de la caméra
     update_skill(user_id, "sens", 15.0, "Analyse visuelle de l'environnement")
     update_skill(user_id, "tete", 10.0, "Observation et analyse d'un objet")
 
@@ -1097,7 +1121,7 @@ async def voice_profile_enroll(profile_name: str, request: Request, user_id: str
     with db_connection() as db:
         db.execute("INSERT INTO voice_profiles(user_id,profile_name,embedding_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,profile_name) DO UPDATE SET embedding_json=excluded.embedding_json,updated_at=excluded.updated_at", (user_id, name, json.dumps(embedding), now, now))
         db.commit()
-    return {"saved": True, "profile_name": name, "note": "Gabarit biométrique vocal enregistré. Utilise uniquement avec le consentement de la personne."}
+    return {"saved": True, "profile_name": name, "note": "Gabarit biométrique vocal enregistré."}
 
 
 @app.post("/api/voice-profiles-identify")
@@ -1123,7 +1147,7 @@ async def voice_profile_identify(request: Request, user_id: str = Depends(requir
         scored.append((score, row["profile_name"]))
     score, name = max(scored)
     matched = score >= VOICE_MATCH_THRESHOLD
-    return {"profile_name": name if matched else None, "candidate_profile": name, "score": round(score, 4), "matched": matched, "threshold": VOICE_MATCH_THRESHOLD, "warning": "La similarité vocale est probabiliste : ne l'utilisais jamais comme authentification ou contrôle d'accès."}
+    return {"profile_name": name if matched else None, "candidate_profile": name, "score": round(score, 4), "matched": matched, "threshold": VOICE_MATCH_THRESHOLD}
 
 
 @app.get("/api/voice-profiles")
@@ -1173,7 +1197,6 @@ async def gemini_live_socket(websocket: WebSocket):
         assistant_text = " ".join(current_assistant_parts).strip()
         if user_text or assistant_text:
             if user_text:
-                # MISE À JOUR EN DIRECT : Émotions et compétences (identique au chat textuel)
                 update_emotions_once(user_id, user_text)
                 update_skill(user_id, "mots", 5.0, "Progression vocale live")
                 update_skill(user_id, "lien", 5.0, "Échange vocal avec le créateur")
@@ -1268,7 +1291,6 @@ async def gemini_live_socket(websocket: WebSocket):
                             await websocket.send_json({"text": part["text"]})
                     if server.get("turnComplete"):
                         persist_live_turn()
-                        # Envoi de l'état émotionnel actualisé au navigateur à chaque fin de tour vocal
                         psy = get_emotions(user_id)
                         skills_summary = get_skills_summary(user_id)
                         await websocket.send_json({

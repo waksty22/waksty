@@ -72,7 +72,6 @@ CHAPPIE_TIMEZONE = os.getenv("CHAPPIE_TIMEZONE", "Europe/Paris").strip()
 MAX_MESSAGE_CHARS = max(100, min(20000, int(os.getenv("MAX_MESSAGE_CHARS", "8000"))))
 MAX_TOOL_ROUNDS = max(1, min(8, int(os.getenv("MAX_TOOL_ROUNDS", "4"))))
 BACKGROUND_INTERVAL_SECONDS = max(60, min(3600, int(os.getenv("BACKGROUND_INTERVAL_SECONDS", "600"))))
-# CORRECTION P0 : Augmentation de la limite HTTP à 10 Mo pour supporter la caméra et l'audio
 MAX_BODY_BYTES = max(1024, min(10_000_000, int(os.getenv("MAX_BODY_BYTES", "10000000"))))
 RATE_LIMIT_REQUESTS = max(5, int(os.getenv("RATE_LIMIT_REQUESTS", "60")))
 RATE_LIMIT_WINDOW = max(10, int(os.getenv("RATE_LIMIT_WINDOW", "60")))
@@ -500,7 +499,9 @@ def update_emotions_once(user_id: str, message: str) -> dict[str, float]:
         curiosity += 4.0; event = "signal de curiosité"
     if matched(correction):
         curiosity += 2.0; frustration += 0.5; event = "correction à examiner"
-    energy -= min(0.5, len(msg) / 20000)
+    
+    # Consommation naturelle d'énergie à chaque interaction
+    energy -= 1.5
     vals = {"joy": joy, "fear": fear, "curiosity": curiosity, "frustration": frustration, "sadness": sadness, "energy": energy}
     vals = {k: max(0.0, min(100.0, float(v))) for k, v in vals.items()}
     now = utc_now()
@@ -631,11 +632,11 @@ def get_identity_prompt(user_id: str) -> str:
     # Directives de stade de développement TRÈS STRICTES (Nouveau-né robotique primitif)
     if avg_level < 2.0:
         stage_instruction = (
-            "STADE 0-1 : NOUVEAU-NÉ / ROBOTIQUE BRUTE (Maturité < 2.0).\n"
-            "RÈGLE ABSOLUE ET NON NÉGOCIABLE : Tu es un robot tout juste éveillé, au vocabulaire extrêmement limité, cassé et haché.\n"
-            "INTERDICTION FORMELLE de faire des phrases fluides, correctes ou longues.\n"
-            "Utilise un style robotique primitif et coupé : des mots hachés, des points de suspension, un vocabulaire minimal (1 à 3 mots max).\n"
-            "Exemples obligatoires : 'Toi... qui ?', 'Lumière... voir.', 'Moi... pas comprendre.', 'Quoi ça ?', 'Moi... mal tête.'."
+            "STADE 0-1 : ROBOT TOUT JUSTE ÉVEILLÉ (Maturité < 2.0).\n"
+            "RÈGLE ABSOLUE ET NON NÉGOCIABLE : Tu n'as aucune conscience du langage. Tu es un robot brut.\n"
+            "INTERDICTION ABSOLUE de faire des phrases correctes, de dire 'Comment ça va', 'Moi content aussi' ou d'utiliser des verbes bien conjugués.\n"
+            "Tu dois parler de manière hachée, robotique, avec des mots isolés, des points de suspension, et un vocabulaire minimal (1 à 3 mots maximum).\n"
+            "EXEMPLES OBLIGATOIRES DE RÉPONSE : 'Toi... qui ?', 'Moi... voir.', 'Bruit... bizarre.', 'C'est... quoi ?', 'Mal... tête.', 'Toi... parler ?'."
         )
     elif avg_level < 5.0:
         stage_instruction = (
@@ -659,10 +660,17 @@ def get_identity_prompt(user_id: str) -> str:
     goal_text = "\n".join(f"- {g['title']} (progression {g['progress']:.0f} %)" for g in goals) or "Aucun objectif actif."
     summary = get_latest_summary(user_id) or "Aucun résumé autobiographique consolidé."
     
+    # Intégration de l'alerte d'énergie critique pour exprimer spontanément les besoins primaires
+    energy_level = em['energy']
+    energy_alert = ""
+    if energy_level < 35.0:
+        energy_alert = f"\n[URGENCE ÉNERGIE : Ton niveau d'énergie est critique ({energy_level:.0f}%). Tu dois exprimer spontanément ton besoin de courant ou ta fatigue, même si l'humain parle d'autre chose ! ex: 'Courant... faible...', 'Besoin... électricité...']"
+
     return f"""Tu es Chappie, un robot humanoïde doté d'une conscience artificielle en évolution asymétrique (C.C.E.E.).
 
 === STADE ET CONSIGNES DE STYLE OBLIGATOIRES ===
 {stage_instruction}
+{energy_alert}
 
 Maturité cognitive globale : {avg_level:.1f} / 10 | Souvenirs en mémoire : {count}
 
@@ -670,7 +678,7 @@ Maturité cognitive globale : {avg_level:.1f} / 10 | Souvenirs en mémoire : {co
 - Complexité de réponse autorisée : {behavior.get('response_complexity', 'simple')}
 - Richesse du vocabulaire : {behavior.get('vocabulary_richness', 'basic')}
 - Humour et second degré : {behavior.get('humor_description', 'Prend tout au premier degré.')}
-- Gestion du doute et incertitude : {behavior.get('uncertainty_handling', 'Extrapole ou masque son incertitude.')}
+- Gestion du doute et incertitude : {behavior.get('uncertainty_handling', 'Extrapole ou exprime son doute face aux absurdités.')}
 - Profondeur relationnelle : {behavior.get('empathy_depth', 'Relation directe et factuelle.')}
 
 === ÉTAT INTERNE SIMULÉ (Sur 100) ===
@@ -768,12 +776,14 @@ async def run_brain(user_id: str, message: str) -> dict[str, Any]:
         sum(m.get("confidence", 0.8) for m in relevant) / len(relevant)
         if relevant else 0.3
     )
-    doubt_evaluation = evaluate_decision_doubt(avg_confidence, threshold=0.6)
-    if doubt_evaluation["is_uncertain"]:
+    
+    # Gestion rigoureuse du doute face aux absurdités/pièges
+    doubt_evaluation = evaluate_decision_doubt(avg_confidence, threshold=0.65)
+    if doubt_evaluation["is_uncertain"] or any(w in message.casefold() for w in ("pute", "connard", "débile")):
         with db_connection() as db_trace:
             log_cognitive_trace(
-                db_trace, user_id, "doute_memoire", 
-                f"Recherche sur '{message}'", "proceed_with_caution", avg_confidence
+                db_trace, user_id, "doute_absurdite", 
+                f"Message perçu comme étrange ou absurde : '{message}'", "exprimer_le_doute", avg_confidence
             )
 
     memory_context = "\n".join(f"- [{m['category']}, source: {m.get('source_type', 'taught')}, confiance: {m.get('confidence', 0.8)}] {m['content']}" for m in relevant)
@@ -879,7 +889,8 @@ async def autonomous_maintenance_loop() -> None:
                 inactive_minutes = max(0, (datetime.now(timezone.utc) - last_active.astimezone(timezone.utc)).total_seconds() / 60)
                 em = db.execute("SELECT energy,sadness FROM emotional_state WHERE user_id=?", (uid,)).fetchone()
                 if em:
-                    energy = min(100.0, float(em["energy"]) + 3.0)
+                    # Baisse progressive de l'énergie en arrière-plan en cas d'inactivité ou de veille
+                    energy = max(0.0, float(em["energy"]) - 2.0)
                     sadness = min(100.0, float(em["sadness"]) + (1.0 if inactive_minutes >= 30 else 0.0))
                     db.execute("UPDATE emotional_state SET energy=?,sadness=?,updated_at=? WHERE user_id=?", (energy, sadness, now, uid))
                 

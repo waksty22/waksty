@@ -114,7 +114,6 @@ def update_cognitive_milestones(db: sqlite3.Connection, user_id: str, current_ma
     """Met à jour le statut des jalons de développement de Chappie en fonction de sa maturité moyenne."""
     now = utc_now()
     
-    # CORRECTION : Ajout du SELECT manquant dans la requête SQL
     milestones = db.execute("""
         SELECT id, stage_name, min_maturity, status FROM cognitive_milestones WHERE user_id = ?
     """, (user_id,)).fetchall()

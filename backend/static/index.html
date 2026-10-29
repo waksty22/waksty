@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chappie V19.3 — Dashboard Avancé</title>
+  <!-- Inclusion de la bibliothèque Google Model-Viewer pour la 3D -->
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
   <style>
     :root {
       --bg: #070b14;
@@ -126,9 +128,9 @@
   </div>
   
   <div class="nav-menu">
-    <button class="nav-item active" onclick="switchTab('accueil', this)">🏠 Accueil</button>
+    <button class="nav-item" onclick="switchTab('accueil', this)">🏠 Accueil</button>
     <button class="nav-item" onclick="switchTab('chappie-3d', this)">🤖 Visuel & 3D</button>
-    <button class="nav-item" onclick="switchTab('media', this)">🎙️ Voix & Vision</button>
+    <button class="nav-item active" onclick="switchTab('media', this)">🎙️ Voix & Vision</button>
     <button class="nav-item" onclick="switchTab('chat', this)">💬 Chat & Direct</button>
     <button class="nav-item" onclick="switchTab('skills', this)">🎓 Arbre Compétences</button>
     <button class="nav-item" onclick="switchTab('world', this)">🌍 Monde</button>
@@ -144,13 +146,13 @@
 
 <!-- BARRE DE NAVIGATION INFÉRIEURE (MOBILE) -->
 <div class="mobile-bottom-nav">
-  <button class="mobile-nav-btn active" onclick="switchTab('accueil', this)">
+  <button class="mobile-nav-btn" onclick="switchTab('accueil', this)">
     <span class="icon">🏠</span>Accueil
   </button>
   <button class="mobile-nav-btn" onclick="switchTab('chappie-3d', this)">
     <span class="icon">🤖</span>Visuel
   </button>
-  <button class="mobile-mic-btn" onclick="switchTab('media', this)" title="Parler">
+  <button class="mobile-mic-btn active" onclick="switchTab('media', this)" title="Parler">
     🎙️
   </button>
   <button class="mobile-nav-btn" onclick="switchTab('skills', this)">
@@ -166,7 +168,7 @@
   <div style="display: flex; flex-direction: column; gap: 16px;">
 
     <!-- 1) PAGE D'ACCUEIL -->
-    <div id="section-accueil" class="tab-section active">
+    <div id="section-accueil" class="tab-section">
       <div class="panel hero-card">
         <div class="hero-top">
           <div class="hero-avatar"><img src="/hero.png" alt="Chappie"></div>
@@ -180,14 +182,13 @@
           <span class="badge">🛡️ Bienveillant</span>
           <span class="badge">🧠 Apprenant</span>
         </div>
-        <!-- Jeton d'authentification ajouté ici -->
         <div style="margin-top: 6px;">
           <label style="font-size: 0.68rem; color: var(--text-muted); display: block; margin-bottom: 2px;">🔑 Jeton d'authentification API</label>
           <input id="homeToken" type="password" placeholder="CHAPPIE_API_TOKEN..." style="font-size: 0.75rem; padding: 6px;" oninput="syncTokens(this.value)">
         </div>
       </div>
 
-      <!-- Attributs généraux (Joie, Humeur, Énergie) -->
+      <!-- Attributs généraux -->
       <div class="panel">
         <h3>📊 Attributs & États Généraux</h3>
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center;">
@@ -247,16 +248,27 @@
       </div>
     </div>
 
-    <!-- 4) PAGE VOIX & VISION -->
-    <div id="section-media" class="tab-section">
+    <!-- 4) PAGE VOIX & VISION (AVEC ROBOT 3D ANIMÉ INTERACTIF) -->
+    <div id="section-media" class="tab-section active">
+      <!-- 1. Fenêtre Robot 3D Animé Interactif en haut -->
       <div class="panel" style="text-align: center; background: radial-gradient(circle, #101826 0%, #070b14 100%); border: 1px solid rgba(6,182,212,0.4);">
-        <div style="width: 120px; height: 120px; margin: 0 auto 8px auto; border-radius: 50%; border: 3px solid var(--cyan); box-shadow: 0 0 25px rgba(6,182,212,0.5); overflow: hidden;">
-          <img src="/hero.png" alt="Chappie 3D" style="width: 100%; height: 100%; object-fit: cover;">
+        <div style="width: 140px; height: 140px; margin: 0 auto 8px auto; border-radius: 50%; border: 3px solid var(--cyan); box-shadow: 0 0 25px rgba(6,182,212,0.6); overflow: hidden; background: #000;">
+          <!-- Élément 3D interactif (Charge un modèle de robot GLB animé, pilotable au doigt) -->
+          <model-viewer 
+            src="https://modelviewer.dev/shared-assets/models/RobotExpressive.glb" 
+            alt="Chappie 3D Animé" 
+            auto-rotate 
+            camera-controls 
+            interaction-prompt="none"
+            style="width: 100%; height: 100%; background: transparent;"
+            ar>
+          </model-viewer>
         </div>
-        <h3 style="justify-content: center; margin-bottom: 2px;">Chappie V19.3</h3>
-        <p style="font-size: 0.75rem; color: var(--text-muted);">Prêt pour l'interaction vocale et visuelle</p>
+        <h3 style="justify-content: center; margin-bottom: 2px;">Chappie V19.3 (3D Live)</h3>
+        <p style="font-size: 0.72rem; color: var(--text-muted);">Robot interactif en mouvement</p>
       </div>
 
+      <!-- 2. Fonction Parler au milieu -->
       <div class="panel">
         <h3>🎙️ Gemini Live (Voix temps réel)</h3>
         <div class="row-btns">
@@ -266,6 +278,7 @@
         <div id="liveStatus" class="status">Non connecté.</div>
       </div>
 
+      <!-- 3. Fonction Caméra tout en bas -->
       <div class="panel">
         <h3>👁️ Vision par Caméra</h3>
         <video id="camera" autoplay playsinline muted></video>

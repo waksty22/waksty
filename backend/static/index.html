@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chappie V19.3 — Dashboard Avancé</title>
+  <!-- Inclusion de la bibliothèque Google Model-Viewer pour la 3D interactive et la RA -->
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
   <style>
     :root {
       --bg: #070b14;
@@ -84,7 +86,7 @@
     .badges { display: flex; gap: 6px; flex-wrap: wrap; }
     .badge { font-size: 0.65rem; background: rgba(6,182,212,0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(6,182,212,0.3); color: var(--cyan); font-weight: 500; }
 
-    /* --- ANIMATION HOLO LIVE 3D (Design Référence Chappie) --- */
+    /* --- ANIMATION HOLO LIVE 3D & INTERACTIF --- */
     @keyframes holoGlow {
       0% { box-shadow: 0 0 15px rgba(6,182,212,0.5), inset 0 0 15px rgba(6,182,212,0.3); border-color: var(--cyan); }
       50% { box-shadow: 0 0 35px rgba(37,99,235,0.9), inset 0 0 25px rgba(6,182,212,0.6); border-color: #3b82f6; }
@@ -94,11 +96,6 @@
     @keyframes scanMove {
       0% { transform: translateY(-100%); }
       100% { transform: translateY(100%); }
-    }
-
-    @keyframes holoGrid {
-      0% { background-position: 0 0; }
-      100% { background-position: 0 20px; }
     }
 
     .holo-container {
@@ -113,21 +110,10 @@
       animation: holoGlow 3s infinite ease-in-out;
     }
 
-    .holo-container img {
+    .holo-container model-viewer {
       width: 100%;
       height: 100%;
-      object-fit: cover;
-      filter: contrast(1.2) saturate(1.2) drop-shadow(0 0 8px rgba(6,182,212,0.8));
-    }
-
-    .holo-overlay {
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: linear-gradient(rgba(6,182,212,0.1) 50%, rgba(0,0,0,0.3) 50%);
-      background-size: 100% 4px;
-      animation: holoGrid 1s infinite linear;
-      pointer-events: none;
-      opacity: 0.6;
+      background: transparent;
     }
 
     .holo-scan {
@@ -279,12 +265,18 @@
     <!-- 2) PAGE VISUEL DE CHAPPIE EN 3D / ANIMÉ -->
     <div id="section-chappie-3d" class="tab-section">
       <div class="panel" style="text-align: center; background: radial-gradient(circle, #101826 0%, #070b14 100%);">
-        <h3>🤖 Avatar & Hologramme 3D</h3>
-        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px;">Chappie en projection holographique active.</p>
+        <h3>🤖 Avatar & Hologramme 3D Interactif</h3>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px;">Chappie en projection 3D et Réalité Augmentée.</p>
         <div class="holo-container">
-          <div class="holo-overlay"></div>
           <div class="holo-scan"></div>
-          <img src="/hero.png" alt="Chappie Hologram">
+          <model-viewer 
+            src="https://modelviewer.dev/shared-assets/models/RobotExpressive.glb" 
+            alt="Chappie RA" 
+            auto-rotate 
+            camera-controls 
+            interaction-prompt="none"
+            ar>
+          </model-viewer>
         </div>
         <div class="row-btns" style="justify-content: center;">
           <button onclick="switchTab('media')">🎙️ Parler au Live</button>
@@ -303,17 +295,23 @@
       </div>
     </div>
 
-    <!-- 4) PAGE VOIX & VISION (AVEC L'EFFET HOLO LIVE DE CHAPPIE) -->
+    <!-- 4) PAGE VOIX & VISION (AVEC LE LECTEUR 3D INTERACTIF & RA) -->
     <div id="section-media" class="tab-section active">
-      <!-- 1. Avatar Holographique de Chappie en haut -->
+      <!-- 1. Robot 3D Interactif & RA en haut -->
       <div class="panel" style="text-align: center; background: radial-gradient(circle, #101826 0%, #070b14 100%); border: 1px solid rgba(6,182,212,0.4);">
         <div class="holo-container">
-          <div class="holo-overlay"></div>
           <div class="holo-scan"></div>
-          <img src="/hero.png" alt="Chappie Holo Live">
+          <model-viewer 
+            src="https://modelviewer.dev/shared-assets/models/RobotExpressive.glb" 
+            alt="Chappie RA" 
+            auto-rotate 
+            camera-controls 
+            interaction-prompt="none"
+            ar>
+          </model-viewer>
         </div>
-        <h3 style="justify-content: center; margin-bottom: 2px; color: var(--cyan);">Chappie V19.3 (Holo Live)</h3>
-        <p style="font-size: 0.72rem; color: var(--text-muted);">Système cybernétique actif et connecté</p>
+        <h3 style="justify-content: center; margin-bottom: 2px; color: var(--cyan);">Chappie V19.3 (Holo Live & RA)</h3>
+        <p style="font-size: 0.72rem; color: var(--text-muted);">Rotation tactile ou mode Réalité Augmentée actif</p>
       </div>
 
       <!-- 2. Fonction Parler au milieu -->

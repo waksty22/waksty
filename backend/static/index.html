@@ -38,7 +38,7 @@
     /* --- MODE MOBILE --- */
     @media (max-width: 1000px) {
       body { flex-direction: column; height: 100vh; overflow: hidden; }
-      aside { display: none; } /* On masque la sidebar PC au profit de la barre mobile en bas */
+      aside { display: none; }
       
       main { display: flex; flex-direction: column; padding: 12px; gap: 12px; overflow-y: auto; height: calc(100vh - 70px); padding-bottom: 90px; }
       .side-column { order: 2; }
@@ -305,7 +305,11 @@
     <!-- 8) PAGE PARAMÈTRES & REMISE À ZÉRO -->
     <div id="section-params" class="tab-section">
       <div class="panel">
-        <h3>⚙️ Paramètres & Maintenance</h3>
+        <h3>⚙️ Configuration & Jeton API</h3>
+        <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 4px;">🔑 Jeton d'authentification API (CHAPPIE_API_TOKEN)</label>
+        <input id="mobileToken" type="password" placeholder="Colle ton jeton ici..." style="font-size: 0.8rem; padding: 8px; margin-bottom: 12px;" oninput="syncTokens(this.value)">
+
+        <h3 style="margin-top: 15px;">⚙️ Paramètres & Maintenance</h3>
         <div class="row-btns">
           <button type="button" class="secondary" onclick="consolidate()">Consolider la mémoire</button>
         </div>
@@ -374,12 +378,18 @@ function switchTab(tabId, btnElement) {
   const target = document.getElementById('section-' + tabId);
   if (target) target.classList.add('active');
 
-  // Synchronise les boutons actifs sur PC et Mobile
   if (btnElement) {
     btnElement.classList.add('active');
   } else {
     document.querySelectorAll(`[onclick*="'${tabId}'"]`).forEach(el => el.classList.add('active'));
   }
+}
+
+function syncTokens(val) {
+  const pcToken = document.getElementById('token');
+  const mobToken = document.getElementById('mobileToken');
+  if (pcToken) pcToken.value = val;
+  if (mobToken) mobToken.value = val;
 }
 </script>
 <script src="/script.js" defer></script>

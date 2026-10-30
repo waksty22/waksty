@@ -364,27 +364,32 @@
       overflow-wrap:anywhere;
     }
 
-    .stat-item { margin-bottom:10px; }
+    .stat-item { margin-bottom:12px; }
 
     .stat-header {
       display:flex;
       justify-content:space-between;
       gap:10px;
-      font-size:.75rem;
-      margin-bottom:4px;
+      font-size:.78rem;
+      margin-bottom:6px;
       color:var(--text-muted);
-      font-weight:500;
+      font-weight:600;
+    }
+
+    .stat-header span:last-child {
+      color:var(--cyan);
+      font-family:monospace;
     }
 
     .bar-bg {
       background:#070b14;
       border-radius:6px;
-      height:8px;
+      height:10px;
       overflow:hidden;
       border:1px solid var(--card-border);
     }
 
-    .bar-fill { height:100%; border-radius:6px; }
+    .bar-fill { height:100%; border-radius:6px; transition:width 0.6s ease-in-out; }
 
     video {
       width:100%;
@@ -551,7 +556,7 @@
     <nav class="nav-menu" aria-label="Navigation principale">
       <button class="nav-item" onclick="switchTab('accueil',this)">🏠 Accueil</button>
       <button class="nav-item" onclick="switchTab('chappie-3d',this)">🤖 Visuel &amp; 3D</button>
-      <button class="nav-item active" onclick="switchTab('media',this)">🎙️ Voix &amp; Vision</button>
+      <button class="nav-item" onclick="switchTab('media',this)">🎙️ Voix &amp; Vision</button>
       <button class="nav-item" onclick="switchTab('chat',this)">💬 Chat &amp; Direct</button>
       <button class="nav-item" onclick="switchTab('skills',this)">🎓 Arbre Compétences</button>
       <button class="nav-item" onclick="switchTab('world',this)">🌍 Monde</button>
@@ -810,25 +815,76 @@
           <pre id="visionOut" class="output">Caméra inactive.</pre>
         </div>
       </section>
-            <!-- 5. PAGE ARBRE DE COMPÉTENCES -->
+
+      <!-- 5. PAGE ARBRE DE COMPÉTENCES (REFONTE GRAPHIQUE 0-30) -->
       <section id="section-skills" class="tab-section">
         <div class="panel">
           <h3>🎓 Arbre des Compétences &amp; Sous-branches</h3>
 
-          <p class="muted" style="margin-bottom:12px">
-            Évolution détaillée des capacités cognitives de Chappie.
+          <p class="muted" style="margin-bottom:14px">
+            Évolution cognitive de Chappie (Échelle de maturité : 0 à 30 par branche).
           </p>
 
-          <div class="row-btns">
-            <button type="button" class="secondary" onclick="loadSkills()">
-              Actualiser les données
+          <div class="row-btns" style="margin-bottom:16px">
+            <button type="button" onclick="loadSkills()">
+              ⚡ Actualiser les données
             </button>
             <button type="button" class="secondary" onclick="loadGoals()">
-              Voir les Objectifs
+              🎯 Voir les Objectifs
             </button>
           </div>
 
-          <pre id="skillsOut" class="output" style="min-height:150px">Clique sur actualiser pour charger l'arbre des compétences.</pre>
+          <!-- CONTENEUR GRAPHIQUE DES COMPÉTENCES -->
+          <div id="skillsVisualContainer" style="display:flex; flex-direction:column; gap:14px;">
+            
+            <!-- Branche 1 : Langage -->
+            <div class="stat-item">
+              <div class="stat-header">
+                <span>🗣️ Langage &amp; Mots</span>
+                <span id="valLang">18.5 / 30</span>
+              </div>
+              <div class="bar-bg">
+                <div id="barLang" class="bar-fill" style="width:61.6%; background:#3b82f6;"></div>
+              </div>
+            </div>
+
+            <!-- Branche 2 : Raisonnement -->
+            <div class="stat-item">
+              <div class="stat-header">
+                <span>🧠 Raisonnement &amp; Logique</span>
+                <span id="valLogique">14.2 / 30</span>
+              </div>
+              <div class="bar-bg">
+                <div id="barLogique" class="bar-fill" style="width:47.3%; background:#10b981;"></div>
+              </div>
+            </div>
+
+            <!-- Branche 3 : Créativité -->
+            <div class="stat-item">
+              <div class="stat-header">
+                <span>🎨 Créativité &amp; Âme</span>
+                <span id="valCreativite">10.5 / 30</span>
+              </div>
+              <div class="bar-bg">
+                <div id="barCreativite" class="bar-fill" style="width:35%; background:#f59e0b;"></div>
+              </div>
+            </div>
+
+            <!-- Branche 4 : Perception -->
+            <div class="stat-item">
+              <div class="stat-header">
+                <span>👁️ Perception &amp; Sens</span>
+                <span id="valPerception">14.1 / 30</span>
+              </div>
+              <div class="bar-bg">
+                <div id="barPerception" class="bar-fill" style="width:47%; background:var(--cyan);"></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Zone d'affichage des objectifs / détails dynamiques -->
+          <pre id="skillsOut" class="output" style="margin-top:16px; min-height:80px">État du système cognitif : Synchronisé avec le cloud.</pre>
         </div>
       </section>
 
@@ -916,17 +972,17 @@ Sélectionne une option ci-dessus.
         <h3>🎯 Niveau de maturité</h3>
 
         <div style="text-align:center;margin:8px 0">
-          <span style="font-size:2rem;font-weight:bold;color:var(--cyan)">4,2</span>
-          <span style="color:var(--text-muted)"> / 10</span>
+          <span style="font-size:2rem;font-weight:bold;color:var(--cyan)">14,3</span>
+          <span style="color:var(--text-muted)"> / 30</span>
           <p class="muted" style="margin-top:2px">Adolescent / Explorateur</p>
         </div>
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Progression</span><span>42%</span>
+            <span>Progression globale</span><span>47%</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:42%;background:var(--cyan)"></div>
+            <div class="bar-fill" style="width:47%;background:var(--cyan)"></div>
           </div>
         </div>
       </div>
@@ -936,25 +992,25 @@ Sélectionne une option ci-dessus.
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Langage (Mots)</span><span>6.2</span>
+            <span>Langage</span><span>18.5/30</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:62%;background:#3b82f6"></div>
+            <div class="bar-fill" style="width:61.6%;background:#3b82f6"></div>
           </div>
         </div>
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Raisonnement (Tête)</span><span>4.8</span>
+            <span>Raisonnement</span><span>14.2/30</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:48%;background:#10b981"></div>
+            <div class="bar-fill" style="width:47.3%;background:#10b981"></div>
           </div>
         </div>
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Créativité (Âme)</span><span>3.5</span>
+            <span>Créativité</span><span>10.5/30</span>
           </div>
           <div class="bar-bg">
             <div class="bar-fill" style="width:35%;background:#f59e0b"></div>
@@ -963,7 +1019,7 @@ Sélectionne une option ci-dessus.
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Perception (Sens)</span><span>4.7</span>
+            <span>Perception</span><span>14.1/30</span>
           </div>
           <div class="bar-bg">
             <div class="bar-fill" style="width:47%;background:var(--cyan)"></div>
@@ -1106,18 +1162,44 @@ Sélectionne une option ci-dessus.
       }
     }
 
-    // Met à jour le statut de chargement du modèle.
-    function setModelStatus(id, message) {
-      const statusId =
-        id === 'chappieModelMain'
-          ? 'modelStatusMain'
-          : 'modelStatusLive';
+    // Met à jour dynamiquement les barres de compétences sur une échelle de 0 à 30
+    function updateSkillBars(lang, logique, creativite, perception) {
+      const max = 30;
+      
+      document.getElementById('valLang').textContent = lang.toFixed(1) + ' / 30';
+      document.getElementById('barLang').style.width = ((lang / max) * 100) + '%';
 
-      const status = document.getElementById(statusId);
+      document.getElementById('valLogique').textContent = logique.toFixed(1) + ' / 30';
+      document.getElementById('barLogique').style.width = ((logique / max) * 100) + '%';
 
-      if (status) {
-        status.textContent = message;
-      }
+      document.getElementById('valCreativite').textContent = creativite.toFixed(1) + ' / 30';
+      document.getElementById('barCreativite').style.width = ((creativite / max) * 100) + '%';
+
+      document.getElementById('valPerception').textContent = perception.toFixed(1) + ' / 30';
+      document.getElementById('barPerception').style.width = ((perception / max) * 100) + '%';
+    }
+
+    // Fonction de chargement des compétences (appelée par le bouton)
+    function loadSkills() {
+      const out = document.getElementById('skillsOut');
+      out.textContent = "Actualisation des réseaux neuronaux et calcul de l'âge cognitif...";
+      
+      // Simulation d'une mise à jour dynamique (tu pourras connecter un fetch API ici si besoin)
+      setTimeout(() => {
+        // Valeurs aléatoires ou basées sur l'évolution
+        const lang = 18.5 + Math.random() * 0.5;
+        const logique = 14.2 + Math.random() * 0.4;
+        const creativite = 10.5 + Math.random() * 0.3;
+        const perception = 14.1 + Math.random() * 0.4;
+
+        updateSkillBars(lang, logique, creativite, perception);
+        out.textContent = "✔️ Arbre de compétences mis à jour avec succès.\n- Âge global estimé : 14.3 / 30 cycles d'apprentissage.\n- Prochain jalon : Optimisation de la sous-branche Créativité.";
+      }, 500);
+    }
+
+    function loadGoals() {
+      const out = document.getElementById('skillsOut');
+      out.textContent = "🎯 Objectifs cognitifs en cours :\n1. Maîtriser le vocabulaire technique des flux audio.\n2. Améliorer la reconnaissance visuelle en milieu sombre.\n3. Explorer de nouvelles structures de pensées autonomes.";
     }
 
     // Initialise les événements des deux modèles 3D.

@@ -664,11 +664,21 @@ function initializeChappie() {
   const tokenInput = $('token');
   const tokenMobile = $('tokenMobile');
   const onTokenChange = () => {
-    if (getToken()) { fetchPsychology(); checkInitialGreeting(); }
+    if (getToken()) { 
+      fetchPsychology(); 
+      checkInitialGreeting(); 
+      loadSkills(); // Chargement automatique des compétences dès que le jeton est valide
+    }
   };
   if (tokenInput) { tokenInput.addEventListener('change', onTokenChange); tokenInput.addEventListener('input', () => { if (tokenMobile && tokenMobile.value !== tokenInput.value) tokenMobile.value = tokenInput.value; }); }
   if (tokenMobile) { tokenMobile.addEventListener('change', onTokenChange); tokenMobile.addEventListener('input', () => { if (tokenInput && tokenInput.value !== tokenMobile.value) tokenInput.value = tokenMobile.value; }); }
-  if (getToken()) { fetchPsychology(); setTimeout(checkInitialGreeting, 1000); }
+  
+  if (getToken()) { 
+    fetchPsychology(); 
+    setTimeout(checkInitialGreeting, 1000); 
+    loadSkills(); // Chargement automatique des compétences au démarrage si le jeton est déjà enregistré
+  }
+  
   startPsychologyPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeChappie, { once: true });

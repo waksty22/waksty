@@ -1199,14 +1199,14 @@ Sélectionne une option ci-dessus.
       document.getElementById('sideMaturityText').textContent = stageText;
     }
 
-    // Fonction de synchronisation unifiée (compatible PC et Mobile)
+    // Fonction de synchronisation corrigée avec récupération multi-champs (Mobile + PC)
     async function loadSkills() {
       const out = document.getElementById('skillsOut');
       if (out) out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
 
       try {
-        const tokenInput = document.getElementById('token') || document.getElementById('mobileToken') || document.getElementById('homeToken');
-        const token = tokenInput ? tokenInput.value : '';
+        const tokenInput = document.getElementById('mobileToken') || document.getElementById('token') || document.getElementById('homeToken');
+        const token = tokenInput ? tokenInput.value.trim() : '';
 
         const response = await fetch('/api/skills/creator', {
           headers: {
@@ -1221,7 +1221,6 @@ Sélectionne une option ci-dessus.
           let skillsArray = data.skills || (Array.isArray(data) ? data : []);
 
           skillsArray.forEach(s => {
-            // Conversion robuste selon le format renvoyé par le backend
             const val = s.xp !== undefined ? (s.xp / 10.0) : (s.level ? s.level * 3.0 : 0.0);
             const name = (s.skill_name || s.name || '').toLowerCase();
 
@@ -1246,13 +1245,13 @@ Sélectionne une option ci-dessus.
             Math.min(30, perception)
           );
 
-          if (out) out.textContent = "✔️ Synchronisé avec le noyau cérébral.";
+          if (out) out.textContent = "✔️ Arbre des compétences synchronisé avec succès !";
         } else {
-          throw new Error("Jeton manquant ou invalide.");
+          throw new Error("Jeton manquant ou invalide (401).");
         }
       } catch (err) {
         console.warn("Erreur de synchro compétences :", err);
-        if (out) out.textContent = "⚠️ Échec de synchro : Vérifie ton jeton API dans les options / paramètres.";
+        if (out) out.textContent = "⚠️ Échec de synchro : Vérifie ton jeton API dans l'onglet Options.";
       }
     }
 

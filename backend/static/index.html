@@ -667,7 +667,7 @@
           <div class="robot-stage">
             <model-viewer
               id="chappieModelMain"
-              src="https://github.com/waksty22/waksty/releases/download/v1.0.0/model.glb"
+              src="https://huggingface.co/datasets/wakstyprod/Chappie3D/resolve/main/model.glb"
               poster="/hero.png"
               alt="Modèle 3D de Chappie, robot métallique bleu acier aux yeux cyan"
               camera-controls
@@ -716,7 +716,7 @@
             la mâchoire, le cou et les épaules métalliques.
           </p>
 
-          <p id="modelStatusMain" class="status">Modèle chargé depuis GitHub Release.</p>
+          <p id="modelStatusMain" class="status">Modèle chargé depuis Hugging Face.</p>
         </div>
       </section>
 
@@ -744,7 +744,7 @@
           <div class="robot-stage">
             <model-viewer
               id="chappieModelLive"
-              src="https://github.com/waksty22/waksty/releases/download/v1.0.0/model.glb"
+              src="https://huggingface.co/datasets/wakstyprod/Chappie3D/resolve/main/model.glb"
               poster="/hero.png"
               alt="Chappie en 3D, visière noire et yeux cyan"
               camera-controls
@@ -783,7 +783,7 @@
                     onclick="enterRobotAR('chappieModelLive')">🥽 Activer la RA</button>
           </div>
 
-          <p id="modelStatusLive" class="status">Modèle chargé depuis GitHub Release.</p>
+          <p id="modelStatusLive" class="status">Modèle chargé depuis Hugging Face.</p>
         </div>
 
         <div class="panel">
@@ -1136,7 +1136,7 @@ Sélectionne une option ci-dessus.
       model.addEventListener('error', () => {
         setModelStatus(
           id,
-          'Impossible de charger le modèle 3D depuis GitHub Release. Vérifie la connexion ou l’URL.'
+          'Impossible de charger le modèle 3D depuis Hugging Face. Vérifie la connexion ou l’URL.'
         );
       });
     }

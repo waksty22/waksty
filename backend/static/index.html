@@ -816,18 +816,18 @@
         </div>
       </section>
 
-      <!-- 5. PAGE ARBRE DE COMPÉTENCES (REFONTE GRAPHIQUE 0-30) -->
+      <!-- 5. PAGE ARBRE DE COMPÉTENCES (PAGE BLANCHE 0-30 RELIÉ AU CERVEAU) -->
       <section id="section-skills" class="tab-section">
         <div class="panel">
           <h3>🎓 Arbre des Compétences &amp; Sous-branches</h3>
 
           <p class="muted" style="margin-bottom:14px">
-            Évolution cognitive de Chappie (Échelle de maturité : 0 à 30 par branche).
+            Évolution cognitive connectée aux modules cérébraux (0 à 30 par branche).
           </p>
 
           <div class="row-btns" style="margin-bottom:16px">
             <button type="button" onclick="loadSkills()">
-              ⚡ Actualiser les données
+              ⚡ Synchroniser le Cerveau
             </button>
             <button type="button" class="secondary" onclick="loadGoals()">
               🎯 Voir les Objectifs
@@ -841,10 +841,10 @@
             <div class="stat-item">
               <div class="stat-header">
                 <span>🗣️ Langage &amp; Mots</span>
-                <span id="valLang">18.5 / 30</span>
+                <span id="valLang">0.0 / 30</span>
               </div>
               <div class="bar-bg">
-                <div id="barLang" class="bar-fill" style="width:61.6%; background:#3b82f6;"></div>
+                <div id="barLang" class="bar-fill" style="width:0%; background:#3b82f6;"></div>
               </div>
             </div>
 
@@ -852,10 +852,10 @@
             <div class="stat-item">
               <div class="stat-header">
                 <span>🧠 Raisonnement &amp; Logique</span>
-                <span id="valLogique">14.2 / 30</span>
+                <span id="valLogique">0.0 / 30</span>
               </div>
               <div class="bar-bg">
-                <div id="barLogique" class="bar-fill" style="width:47.3%; background:#10b981;"></div>
+                <div id="barLogique" class="bar-fill" style="width:0%; background:#10b981;"></div>
               </div>
             </div>
 
@@ -863,10 +863,10 @@
             <div class="stat-item">
               <div class="stat-header">
                 <span>🎨 Créativité &amp; Âme</span>
-                <span id="valCreativite">10.5 / 30</span>
+                <span id="valCreativite">0.0 / 30</span>
               </div>
               <div class="bar-bg">
-                <div id="barCreativite" class="bar-fill" style="width:35%; background:#f59e0b;"></div>
+                <div id="barCreativite" class="bar-fill" style="width:0%; background:#f59e0b;"></div>
               </div>
             </div>
 
@@ -874,17 +874,16 @@
             <div class="stat-item">
               <div class="stat-header">
                 <span>👁️ Perception &amp; Sens</span>
-                <span id="valPerception">14.1 / 30</span>
+                <span id="valPerception">0.0 / 30</span>
               </div>
               <div class="bar-bg">
-                <div id="barPerception" class="bar-fill" style="width:47%; background:var(--cyan);"></div>
+                <div id="barPerception" class="bar-fill" style="width:0%; background:var(--cyan);"></div>
               </div>
             </div>
 
           </div>
 
-          <!-- Zone d'affichage des objectifs / détails dynamiques -->
-          <pre id="skillsOut" class="output" style="margin-top:16px; min-height:80px">État du système cognitif : Synchronisé avec le cloud.</pre>
+          <pre id="skillsOut" class="output" style="margin-top:16px; min-height:80px">Statut : Page blanche initiale (0.0). En attente d'interactions vocales et textuelles.</pre>
         </div>
       </section>
 
@@ -972,17 +971,17 @@ Sélectionne une option ci-dessus.
         <h3>🎯 Niveau de maturité</h3>
 
         <div style="text-align:center;margin:8px 0">
-          <span style="font-size:2rem;font-weight:bold;color:var(--cyan)">14,3</span>
+          <span id="sideMaturityVal" style="font-size:2rem;font-weight:bold;color:var(--cyan)">0.0</span>
           <span style="color:var(--text-muted)"> / 30</span>
-          <p class="muted" style="margin-top:2px">Adolescent / Explorateur</p>
+          <p id="sideMaturityText" class="muted" style="margin-top:2px">Nouveau-né / Éveil</p>
         </div>
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Progression globale</span><span>47%</span>
+            <span>Progression globale</span><span id="sideProgPercent">0%</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:47%;background:var(--cyan)"></div>
+            <div id="sideBarGlobal" class="bar-fill" style="width:0%;background:var(--cyan)"></div>
           </div>
         </div>
       </div>
@@ -992,37 +991,37 @@ Sélectionne une option ci-dessus.
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Langage</span><span>18.5/30</span>
+            <span>Langage</span><span id="sideLangVal">0.0/30</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:61.6%;background:#3b82f6"></div>
+            <div id="sideBarLang" class="bar-fill" style="width:0%;background:#3b82f6"></div>
           </div>
         </div>
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Raisonnement</span><span>14.2/30</span>
+            <span>Raisonnement</span><span id="sideLogiqueVal">0.0/30</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:47.3%;background:#10b981"></div>
+            <div id="sideBarLogique" class="bar-fill" style="width:0%;background:#10b981"></div>
           </div>
         </div>
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Créativité</span><span>10.5/30</span>
+            <span>Créativité</span><span id="sideCreativiteVal">0.0/30</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:35%;background:#f59e0b"></div>
+            <div id="sideBarCreativite" class="bar-fill" style="width:0%;background:#f59e0b"></div>
           </div>
         </div>
 
         <div class="stat-item">
           <div class="stat-header">
-            <span>Perception</span><span>14.1/30</span>
+            <span>Perception</span><span id="sidePerceptionVal">0.0/30</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill" style="width:47%;background:var(--cyan)"></div>
+            <div id="sideBarPerception" class="bar-fill" style="width:0%;background:var(--cyan)"></div>
           </div>
         </div>
       </div>
@@ -1038,7 +1037,8 @@ Sélectionne une option ci-dessus.
       </div>
     </div>
   </main>
-    <script>
+
+  <script>
     // Navigation entre les huit onglets.
     function switchTab(tabId, btnElement) {
       document.querySelectorAll('.tab-section').forEach(el => {
@@ -1162,97 +1162,104 @@ Sélectionne une option ci-dessus.
       }
     }
 
-    // Met à jour dynamiquement les barres de compétences sur une échelle de 0 à 30
+    // Met à jour dynamiquement et indépendamment chaque branche (0 à 30) sur toute l'interface
     function updateSkillBars(lang, logique, creativite, perception) {
       const max = 30;
       
+      // Page Skills principale
       document.getElementById('valLang').textContent = lang.toFixed(1) + ' / 30';
-      document.getElementById('barLang').style.width = ((lang / max) * 100) + '%';
+      document.getElementById('barLang').style.width = Math.min(100, (lang / max) * 100) + '%';
 
       document.getElementById('valLogique').textContent = logique.toFixed(1) + ' / 30';
-      document.getElementById('barLogique').style.width = ((logique / max) * 100) + '%';
+      document.getElementById('barLogique').style.width = Math.min(100, (logique / max) * 100) + '%';
 
       document.getElementById('valCreativite').textContent = creativite.toFixed(1) + ' / 30';
-      document.getElementById('barCreativite').style.width = ((creativite / max) * 100) + '%';
+      document.getElementById('barCreativite').style.width = Math.min(100, (creativite / max) * 100) + '%';
 
       document.getElementById('valPerception').textContent = perception.toFixed(1) + ' / 30';
-      document.getElementById('barPerception').style.width = ((perception / max) * 100) + '%';
+      document.getElementById('barPerception').style.width = Math.min(100, (perception / max) * 100) + '%';
+
+      // Sidebar PC
+      document.getElementById('sideLangVal').textContent = lang.toFixed(1) + '/30';
+      document.getElementById('sideBarLang').style.width = Math.min(100, (lang / max) * 100) + '%';
+
+      document.getElementById('sideLogiqueVal').textContent = logique.toFixed(1) + '/30';
+      document.getElementById('sideBarLogique').style.width = Math.min(100, (logique / max) * 100) + '%';
+
+      document.getElementById('sideCreativiteVal').textContent = creativite.toFixed(1) + '/30';
+      document.getElementById('sideBarCreativite').style.width = Math.min(100, (creativite / max) * 100) + '%';
+
+      document.getElementById('sidePerceptionVal').textContent = perception.toFixed(1) + '/30';
+      document.getElementById('sideBarPerception').style.width = Math.min(100, (perception / max) * 100) + '%';
+
+      // Calcul maturité globale (moyenne des 4 branches)
+      const avgGlobal = (lang + logique + creativite + perception) / 4;
+      const percentGlobal = (avgGlobal / max) * 100;
+
+      document.getElementById('sideMaturityVal').textContent = avgGlobal.toFixed(1);
+      document.getElementById('sideProgPercent').textContent = Math.round(percentGlobal) + '%';
+      document.getElementById('sideBarGlobal').style.width = percentGlobal + '%';
+
+      let stageText = "Nouveau-né / Éveil";
+      if (avgGlobal > 5) stageText = "Enfant / Apprenti";
+      if (avgGlobal > 15) stageText = "Adolescent / Explorateur";
+      if (avgGlobal > 25) stageText = "Conscience Autonome Avancée";
+      document.getElementById('sideMaturityText').textContent = stageText;
     }
 
-    // Fonction de chargement des compétences (appelée par le bouton)
-    function loadSkills() {
+    // Fonction connectée au backend pour actualiser l'arbre des compétences en temps réel
+    async function loadSkills() {
       const out = document.getElementById('skillsOut');
-      out.textContent = "Actualisation des réseaux neuronaux et calcul de l'âge cognitif...";
-      
-      // Simulation d'une mise à jour dynamique (tu pourras connecter un fetch API ici si besoin)
-      setTimeout(() => {
-        // Valeurs aléatoires ou basées sur l'évolution
-        const lang = 18.5 + Math.random() * 0.5;
-        const logique = 14.2 + Math.random() * 0.4;
-        const creativite = 10.5 + Math.random() * 0.3;
-        const perception = 14.1 + Math.random() * 0.4;
+      out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
 
-        updateSkillBars(lang, logique, creativite, perception);
-        out.textContent = "✔️ Arbre de compétences mis à jour avec succès.\n- Âge global estimé : 14.3 / 30 cycles d'apprentissage.\n- Prochain jalon : Optimisation de la sous-branche Créativité.";
-      }, 500);
+      try {
+        const response = await fetch('/api/skills');
+        if (response.ok) {
+          const data = await response.json();
+          updateSkillBars(
+            data.lang ?? 0.0,
+            data.logique ?? 0.0,
+            data.creativite ?? 0.0,
+            data.perception ?? 0.0
+          );
+          out.textContent = "✔️ Synchronisation réussie. Toutes les branches cérébrales sont à jour.";
+        } else {
+          throw new Error("Réponse serveur non valide");
+        }
+      } catch (err) {
+        // Mode Page Blanche par défaut (0.0)
+        updateSkillBars(0.0, 0.0, 0.0, 0.0);
+        out.textContent = "🐣 Chappie est en mode Page Blanche (0.0). Aucune donnée active détectée dans le noyau pour l'instant.";
+      }
     }
 
     function loadGoals() {
       const out = document.getElementById('skillsOut');
-      out.textContent = "🎯 Objectifs cognitifs en cours :\n1. Maîtriser le vocabulaire technique des flux audio.\n2. Améliorer la reconnaissance visuelle en milieu sombre.\n3. Explorer de nouvelles structures de pensées autonomes.";
+      out.textContent = "🎯 Objectifs cognitifs initiaux (Stade 0) :\n1. Enregistrer les premiers stimuli textuels et vocaux via Gemini Live.\n2. Établir les premières connexions synaptiques.\n3. Découvrir l'environnement immédiat.";
     }
 
-    // Initialise les événements des deux modèles 3D.
-    function setupRobotModel(id) {
-      const model = document.getElementById(id);
-
-      if (!model) return;
-
-      model.addEventListener('load', () => {
-        setModelStatus(
-          id,
-          'Modèle 3D chargé. Fais glisser pour tourner et pince pour zoomer.'
-        );
-      });
-
-      model.addEventListener('error', () => {
-        setModelStatus(
-          id,
-          'Impossible de charger le modèle 3D depuis Hugging Face. Vérifie la connexion ou l’URL.'
-        );
-      });
-    }
-
-    function initializeRobotModels() {
+    // Initialisation au chargement de la page : Démarrage strict à 0.0 (Page Blanche)
+    document.addEventListener('DOMContentLoaded', () => {
+      updateSkillBars(0.0, 0.0, 0.0, 0.0);
       setupRobotModel('chappieModelMain');
       setupRobotModel('chappieModelLive');
+    });
+
+    function setupRobotModel(id) {
+      const model = document.getElementById(id);
+      if (!model) return;
+      model.addEventListener('load', () => {
+        const status = document.getElementById(id === 'chappieModelMain' ? 'modelStatusMain' : 'modelStatusLive');
+        if (status) status.textContent = 'Modèle 3D chargé avec succès.';
+      });
     }
 
-    if (document.readyState === 'loading') {
-      document.addEventListener(
-        'DOMContentLoaded',
-        initializeRobotModels,
-        { once: true }
-      );
-    } else {
-      initializeRobotModels();
-    }
-
-    // Adapte la colonne de statistiques lorsque la fenêtre change de taille.
     window.addEventListener('resize', () => {
-      const skillsActive = document
-        .getElementById('section-skills')
-        ?.classList.contains('active');
-
-      document
-        .getElementById('mainContainer')
-        ?.classList.toggle(
-          'has-sidebar',
-          Boolean(
-            skillsActive &&
-            window.matchMedia('(min-width: 1001px)').matches
-          )
-        );
+      const skillsActive = document.getElementById('section-skills')?.classList.contains('active');
+      document.getElementById('mainContainer')?.classList.toggle(
+        'has-sidebar',
+        Boolean(skillsActive && window.matchMedia('(min-width: 1001px)').matches)
+      );
     });
   </script>
 

@@ -973,6 +973,12 @@ async def skills_list(user_id: str, auth_user: str = Depends(require_auth)):
     return {**get_skills_summary(auth_user), "simulated": True}
 
 
+# Route ajoutée pour correspondre exactement à l'appel frontend /api/skills/creator
+@app.get("/api/skills/creator")
+async def skills_creator_default(auth_user: str = Depends(require_auth)):
+    return {**get_skills_summary(auth_user), "simulated": True}
+
+
 @app.get("/api/cognition/audit")
 async def cognition_audit(auth_user: str = Depends(require_auth)):
     with db_connection() as db:

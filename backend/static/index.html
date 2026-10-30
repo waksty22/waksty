@@ -1199,21 +1199,27 @@ Sélectionne une option ci-dessus.
       document.getElementById('sideMaturityText').textContent = stageText;
     }
 
-    // Fonction de synchronisation connectée au backend Python (/api/skills/creator)
+    // Fonction de synchronisation corrigée avec envoi du Token Bearer
     async function loadSkills() {
+      const out = document.getElementById('skillsOut');
+      if (out) out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
+
       try {
+        const tokenInput = document.getElementById('token') || document.getElementById('mobileToken') || document.getElementById('homeToken');
+        const token = tokenInput ? tokenInput.value : '';
+
         const response = await fetch('/api/skills/creator', {
           headers: {
-            'Authorization': 'Bearer ' + (document.getElementById('token')?.value || '')
+            'Authorization': 'Bearer ' + token
           }
         });
+
         if (response.ok) {
           const data = await response.json();
           let lang = 0.0, logique = 0.0, creativite = 0.0, perception = 0.0;
 
           if (data.skills && Array.isArray(data.skills)) {
             data.skills.forEach(s => {
-              // Conversion de l'XP ou du niveau brut de la base vers l'échelle 0-30
               const val = (s.xp ? s.xp / 10.0 : (s.level || 0.0));
               if (s.skill_name === 'mots') lang = val;
               if (s.skill_name === 'tete') logique = val;
@@ -1223,11 +1229,13 @@ Sélectionne une option ci-dessus.
           }
 
           updateSkillBars(lang, logique, creativite, perception);
-          const out = document.getElementById('skillsOut');
           if (out) out.textContent = "✔️ Synchronisé avec le noyau cérébral.";
+        } else {
+          throw new Error("Jeton manquant ou invalide.");
         }
       } catch (err) {
-        console.warn("Erreur de synchro automatique des compétences", err);
+        console.warn("Erreur de synchro compétences :", err);
+        if (out) out.textContent = "⚠️ Échec de synchro : Vérifie ton jeton API dans les options / paramètres.";
       }
     }
 
@@ -1236,9 +1244,7 @@ Sélectionne une option ci-dessus.
       out.textContent = "🎯 Objectifs cognitifs en cours :\n1. Enregistrer les premiers stimuli textuels et vocaux.\n2. Établir les premières connexions synaptiques.";
     }
 
-    // Hook global : intercepte l'envoi du message dans le chat rapide pour rafraîchir l'arbre après la réponse
-    const originalSendMessage = window.sendMessage;
-    // Si la fonction sendMessage existe dans le script.js externe, on l'enrobe :
+    // Hook automatique après l'envoi d'un message dans le chat rapide ou synchro périodique
     window.addEventListener('DOMContentLoaded', () => {
       updateSkillBars(0.0, 0.0, 0.0, 0.0);
       setupRobotModel('chappieModelMain');
@@ -1247,6 +1253,15 @@ Sélectionne une option ci-dessus.
 
       // Synchronisation automatique toutes les 10 secondes en arrière-plan
       setInterval(loadSkills, 10000);
+
+      // Interception optionnelle pour rafraîchir après un envoi de message
+      const originalSendMessage = window.sendMessage;
+      if (typeof originalSendMessage === 'function') {
+        window.sendMessage = async function() {
+          await originalSendMessage.apply(this, arguments);
+          setTimeout(loadSkills, 1500); // Actualise l'arbre 1.5s après la réponse
+        };
+      }
     });
 
     function setupRobotModel(id) {

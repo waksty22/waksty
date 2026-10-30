@@ -816,7 +816,7 @@
         </div>
       </section>
 
-      <!-- 5. PAGE ARBRE DE COMPÉTENCES (PAGE BLANCHE 0-30 RELIÉ AU CERVEAU) -->
+      <!-- 5. PAGE ARBRE DE COMPÉTENCES -->
       <section id="section-skills" class="tab-section">
         <div class="panel">
           <h3>🎓 Arbre des Compétences &amp; Sous-branches</h3>
@@ -965,7 +965,7 @@ Sélectionne une option ci-dessus.
 
     </div>
 
-    <!-- COLONNE DE DROITE SUR PC, ONGLET COMPÉTENCES -->
+    <!-- COLONNE DE DROITE SUR PC -->
     <div class="side-column">
       <div class="panel">
         <h3>🎯 Niveau de maturité</h3>
@@ -1039,7 +1039,6 @@ Sélectionne une option ci-dessus.
   </main>
 
   <script>
-    // Navigation entre les huit onglets.
     function switchTab(tabId, btnElement) {
       document.querySelectorAll('.tab-section').forEach(el => {
         el.classList.remove('active');
@@ -1084,7 +1083,6 @@ Sélectionne une option ci-dessus.
       }
     }
 
-    // Synchronise les trois champs du jeton sans le stocker dans le navigateur.
     function syncTokens(value) {
       ['token', 'mobileToken', 'homeToken'].forEach(id => {
         const field = document.getElementById(id);
@@ -1095,7 +1093,6 @@ Sélectionne une option ci-dessus.
       });
     }
 
-    // Replace la caméra du modèle sur une vue frontale.
     function resetRobotView(id) {
       const model = document.getElementById(id);
 
@@ -1110,7 +1107,6 @@ Sélectionne une option ci-dessus.
       }
     }
 
-    // Active ou désactive la rotation automatique.
     function toggleRobotRotation(id, button) {
       const model = document.getElementById(id);
 
@@ -1125,7 +1121,6 @@ Sélectionne une option ci-dessus.
       }
     }
 
-    // Ouvre le mode réalité augmentée si l'appareil le permet.
     async function enterRobotAR(id) {
       const model = document.getElementById(id);
 
@@ -1162,11 +1157,10 @@ Sélectionne une option ci-dessus.
       }
     }
 
-    // Met à jour dynamiquement et indépendamment chaque branche (0 à 30) sur toute l'interface
+    // Mise à jour graphique de l'arbre et de la sidebar (Échelle 0 à 30)
     function updateSkillBars(lang, logique, creativite, perception) {
       const max = 30;
       
-      // Page Skills principale
       document.getElementById('valLang').textContent = lang.toFixed(1) + ' / 30';
       document.getElementById('barLang').style.width = Math.min(100, (lang / max) * 100) + '%';
 
@@ -1179,7 +1173,6 @@ Sélectionne une option ci-dessus.
       document.getElementById('valPerception').textContent = perception.toFixed(1) + ' / 30';
       document.getElementById('barPerception').style.width = Math.min(100, (perception / max) * 100) + '%';
 
-      // Sidebar PC
       document.getElementById('sideLangVal').textContent = lang.toFixed(1) + '/30';
       document.getElementById('sideBarLang').style.width = Math.min(100, (lang / max) * 100) + '%';
 
@@ -1192,7 +1185,6 @@ Sélectionne une option ci-dessus.
       document.getElementById('sidePerceptionVal').textContent = perception.toFixed(1) + '/30';
       document.getElementById('sideBarPerception').style.width = Math.min(100, (perception / max) * 100) + '%';
 
-      // Calcul maturité globale (moyenne des 4 branches)
       const avgGlobal = (lang + logique + creativite + perception) / 4;
       const percentGlobal = (avgGlobal / max) * 100;
 
@@ -1207,42 +1199,54 @@ Sélectionne une option ci-dessus.
       document.getElementById('sideMaturityText').textContent = stageText;
     }
 
-    // Fonction connectée au backend pour actualiser l'arbre des compétences en temps réel
+    // Fonction de synchronisation connectée au backend Python (/api/skills/creator)
     async function loadSkills() {
-      const out = document.getElementById('skillsOut');
-      out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
-
       try {
-        const response = await fetch('/api/skills');
+        const response = await fetch('/api/skills/creator', {
+          headers: {
+            'Authorization': 'Bearer ' + (document.getElementById('token')?.value || '')
+          }
+        });
         if (response.ok) {
           const data = await response.json();
-          updateSkillBars(
-            data.lang ?? 0.0,
-            data.logique ?? 0.0,
-            data.creativite ?? 0.0,
-            data.perception ?? 0.0
-          );
-          out.textContent = "✔️ Synchronisation réussie. Toutes les branches cérébrales sont à jour.";
-        } else {
-          throw new Error("Réponse serveur non valide");
+          let lang = 0.0, logique = 0.0, creativite = 0.0, perception = 0.0;
+
+          if (data.skills && Array.isArray(data.skills)) {
+            data.skills.forEach(s => {
+              // Conversion de l'XP ou du niveau brut de la base vers l'échelle 0-30
+              const val = (s.xp ? s.xp / 10.0 : (s.level || 0.0));
+              if (s.skill_name === 'mots') lang = val;
+              if (s.skill_name === 'tete') logique = val;
+              if (s.skill_name === 'ame') creativite = val;
+              if (s.skill_name === 'sens') perception = val;
+            });
+          }
+
+          updateSkillBars(lang, logique, creativite, perception);
+          const out = document.getElementById('skillsOut');
+          if (out) out.textContent = "✔️ Synchronisé avec le noyau cérébral.";
         }
       } catch (err) {
-        // Mode Page Blanche par défaut (0.0)
-        updateSkillBars(0.0, 0.0, 0.0, 0.0);
-        out.textContent = "🐣 Chappie est en mode Page Blanche (0.0). Aucune donnée active détectée dans le noyau pour l'instant.";
+        console.warn("Erreur de synchro automatique des compétences", err);
       }
     }
 
     function loadGoals() {
       const out = document.getElementById('skillsOut');
-      out.textContent = "🎯 Objectifs cognitifs initiaux (Stade 0) :\n1. Enregistrer les premiers stimuli textuels et vocaux via Gemini Live.\n2. Établir les premières connexions synaptiques.\n3. Découvrir l'environnement immédiat.";
+      out.textContent = "🎯 Objectifs cognitifs en cours :\n1. Enregistrer les premiers stimuli textuels et vocaux.\n2. Établir les premières connexions synaptiques.";
     }
 
-    // Initialisation au chargement de la page : Démarrage strict à 0.0 (Page Blanche)
-    document.addEventListener('DOMContentLoaded', () => {
+    // Hook global : intercepte l'envoi du message dans le chat rapide pour rafraîchir l'arbre après la réponse
+    const originalSendMessage = window.sendMessage;
+    // Si la fonction sendMessage existe dans le script.js externe, on l'enrobe :
+    window.addEventListener('DOMContentLoaded', () => {
       updateSkillBars(0.0, 0.0, 0.0, 0.0);
       setupRobotModel('chappieModelMain');
       setupRobotModel('chappieModelLive');
+      loadSkills(); // Premier appel au chargement
+
+      // Synchronisation automatique toutes les 10 secondes en arrière-plan
+      setInterval(loadSkills, 10000);
     });
 
     function setupRobotModel(id) {
@@ -1263,7 +1267,7 @@ Sélectionne une option ci-dessus.
     });
   </script>
 
-  <!-- Conserve le JavaScript applicatif existant. -->
+  <!-- Script externe global -->
   <script src="/script.js" defer></script>
 </body>
 </html>

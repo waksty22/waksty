@@ -1199,7 +1199,7 @@ Sélectionne une option ci-dessus.
       document.getElementById('sideMaturityText').textContent = stageText;
     }
 
-    // Fonction de synchronisation corrigée avec envoi du Token Bearer
+    // Fonction de synchronisation unifiée (compatible PC et Mobile)
     async function loadSkills() {
       const out = document.getElementById('skillsOut');
       if (out) out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
@@ -1218,17 +1218,34 @@ Sélectionne une option ci-dessus.
           const data = await response.json();
           let lang = 0.0, logique = 0.0, creativite = 0.0, perception = 0.0;
 
-          if (data.skills && Array.isArray(data.skills)) {
-            data.skills.forEach(s => {
-              const val = (s.xp ? s.xp / 10.0 : (s.level || 0.0));
-              if (s.skill_name === 'mots') lang = val;
-              if (s.skill_name === 'tete') logique = val;
-              if (s.skill_name === 'ame') creativite = val;
-              if (s.skill_name === 'sens') perception = val;
-            });
-          }
+          let skillsArray = data.skills || (Array.isArray(data) ? data : []);
 
-          updateSkillBars(lang, logique, creativite, perception);
+          skillsArray.forEach(s => {
+            // Conversion robuste selon le format renvoyé par le backend
+            const val = s.xp !== undefined ? (s.xp / 10.0) : (s.level ? s.level * 3.0 : 0.0);
+            const name = (s.skill_name || s.name || '').toLowerCase();
+
+            if (name === 'mots' || name === 'lang' || name === 'lien') {
+              lang = Math.max(lang, val);
+            }
+            if (name === 'tete' || name === 'logique' || name === 'mains') {
+              logique = Math.max(logique, val);
+            }
+            if (name === 'ame' || name === 'creativite') {
+              creativite = Math.max(creativite, val);
+            }
+            if (name === 'sens' || name === 'perception') {
+              perception = Math.max(perception, val);
+            }
+          });
+
+          updateSkillBars(
+            Math.min(30, lang), 
+            Math.min(30, logique), 
+            Math.min(30, creativite), 
+            Math.min(30, perception)
+          );
+
           if (out) out.textContent = "✔️ Synchronisé avec le noyau cérébral.";
         } else {
           throw new Error("Jeton manquant ou invalide.");

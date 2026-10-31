@@ -158,7 +158,6 @@ function renderEmotionsDashboard(psy, lastEvent = null) {
 async function fetchPsychology() {
   if (!getToken()) return;
   try {
-    // Route serveur : GET /api/emotions/{user_id}
     const data = await apiRequest(`/api/emotions/${encodeURIComponent(CREATOR_ID)}`);
     if (data.psychology) renderEmotionsDashboard(data.psychology);
   } catch (error) { console.warn('Émotions :', error.message); }
@@ -303,10 +302,12 @@ function toggleMic() {
 
 /* 8. MÉMOIRE, HISTORIQUE ET DONNÉES COGNITIVES */
 async function loadSummary() {
+  if (!requireToken()) return;
   try { const d = await apiRequest('/api/memory/summary'); setText('summary', d.summary || 'Aucun résumé enregistré pour le moment.'); }
   catch (e) { setText('summary', 'Erreur de chargement : ' + e.message); }
 }
 async function loadMoodHistory() {
+  if (!requireToken()) return;
   try {
     const d = await apiRequest('/api/mood/history?limit=10');
     if (!Array.isArray(d.events)) throw new Error('Format de réponse inattendu.');
@@ -320,6 +321,7 @@ async function loadMoodHistory() {
   } catch (e) { setText('summary', 'Erreur d’historique : ' + e.message); }
 }
 async function loadDreams() {
+  if (!requireToken()) return;
   try {
     const d = await apiRequest(`/api/dreams/${encodeURIComponent(CREATOR_ID)}`);
     if (!Array.isArray(d.dreams)) throw new Error('Format de réponse inattendu.');
@@ -330,6 +332,7 @@ async function loadDreams() {
   } catch (e) { setText('summary', 'Erreur de chargement des rêves : ' + e.message); }
 }
 async function loadThoughts() {
+  if (!requireToken()) return;
   try {
     const d = await apiRequest(`/api/thoughts/${encodeURIComponent(CREATOR_ID)}`);
     if (!Array.isArray(d.thoughts)) throw new Error('Format de réponse inattendu.');
@@ -340,6 +343,7 @@ async function loadThoughts() {
   } catch (e) { setText('summary', 'Erreur de chargement des pensées : ' + e.message); }
 }
 async function loadSkills() {
+  if (!requireToken()) return;
   try {
     const d = await apiRequest(`/api/skills/${encodeURIComponent(CREATOR_ID)}`);
     if (!Array.isArray(d.skills)) throw new Error('Format de réponse inattendu.');
@@ -353,9 +357,11 @@ async function loadSkills() {
     const b = d.cognitive_profile?.behavior;
     if (b) out += `⚙️ Profil comportemental\n• Complexité : ${b.response_complexity ?? '—'}\n• Vocabulaire : ${b.vocabulary_richness ?? '—'}\n• Humour : ${b.humor_description ?? '—'}\n• Incertitude : ${b.uncertainty_handling ?? '—'}\n`;
     setText('summary', out);
+    setStatus('Compétences chargées avec succès.');
   } catch (e) { setText('summary', 'Erreur de chargement des compétences : ' + e.message); }
 }
 async function loadGoals() {
+  if (!requireToken()) return;
   try {
     const d = await apiRequest('/api/goals');
     if (!Array.isArray(d.goals)) throw new Error('Format de réponse inattendu.');
@@ -485,7 +491,6 @@ async function toggleLive() {
         for (const source of liveAudioSources) { try { source.stop(); } catch (_) {} }
         liveAudioSources.clear(); liveNextTime = liveCtx ? liveCtx.currentTime : 0;
       }
-      // Le serveur transmet inputTranscription sous user_text.
       if (data.user_text) appendLiveTranscript('Toi : ', data.user_text);
       if (data.text) {
         appendLiveTranscript('Chappie : ', data.text);
@@ -663,24 +668,33 @@ function initializeChappie() {
   });
   const tokenInput = $('token');
   const tokenMobile = $('tokenMobile');
+  
   const onTokenChange = () => {
     if (getToken()) { 
       fetchPsychology(); 
       checkInitialGreeting(); 
-      loadSkills(); // Chargement automatique des compétences dès que le jeton est valide
+      loadSkills(); 
     }
   };
-  if (tokenInput) { tokenInput.addEventListener('change', onTokenChange); tokenInput.addEventListener('input', () => { if (tokenMobile && tokenMobile.value !== tokenInput.value) tokenMobile.value = tokenInput.value; }); }
-  if (tokenMobile) { tokenMobile.addEventListener('change', onTokenChange); tokenMobile.addEventListener('input', () => { if (tokenInput && tokenInput.value !== tokenMobile.value) tokenInput.value = tokenMobile.value; }); }
+
+  if (tokenInput) {
+    tokenInput.addEventListener('change', onTokenChange);
+    tokenInput.addEventListener('input', onTokenChange);
+  }
+  if (tokenMobile) {
+    tokenMobile.addEventListener('change', onTokenChange);
+    tokenMobile.addEventListener('input', onTokenChange);
+  }
   
   if (getToken()) { 
     fetchPsychology(); 
     setTimeout(checkInitialGreeting, 1000); 
-    loadSkills(); // Chargement automatique des compétences au démarrage si le jeton est déjà enregistré
+    loadSkills(); 
   }
   
   startPsychologyPolling();
 }
+
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeChappie, { once: true });
 else initializeChappie();
 

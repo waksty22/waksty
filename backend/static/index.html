@@ -1199,7 +1199,7 @@ Sélectionne une option ci-dessus.
       document.getElementById('sideMaturityText').textContent = stageText;
     }
 
-    // Fonction de synchronisation corrigée avec support complet des modules V19.3
+    // Fonction de synchronisation corrigée et universelle pour l'API /api/skills/creator
     async function loadSkills() {
       const out = document.getElementById('skillsOut');
       if (out) out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
@@ -1218,11 +1218,14 @@ Sélectionne une option ci-dessus.
           const data = await response.json();
           let lang = 0.0, logique = 0.0, creativite = 0.0, perception = 0.0;
 
-          let skillsArray = data.skills || (Array.isArray(data) ? data : []);
-
-          skillsArray.forEach(s => {
-            const val = s.xp !== undefined ? (s.xp / 10.0) : (s.level ? s.level * 3.0 : 0.0);
-            const name = (s.skill_name || s.name || '').toLowerCase();
+          // Analyse compatible avec les dictionnaires directs (ex: data.MOTS, data.LIEN) ou tableaux
+          const processModule = (key, item) => {
+            const name = key.toLowerCase();
+            const level = item.level !== undefined ? item.level : 1;
+            const xp = item.xp !== undefined ? item.xp : 0.0;
+            
+            // Calcul de la valeur (Niveau * 3 + fraction d'XP) sur une échelle de 30 max
+            const val = (level - 1) * 3.0 + (xp / 33.33);
 
             if (name === 'mots' || name === 'lang' || name === 'lien') {
               lang = Math.max(lang, val);
@@ -1236,17 +1239,25 @@ Sélectionne une option ci-dessus.
             if (name === 'sens' || name === 'perception') {
               perception = Math.max(perception, val);
             }
-          });
+          };
 
-          // Compatibilité avec le profil cognitif asymétrique renvoyé par le backend V19.3
-          if (data.cognitive_profile && data.cognitive_profile.systems) {
-            const sys = data.cognitive_profile.systems;
-            if (sys.mots) lang = Math.max(lang, (sys.mots.average_level / 10) * 30);
-            if (sys.lien) lang = Math.max(lang, (sys.lien.average_level / 10) * 30);
-            if (sys.tete) logique = Math.max(logique, (sys.tete.average_level / 10) * 30);
-            if (sys.mains) logique = Math.max(logique, (sys.mains.average_level / 10) * 30);
-            if (sys.ame) creativite = Math.max(creativite, (sys.ame.average_level / 10) * 30);
-            if (sys.sens) perception = Math.max(perception, (sys.sens.average_level / 10) * 30);
+          if (Array.isArray(data)) {
+            data.forEach(s => processModule(s.skill_name || s.name || '', s));
+          } else if (typeof data === 'object' && data !== null) {
+            // Parcourt les clés directes du JSON (ex: AME, LIEN, MAINS, MOTS, SENS, TETE)
+            Object.keys(data).forEach(key => {
+              const item = data[key];
+              if (item && typeof item === 'object' && (item.level !== undefined || item.xp !== undefined)) {
+                processModule(key, item);
+              }
+            });
+            // Si les données sont enveloppées dans un champ skills ou systems
+            if (data.skills && Array.isArray(data.skills)) {
+              data.skills.forEach(s => processModule(s.skill_name || s.name || '', s));
+            }
+            if (data.systems && typeof data.systems === 'object') {
+              Object.keys(data.systems).forEach(key => processModule(key, data.systems[key]));
+            }
           }
 
           updateSkillBars(

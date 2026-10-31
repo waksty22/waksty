@@ -1,5 +1,7 @@
+
 """
-Module de gestion de la mémoire épisodique et des sources de connaissances pour Chappie.
+Module de gestion de la mémoire épisodique et des sources de connaissances
+pour Chappie V19.3.
 
 Fonctionnalités :
 - Enregistrement des souvenirs avec traçabilité de leur source.
@@ -8,18 +10,21 @@ Fonctionnalités :
 - Incrémentation sécurisée du compteur d'accès.
 - Courbe de l'oubli progressive et maîtrisée.
 - Isolation des données par utilisateur.
+- Compatibilité avec les connexions SQLite existantes.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
 log = logging.getLogger(__name__)
+
 
 VALID_SOURCE_TYPES = {
     "observed",
@@ -28,15 +33,35 @@ VALID_SOURCE_TYPES = {
     "confirmed",
 }
 
+MAX_USER_ID_LENGTH = 80
 MAX_CONTENT_LENGTH = 4000
 MAX_CATEGORY_LENGTH = 60
 MAX_TAG_LENGTH = 40
 MAX_TAGS = 20
+MAX_SEARCH_LENGTH = 200
 
 
 def utc_now() -> str:
     """Retourne la date actuelle au format ISO 8601 UTC."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_user_id(user_id: str) -> str:
+    """Valide et normalise l'identifiant utilisateur."""
+    if not isinstance(user_id, str):
+        raise ValueError("user_id doit être du texte.")
+
+    user_id = user_id.strip()
+
+    if not user_id:
+        raise ValueError("user_id est obligatoire.")
+
+    if len(user_id) > MAX_USER_ID_LENGTH:
+        raise ValueError(
+            f"user_id dépasse {MAX_USER_ID_LENGTH} caractères."
+        )
+
+    return user_id
 
 
 def _normalize_source_type(source_type: str) -> str:
@@ -70,6 +95,16 @@ def _normalize_content(content: str) -> str:
     return content
 
 
+def _normalize_category(category: str) -> str:
+    """Nettoie et valide la catégorie."""
+    if not isinstance(category, str):
+        raise ValueError("La catégorie doit être du texte.")
+
+    category = category.strip()[:MAX_CATEGORY_LENGTH]
+
+    return category or "general"
+
+
 def _normalize_tags(tags: list[str] | None) -> list[str]:
     """Nettoie les tags et limite leur nombre."""
     if tags is None:
@@ -78,10 +113,13 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
     if not isinstance(tags, (list, tuple)):
         raise ValueError("Les tags doivent être fournis sous forme de liste.")
 
-    safe_tags = []
-    seen = set()
+    safe_tags: list[str] = []
+    seen: set[str] = set()
 
     for tag in tags:
+        if tag is None:
+            continue
+
         clean = str(tag).strip()[:MAX_TAG_LENGTH]
 
         if not clean:
@@ -101,12 +139,93 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
     return safe_tags
 
 
+def _normalize_importance(importance: int) -> int:
+    """Valide et borne l'importance entre 1 et 5."""
+    if isinstance(importance, bool):
+        raise ValueError("L'importance doit être un nombre entier.")
+
+    try:
+        value = int(importance)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Importance invalide.") from exc
+
+    return max(1, min(5, value))
+
+
+def _normalize_confidence(confidence: float) -> float:
+    """Valide la confiance entre 0 et 1."""
+    if isinstance(confidence, bool):
+        raise ValueError("La confiance doit être un nombre.")
+
+    try:
+        value = float(confidence)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Confiance invalide.") from exc
+
+    if not math.isfinite(value):
+        raise ValueError("La confiance doit être une valeur finie.")
+
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(
+            "La confiance doit être comprise entre 0 et 1."
+        )
+
+    return value
+
+
+def _normalize_limit(limit: int, minimum: int, maximum: int) -> int:
+    """Valide une limite numérique."""
+    if isinstance(limit, bool):
+        raise ValueError("La limite doit être un nombre entier.")
+
+    try:
+        value = int(limit)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("La limite doit être un nombre.") from exc
+
+    return max(minimum, min(maximum, value))
+
+
+def _escape_like(value: str) -> str:
+    """
+    Échappe les caractères spéciaux SQL LIKE.
+
+    Empêche notamment qu'un caractère '%' ou '_' fourni
+    par l'utilisateur soit interprété comme un joker.
+    """
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
+def _row_to_dict(row: Any, cursor: sqlite3.Cursor) -> dict[str, Any]:
+    """Convertit un résultat SQLite en dictionnaire."""
+    if isinstance(row, sqlite3.Row):
+        return dict(row)
+
+    if isinstance(row, dict):
+        return dict(row)
+
+    if hasattr(row, "keys"):
+        return dict(row)
+
+    columns = [
+        description[0]
+        for description in (cursor.description or [])
+    ]
+
+    return dict(zip(columns, row))
+
+
 def init_memory_tables(db: sqlite3.Connection) -> None:
     """
     Initialise les tables de mémoire épisodique.
 
     Compatible avec une base SQLite existante :
-    CREATE TABLE IF NOT EXISTS ne supprime pas les souvenirs déjà enregistrés.
+    CREATE TABLE IF NOT EXISTS ne supprime pas les souvenirs existants.
     """
     db.executescript(
         """
@@ -115,8 +234,10 @@ def init_memory_tables(db: sqlite3.Connection) -> None:
             user_id TEXT NOT NULL,
             category TEXT NOT NULL,
             content TEXT NOT NULL,
+
             importance INTEGER NOT NULL
                 CHECK(importance BETWEEN 1 AND 5),
+
             source_type TEXT NOT NULL
                 CHECK(
                     source_type IN (
@@ -127,13 +248,18 @@ def init_memory_tables(db: sqlite3.Connection) -> None:
                     )
                 )
                 DEFAULT 'taught',
+
             confidence REAL NOT NULL DEFAULT 0.8
                 CHECK(confidence BETWEEN 0.0 AND 1.0),
+
             tags TEXT NOT NULL DEFAULT '[]',
+
             access_count INTEGER NOT NULL DEFAULT 0
                 CHECK(access_count >= 0),
+
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+
             UNIQUE(user_id, content)
         );
 
@@ -145,10 +271,11 @@ def init_memory_tables(db: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_memories_v19_category
         ON memories_v19(user_id, category);
+
+        CREATE INDEX IF NOT EXISTS idx_memories_v19_access
+        ON memories_v19(user_id, access_count DESC);
         """
     )
-
-    db.commit()
 
 
 def save_episodic_memory(
@@ -170,33 +297,12 @@ def save_episodic_memory(
     - sa date de mise à jour est actualisée ;
     - son compteur d'accès est conservé.
     """
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("user_id est obligatoire.")
-
-    user_id = user_id.strip()
-
-    if len(user_id) > 80:
-        raise ValueError("user_id dépasse 80 caractères.")
-
+    user_id = _normalize_user_id(user_id)
     content = _normalize_content(content)
-
-    if not isinstance(category, str):
-        raise ValueError("La catégorie doit être du texte.")
-
-    category = category.strip()[:MAX_CATEGORY_LENGTH] or "general"
-
+    category = _normalize_category(category)
+    importance = _normalize_importance(importance)
     source_type = _normalize_source_type(source_type)
-
-    try:
-        importance = int(importance)
-        confidence = float(confidence)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Importance ou confiance invalide.") from exc
-
-    importance = max(1, min(5, importance))
-
-    if not 0.0 <= confidence <= 1.0:
-        raise ValueError("La confiance doit être comprise entre 0 et 1.")
+    confidence = _normalize_confidence(confidence)
 
     safe_tags = _normalize_tags(tags)
     tags_json = json.dumps(safe_tags, ensure_ascii=False)
@@ -220,10 +326,12 @@ def save_episodic_memory(
 
         ON CONFLICT(user_id, content) DO UPDATE SET
             category = excluded.category,
+
             importance = MAX(
                 memories_v19.importance,
                 excluded.importance
             ),
+
             source_type = excluded.source_type,
             confidence = excluded.confidence,
             tags = excluded.tags,
@@ -241,8 +349,6 @@ def save_episodic_memory(
             now,
         ),
     )
-
-    db.commit()
 
     return {
         "saved": True,
@@ -271,13 +377,7 @@ def search_episodic_memories(
 
     Chaque souvenir retourné voit son compteur d'accès augmenter.
     """
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("user_id est obligatoire.")
-
-    user_id = user_id.strip()
-
-    if len(user_id) > 80:
-        raise ValueError("user_id dépasse 80 caractères.")
+    user_id = _normalize_user_id(user_id)
 
     if query is None:
         query = ""
@@ -287,14 +387,14 @@ def search_episodic_memories(
 
     query = query.strip()
 
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("La limite de recherche doit être un nombre.") from exc
+    if len(query) > MAX_SEARCH_LENGTH:
+        query = query[:MAX_SEARCH_LENGTH]
 
-    limit = max(1, min(30, limit))
+    limit = _normalize_limit(limit, 1, 30)
 
     if query:
+        pattern = f"%{_escape_like(query)}%"
+
         cursor = db.execute(
             """
             SELECT
@@ -312,9 +412,9 @@ def search_episodic_memories(
             FROM memories_v19
             WHERE user_id = ?
               AND (
-                    content LIKE ? COLLATE NOCASE
-                    OR category LIKE ? COLLATE NOCASE
-                    OR tags LIKE ? COLLATE NOCASE
+                    content LIKE ? ESCAPE '\\' COLLATE NOCASE
+                    OR category LIKE ? ESCAPE '\\' COLLATE NOCASE
+                    OR tags LIKE ? ESCAPE '\\' COLLATE NOCASE
               )
             ORDER BY
                 importance DESC,
@@ -324,9 +424,9 @@ def search_episodic_memories(
             """,
             (
                 user_id,
-                f"%{query}%",
-                f"%{query}%",
-                f"%{query}%",
+                pattern,
+                pattern,
+                pattern,
                 limit,
             ),
         )
@@ -362,20 +462,24 @@ def search_episodic_memories(
     memory_ids: list[int] = []
 
     for row in rows:
-        item = dict(row)
+        item = _row_to_dict(row, cursor)
 
         try:
             parsed_tags = json.loads(item.get("tags") or "[]")
+
             item["tags"] = (
-                parsed_tags if isinstance(parsed_tags, list) else []
+                parsed_tags
+                if isinstance(parsed_tags, list)
+                else []
             )
+
         except (ValueError, TypeError):
             item["tags"] = []
 
         results.append(item)
         memory_ids.append(int(item["id"]))
 
-    # Mise à jour atomique et limitée à l'utilisateur concerné.
+    # Incrémentation atomique, limitée aux souvenirs sélectionnés.
     if memory_ids:
         db.executemany(
             """
@@ -383,10 +487,11 @@ def search_episodic_memories(
             SET access_count = access_count + 1
             WHERE user_id = ? AND id = ?
             """,
-            [(user_id, memory_id) for memory_id in memory_ids],
+            [
+                (user_id, memory_id)
+                for memory_id in memory_ids
+            ],
         )
-
-        db.commit()
 
     return results
 
@@ -405,30 +510,18 @@ def apply_memory_decay(
     - il a été consulté moins de deux fois ;
     - il n'a pas été actualisé depuis le nombre de jours indiqué.
 
-    Le seuil d'importance minimal reste fixé à 1.
-
-    La date updated_at est actualisée après la décroissance :
-    un souvenir ne perd donc pas un point à chaque passage de la boucle
-    de maintenance.
+    La date updated_at est actualisée après la décroissance.
+    Un souvenir ne perd donc pas un point à chaque passage
+    de la boucle de maintenance.
     """
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("user_id est obligatoire.")
-
-    user_id = user_id.strip()
-
-    if len(user_id) > 80:
-        raise ValueError("user_id dépasse 80 caractères.")
-
-    try:
-        days = int(days)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Le nombre de jours est invalide.") from exc
-
-    days = max(1, min(3650, days))
+    user_id = _normalize_user_id(user_id)
+    days = _normalize_limit(days, 1, 3650)
 
     cutoff = (
         datetime.now(timezone.utc) - timedelta(days=days)
     ).isoformat()
+
+    now = utc_now()
 
     cursor = db.execute(
         """
@@ -444,10 +537,8 @@ def apply_memory_decay(
                 OR julianday(updated_at) IS NULL
           )
         """,
-        (utc_now(), user_id, cutoff),
+        (now, user_id, cutoff),
     )
-
-    db.commit()
 
     return max(0, cursor.rowcount)
 
@@ -457,37 +548,64 @@ def get_memory_statistics(
     user_id: str,
 ) -> dict[str, Any]:
     """Retourne des statistiques sur les souvenirs d'un utilisateur."""
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("user_id est obligatoire.")
+    user_id = _normalize_user_id(user_id)
 
-    user_id = user_id.strip()
-
-    row = db.execute(
+    cursor = db.execute(
         """
         SELECT
             COUNT(*) AS total,
-            COALESCE(AVG(importance), 0) AS average_importance,
-            COALESCE(AVG(confidence), 0) AS average_confidence,
-            COALESCE(SUM(access_count), 0) AS total_accesses,
-            SUM(CASE WHEN importance >= 4 THEN 1 ELSE 0 END)
-                AS important_memories
+
+            COALESCE(
+                AVG(importance),
+                0
+            ) AS average_importance,
+
+            COALESCE(
+                AVG(confidence),
+                0
+            ) AS average_confidence,
+
+            COALESCE(
+                SUM(access_count),
+                0
+            ) AS total_accesses,
+
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN importance >= 4 THEN 1
+                        ELSE 0
+                    END
+                ),
+                0
+            ) AS important_memories
+
         FROM memories_v19
         WHERE user_id = ?
         """,
         (user_id,),
-    ).fetchone()
+    )
+
+    row = _row_to_dict(cursor.fetchone(), cursor)
 
     return {
         "total": int(row["total"] or 0),
+
         "average_importance": round(
-            float(row["average_importance"] or 0), 2
+            float(row["average_importance"] or 0),
+            2,
         ),
+
         "average_confidence": round(
-            float(row["average_confidence"] or 0), 3
+            float(row["average_confidence"] or 0),
+            3,
         ),
-        "total_accesses": int(row["total_accesses"] or 0),
-        "important_memories": int(row["important_memories"] or 0),
+
+        "total_accesses": int(
+            row["total_accesses"] or 0
+        ),
+
+        "important_memories": int(
+            row["important_memories"] or 0
+        ),
     }
-
-
-

@@ -1199,7 +1199,7 @@ Sélectionne une option ci-dessus.
       document.getElementById('sideMaturityText').textContent = stageText;
     }
 
-    // Fonction de synchronisation corrigée avec récupération multi-champs (Mobile + PC)
+    // Fonction de synchronisation corrigée avec support complet des modules V19.3
     async function loadSkills() {
       const out = document.getElementById('skillsOut');
       if (out) out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
@@ -1238,6 +1238,17 @@ Sélectionne une option ci-dessus.
             }
           });
 
+          // Compatibilité avec le profil cognitif asymétrique renvoyé par le backend V19.3
+          if (data.cognitive_profile && data.cognitive_profile.systems) {
+            const sys = data.cognitive_profile.systems;
+            if (sys.mots) lang = Math.max(lang, (sys.mots.average_level / 10) * 30);
+            if (sys.lien) lang = Math.max(lang, (sys.lien.average_level / 10) * 30);
+            if (sys.tete) logique = Math.max(logique, (sys.tete.average_level / 10) * 30);
+            if (sys.mains) logique = Math.max(logique, (sys.mains.average_level / 10) * 30);
+            if (sys.ame) creativite = Math.max(creativite, (sys.ame.average_level / 10) * 30);
+            if (sys.sens) perception = Math.max(perception, (sys.sens.average_level / 10) * 30);
+          }
+
           updateSkillBars(
             Math.min(30, lang), 
             Math.min(30, logique), 
@@ -1257,7 +1268,9 @@ Sélectionne une option ci-dessus.
 
     function loadGoals() {
       const out = document.getElementById('skillsOut');
-      out.textContent = "🎯 Objectifs cognitifs en cours :\n1. Enregistrer les premiers stimuli textuels et vocaux.\n2. Établir les premières connexions synaptiques.";
+      if (out) {
+        out.textContent = "🎯 Objectifs cognitifs en cours :\n1. Enregistrer les premiers stimuli textuels et vocaux.\n2. Établir les premières connexions synaptiques.";
+      }
     }
 
     // Hook automatique après l'envoi d'un message dans le chat rapide ou synchro périodique

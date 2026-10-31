@@ -1,4 +1,3 @@
-# backend/world/world_model.py
 
 """
 Chappie V19.3 — modèle du monde.
@@ -43,9 +42,11 @@ VALID_SOURCE_TYPES = {
 }
 
 DEFAULT_CONFIDENCE = 0.8
+
 MAX_ID_LENGTH = 200
 MAX_TYPE_LENGTH = 100
 MAX_PREDICATE_LENGTH = 200
+MAX_QUERY_LENGTH = 500
 
 
 # ============================================================
@@ -65,16 +66,21 @@ def _validate_text(
     """Nettoie et valide une chaîne de caractères."""
 
     if not isinstance(value, str):
-        raise ValueError(f"{field_name} doit être une chaîne de caractères.")
+        raise ValueError(
+            f"{field_name} doit être une chaîne de caractères."
+        )
 
     value = value.strip()
 
     if not value:
-        raise ValueError(f"{field_name} est obligatoire.")
+        raise ValueError(
+            f"{field_name} est obligatoire."
+        )
 
     if len(value) > max_length:
         raise ValueError(
-            f"{field_name} ne peut pas dépasser {max_length} caractères."
+            f"{field_name} ne peut pas dépasser "
+            f"{max_length} caractères."
         )
 
     return value
@@ -94,7 +100,9 @@ def _validate_source_type(source_type: str) -> str:
     """Vérifie la provenance d'une information."""
 
     if not isinstance(source_type, str):
-        raise ValueError("source_type doit être une chaîne.")
+        raise ValueError(
+            "source_type doit être une chaîne."
+        )
 
     source_type = source_type.strip().lower()
 
@@ -110,49 +118,82 @@ def _validate_source_type(source_type: str) -> str:
 def _validate_confidence(confidence: float) -> float:
     """Garantit un niveau de confiance compris entre 0 et 1."""
 
+    if isinstance(confidence, bool):
+        raise ValueError(
+            "confidence doit être un nombre."
+        )
+
     try:
         confidence = float(confidence)
-    except (TypeError, ValueError):
-        raise ValueError("confidence doit être un nombre.")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "confidence doit être un nombre."
+        ) from exc
 
     if not math.isfinite(confidence):
-        raise ValueError("confidence doit être un nombre fini.")
+        raise ValueError(
+            "confidence doit être un nombre fini."
+        )
 
-    return max(0.0, min(1.0, confidence))
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError(
+            "confidence doit être comprise entre 0 et 1."
+        )
+
+    return confidence
 
 
 def _validate_properties(
     properties: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """Valide et vérifie que les propriétés peuvent être converties en JSON."""
+    """Valide les propriétés et leur compatibilité JSON."""
 
     if properties is None:
-        properties = {}
+        return {}
 
     if not isinstance(properties, dict):
-        raise ValueError("Les propriétés doivent être un dictionnaire.")
+        raise ValueError(
+            "Les propriétés doivent être un dictionnaire."
+        )
 
     try:
-        # Vérification de la sérialisation JSON.
         json.dumps(
             properties,
             ensure_ascii=False,
             allow_nan=False
         )
+
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            f"Les propriétés contiennent une valeur non compatible JSON : {exc}"
+            "Les propriétés contiennent une valeur "
+            f"non compatible JSON : {exc}"
         ) from exc
 
     return properties
 
 
-def _row_to_dict(row: Any) -> dict[str, Any] | None:
+def _escape_like(value: str) -> str:
+    """Échappe les caractères spéciaux SQL LIKE."""
+
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
+def _row_to_dict(
+    row: Any,
+    columns: list[str] | None = None
+) -> dict[str, Any] | None:
     """
     Convertit un résultat SQLite en dictionnaire.
 
-    Compatible avec sqlite3.Row et les connexions qui retournent
-    des tuples classiques.
+    Compatible avec :
+    - sqlite3.Row ;
+    - dictionnaires ;
+    - tuples avec noms de colonnes fournis.
     """
 
     if row is None:
@@ -164,16 +205,16 @@ def _row_to_dict(row: Any) -> dict[str, Any] | None:
     if isinstance(row, dict):
         return dict(row)
 
-    if isinstance(row, tuple):
-        raise TypeError(
-            "Impossible de convertir un tuple sans connaître "
-            "les noms de colonnes."
-        )
-
-    try:
+    if hasattr(row, "keys"):
         return dict(row)
-    except (TypeError, ValueError):
-        raise TypeError("Format de résultat SQLite non pris en charge.")
+
+    if columns is not None:
+        return dict(zip(columns, row))
+
+    raise TypeError(
+        "Impossible de convertir le résultat SQLite "
+        "sans connaître les noms des colonnes."
+    )
 
 
 def _fetch_dict(
@@ -181,7 +222,7 @@ def _fetch_dict(
     query: str,
     params: tuple[Any, ...] = ()
 ) -> dict[str, Any] | None:
-    """Exécute une requête et convertit le résultat en dictionnaire."""
+    """Exécute une requête et convertit le résultat."""
 
     cursor = db.execute(query, params)
     row = cursor.fetchone()
@@ -189,12 +230,12 @@ def _fetch_dict(
     if row is None:
         return None
 
-    if isinstance(row, sqlite3.Row):
-        return dict(row)
+    columns = [
+        column[0]
+        for column in (cursor.description or [])
+    ]
 
-    columns = [column[0] for column in cursor.description]
-
-    return dict(zip(columns, row))
+    return _row_to_dict(row, columns)
 
 
 def _fetch_dicts(
@@ -210,15 +251,37 @@ def _fetch_dicts(
     if not rows:
         return []
 
-    if isinstance(rows[0], sqlite3.Row):
-        return [dict(row) for row in rows]
-
-    columns = [column[0] for column in cursor.description]
+    columns = [
+        column[0]
+        for column in (cursor.description or [])
+    ]
 
     return [
-        dict(zip(columns, row))
+        _row_to_dict(row, columns)
         for row in rows
     ]
+
+
+def _normalize_limit(
+    limit: int,
+    minimum: int = 1,
+    maximum: int = 100
+) -> int:
+    """Valide et borne une limite de résultats."""
+
+    if isinstance(limit, bool):
+        raise ValueError(
+            "limit doit être un nombre entier."
+        )
+
+    try:
+        value = int(limit)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "limit doit être un nombre entier."
+        ) from exc
+
+    return max(minimum, min(maximum, value))
 
 
 # ============================================================
@@ -236,93 +299,90 @@ def init_world_tables(db: sqlite3.Connection) -> None:
     # Active les clés étrangères pour cette connexion SQLite.
     db.execute("PRAGMA foreign_keys = ON")
 
-    db.executescript("""
-    CREATE TABLE IF NOT EXISTS world_entities (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        entity_type TEXT NOT NULL,
-        properties_json TEXT NOT NULL DEFAULT '{}',
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS world_entities (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            properties_json TEXT NOT NULL DEFAULT '{}',
 
-        source_type TEXT NOT NULL
-            CHECK(source_type IN (
-                'observed',
-                'taught',
-                'inferred',
-                'confirmed'
-            ))
-            DEFAULT 'observed',
+            source_type TEXT NOT NULL
+                CHECK(source_type IN (
+                    'observed',
+                    'taught',
+                    'inferred',
+                    'confirmed'
+                ))
+                DEFAULT 'observed',
 
-        confidence REAL NOT NULL DEFAULT 0.8
-            CHECK(confidence >= 0 AND confidence <= 1),
+            confidence REAL NOT NULL DEFAULT 0.8
+                CHECK(confidence >= 0 AND confidence <= 1),
 
-        last_observed_at TEXT NOT NULL
-    );
+            last_observed_at TEXT NOT NULL
+        );
 
+        CREATE TABLE IF NOT EXISTS world_relations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    CREATE TABLE IF NOT EXISTS world_relations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
 
-        user_id TEXT NOT NULL,
+            subject_id TEXT NOT NULL,
+            predicate TEXT NOT NULL,
+            object_id TEXT NOT NULL,
 
-        subject_id TEXT NOT NULL,
-        predicate TEXT NOT NULL,
-        object_id TEXT NOT NULL,
+            source_type TEXT NOT NULL
+                CHECK(source_type IN (
+                    'observed',
+                    'taught',
+                    'inferred',
+                    'confirmed'
+                ))
+                DEFAULT 'observed',
 
-        source_type TEXT NOT NULL
-            CHECK(source_type IN (
-                'observed',
-                'taught',
-                'inferred',
-                'confirmed'
-            ))
-            DEFAULT 'observed',
+            confidence REAL NOT NULL DEFAULT 0.8
+                CHECK(confidence >= 0 AND confidence <= 1),
 
-        confidence REAL NOT NULL DEFAULT 0.8
-            CHECK(confidence >= 0 AND confidence <= 1),
+            updated_at TEXT NOT NULL,
 
-        updated_at TEXT NOT NULL,
+            FOREIGN KEY(subject_id)
+                REFERENCES world_entities(id)
+                ON DELETE CASCADE,
 
-        FOREIGN KEY(subject_id)
-            REFERENCES world_entities(id)
-            ON DELETE CASCADE,
+            FOREIGN KEY(object_id)
+                REFERENCES world_entities(id)
+                ON DELETE CASCADE,
 
-        FOREIGN KEY(object_id)
-            REFERENCES world_entities(id)
-            ON DELETE CASCADE,
+            UNIQUE(
+                user_id,
+                subject_id,
+                predicate,
+                object_id
+            )
+        );
 
-        UNIQUE(user_id, subject_id, predicate, object_id)
-    );
+        CREATE INDEX IF NOT EXISTS idx_world_entities_user
+            ON world_entities(user_id);
 
+        CREATE INDEX IF NOT EXISTS idx_world_entities_type
+            ON world_entities(user_id, entity_type);
 
-    CREATE INDEX IF NOT EXISTS idx_world_entities_user
-        ON world_entities(user_id);
+        CREATE INDEX IF NOT EXISTS idx_world_entities_observed
+            ON world_entities(user_id, last_observed_at);
 
+        CREATE INDEX IF NOT EXISTS idx_world_relations_user
+            ON world_relations(user_id);
 
-    CREATE INDEX IF NOT EXISTS idx_world_entities_type
-        ON world_entities(user_id, entity_type);
+        CREATE INDEX IF NOT EXISTS idx_world_relations_subject
+            ON world_relations(user_id, subject_id);
 
+        CREATE INDEX IF NOT EXISTS idx_world_relations_object
+            ON world_relations(user_id, object_id);
 
-    CREATE INDEX IF NOT EXISTS idx_world_entities_observed
-        ON world_entities(user_id, last_observed_at);
-
-
-    CREATE INDEX IF NOT EXISTS idx_world_relations_user
-        ON world_relations(user_id);
-
-
-    CREATE INDEX IF NOT EXISTS idx_world_relations_subject
-        ON world_relations(user_id, subject_id);
-
-
-    CREATE INDEX IF NOT EXISTS idx_world_relations_object
-        ON world_relations(user_id, object_id);
-
-
-    CREATE INDEX IF NOT EXISTS idx_world_relations_predicate
-        ON world_relations(user_id, predicate);
-    """)
-
-    db.commit()
+        CREATE INDEX IF NOT EXISTS idx_world_relations_predicate
+            ON world_relations(user_id, predicate);
+        """
+    )
 
 
 # ============================================================
@@ -362,9 +422,7 @@ def upsert_world_entity(
     ).casefold()
 
     source_type = _validate_source_type(source_type)
-
     confidence = _validate_confidence(confidence)
-
     properties = _validate_properties(properties)
 
     props_json = json.dumps(
@@ -375,65 +433,65 @@ def upsert_world_entity(
 
     now = utc_now()
 
-    try:
-        # Vérification de la propriété de l'identifiant.
-        existing = _fetch_dict(
-            db,
-            """
-            SELECT user_id, confidence
-            FROM world_entities
-            WHERE id = ?
-            """,
-            (entity_id,)
+    # Vérification préalable de la propriété de l'entité.
+    existing = _fetch_dict(
+        db,
+        """
+        SELECT user_id, confidence
+        FROM world_entities
+        WHERE id = ?
+        """,
+        (entity_id,)
+    )
+
+    if existing and existing["user_id"] != user_id:
+        raise PermissionError(
+            "Cette entité appartient à un autre utilisateur."
         )
 
-        if existing and existing["user_id"] != user_id:
-            raise PermissionError(
-                "Cette entité appartient à un autre utilisateur."
-            )
+    db.execute(
+        """
+        INSERT INTO world_entities (
+            id,
+            user_id,
+            entity_type,
+            properties_json,
+            source_type,
+            confidence,
+            last_observed_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
 
-        db.execute("""
-            INSERT INTO world_entities (
-                id,
-                user_id,
-                entity_type,
-                properties_json,
-                source_type,
-                confidence,
-                last_observed_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
 
-            ON CONFLICT(id) DO UPDATE SET
+            entity_type = CASE
+                WHEN excluded.confidence >= world_entities.confidence
+                THEN excluded.entity_type
+                ELSE world_entities.entity_type
+            END,
 
-                entity_type = CASE
-                    WHEN excluded.confidence >= world_entities.confidence
-                    THEN excluded.entity_type
-                    ELSE world_entities.entity_type
-                END,
+            properties_json = CASE
+                WHEN excluded.confidence >= world_entities.confidence
+                THEN excluded.properties_json
+                ELSE world_entities.properties_json
+            END,
 
-                properties_json = CASE
-                    WHEN excluded.confidence >= world_entities.confidence
-                    THEN excluded.properties_json
-                    ELSE world_entities.properties_json
-                END,
+            source_type = CASE
+                WHEN excluded.confidence >= world_entities.confidence
+                THEN excluded.source_type
+                ELSE world_entities.source_type
+            END,
 
-                source_type = CASE
-                    WHEN excluded.confidence >= world_entities.confidence
-                    THEN excluded.source_type
-                    ELSE world_entities.source_type
-                END,
+            confidence = MAX(
+                world_entities.confidence,
+                excluded.confidence
+            ),
 
-                confidence = MAX(
-                    world_entities.confidence,
-                    excluded.confidence
-                ),
+            last_observed_at = excluded.last_observed_at
 
-                last_observed_at = excluded.last_observed_at
-
-            WHERE world_entities.user_id = excluded.user_id
-
-        """, (
+        WHERE world_entities.user_id = excluded.user_id
+        """,
+        (
             entity_id,
             user_id,
             entity_type,
@@ -441,13 +499,8 @@ def upsert_world_entity(
             source_type,
             confidence,
             now
-        ))
-
-        db.commit()
-
-    except Exception:
-        db.rollback()
-        raise
+        )
+    )
 
     result = get_world_entity(
         db,
@@ -502,7 +555,7 @@ def get_world_entity(
 
     try:
         properties = json.loads(
-            item.get("properties_json", "{}")
+            item.get("properties_json") or "{}"
         )
 
         if not isinstance(properties, dict):
@@ -512,7 +565,6 @@ def get_world_entity(
         properties = {}
 
     item["properties"] = properties
-
     item.pop("properties_json", None)
 
     return item
@@ -566,79 +618,79 @@ def add_world_relation(
     )
 
     source_type = _validate_source_type(source_type)
-
     confidence = _validate_confidence(confidence)
 
     now = utc_now()
 
-    try:
-        # Vérifie que le sujet appartient bien à l'utilisateur.
-        subject = _fetch_dict(
-            db,
-            """
-            SELECT id
-            FROM world_entities
-            WHERE id = ? AND user_id = ?
-            """,
-            (subject_id, user_id)
+    # Vérification du sujet.
+    subject = _fetch_dict(
+        db,
+        """
+        SELECT id
+        FROM world_entities
+        WHERE id = ? AND user_id = ?
+        """,
+        (subject_id, user_id)
+    )
+
+    if subject is None:
+        raise ValueError(
+            f"Le sujet '{subject_id}' n'existe pas "
+            "dans le modèle du monde de cet utilisateur."
         )
 
-        if subject is None:
-            raise ValueError(
-                f"Le sujet '{subject_id}' n'existe pas "
-                "dans le modèle du monde de cet utilisateur."
-            )
+    # Vérification de l'objet.
+    obj = _fetch_dict(
+        db,
+        """
+        SELECT id
+        FROM world_entities
+        WHERE id = ? AND user_id = ?
+        """,
+        (object_id, user_id)
+    )
 
-        # Vérifie que l'objet appartient bien à l'utilisateur.
-        obj = _fetch_dict(
-            db,
-            """
-            SELECT id
-            FROM world_entities
-            WHERE id = ? AND user_id = ?
-            """,
-            (object_id, user_id)
+    if obj is None:
+        raise ValueError(
+            f"L'objet '{object_id}' n'existe pas "
+            "dans le modèle du monde de cet utilisateur."
         )
 
-        if obj is None:
-            raise ValueError(
-                f"L'objet '{object_id}' n'existe pas "
-                "dans le modèle du monde de cet utilisateur."
-            )
+    db.execute(
+        """
+        INSERT INTO world_relations (
+            user_id,
+            subject_id,
+            predicate,
+            object_id,
+            source_type,
+            confidence,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
 
-        db.execute("""
-            INSERT INTO world_relations (
-                user_id,
-                subject_id,
-                predicate,
-                object_id,
-                source_type,
-                confidence,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(
+            user_id,
+            subject_id,
+            predicate,
+            object_id
+        )
+        DO UPDATE SET
 
-            ON CONFLICT(
-                user_id,
-                subject_id,
-                predicate,
-                object_id
-            )
-            DO UPDATE SET
+            source_type = CASE
+                WHEN excluded.confidence >= world_relations.confidence
+                THEN excluded.source_type
+                ELSE world_relations.source_type
+            END,
 
-                source_type = CASE
-                    WHEN excluded.confidence >= world_relations.confidence
-                    THEN excluded.source_type
-                    ELSE world_relations.source_type
-                END,
+            confidence = MAX(
+                world_relations.confidence,
+                excluded.confidence
+            ),
 
-                confidence = MAX(
-                    world_relations.confidence,
-                    excluded.confidence
-                ),
-
-                updated_at = excluded.updated_at
-        """, (
+            updated_at = excluded.updated_at
+        """,
+        (
             user_id,
             subject_id,
             predicate,
@@ -646,13 +698,8 @@ def add_world_relation(
             source_type,
             confidence,
             now
-        ))
-
-        db.commit()
-
-    except Exception:
-        db.rollback()
-        raise
+        )
+    )
 
     result = _fetch_dict(
         db,
@@ -703,13 +750,6 @@ def get_entity_relations(
     L'entité peut être :
     - Le sujet de la relation.
     - L'objet de la relation.
-
-    Exemple :
-
-        Chappie -> connaît -> Julien
-        Julien -> possède -> voiture
-
-    Si entity_id correspond à Julien, les deux relations sont retournées.
     """
 
     user_id = _validate_user_id(user_id)
@@ -720,7 +760,7 @@ def get_entity_relations(
         MAX_ID_LENGTH
     )
 
-    rows = _fetch_dicts(
+    return _fetch_dicts(
         db,
         """
         SELECT
@@ -750,8 +790,6 @@ def get_entity_relations(
         )
     )
 
-    return rows
-
 
 # ============================================================
 # RECHERCHE DES ENTITÉS
@@ -771,24 +809,21 @@ def search_world_entities(
     - L'identifiant.
     - Le type.
     - Les propriétés JSON.
-
-    Cette fonction est complémentaire aux fonctions existantes.
     """
 
     user_id = _validate_user_id(user_id)
 
-    query = _validate_text(
-        query,
-        "query",
-        500
-    ).casefold()
+    if not isinstance(query, str):
+        raise ValueError(
+            "query doit être une chaîne de caractères."
+        )
 
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        raise ValueError("limit doit être un nombre entier.")
+    query = query.strip()
 
-    limit = max(1, min(100, limit))
+    if len(query) > MAX_QUERY_LENGTH:
+        query = query[:MAX_QUERY_LENGTH]
+
+    limit = _normalize_limit(limit, 1, 100)
 
     params: list[Any] = [user_id]
 
@@ -798,7 +833,7 @@ def search_world_entities(
         WHERE user_id = ?
     """
 
-    if entity_type:
+    if entity_type is not None:
         entity_type = _validate_text(
             entity_type,
             "entity_type",
@@ -808,24 +843,29 @@ def search_world_entities(
         sql += " AND entity_type = ?"
         params.append(entity_type)
 
+    if query:
+        search_pattern = f"%{_escape_like(query.casefold())}%"
+
+        sql += """
+            AND (
+                LOWER(id) LIKE ? ESCAPE '\\'
+                OR LOWER(entity_type) LIKE ? ESCAPE '\\'
+                OR LOWER(properties_json) LIKE ? ESCAPE '\\'
+            )
+        """
+
+        params.extend([
+            search_pattern,
+            search_pattern,
+            search_pattern
+        ])
+
     sql += """
-        AND (
-            LOWER(id) LIKE ?
-            OR LOWER(entity_type) LIKE ?
-            OR LOWER(properties_json) LIKE ?
-        )
         ORDER BY last_observed_at DESC
         LIMIT ?
     """
 
-    search_pattern = f"%{query}%"
-
-    params.extend([
-        search_pattern,
-        search_pattern,
-        search_pattern,
-        limit
-    ])
+    params.append(limit)
 
     rows = _fetch_dicts(
         db,
@@ -833,12 +873,12 @@ def search_world_entities(
         tuple(params)
     )
 
-    results = []
+    results: list[dict[str, Any]] = []
 
     for item in rows:
         try:
             properties = json.loads(
-                item.get("properties_json", "{}")
+                item.get("properties_json") or "{}"
             )
 
             if not isinstance(properties, dict):
@@ -936,13 +976,10 @@ def get_world_statistics(
     )
 
     return {
-        "entity_count": entity_count,
-        "relation_count": relation_count,
+        "entity_count": int(entity_count or 0),
+        "relation_count": int(relation_count or 0),
         "entity_types": entity_types,
         "entity_sources": sources,
         "relation_sources": relation_sources,
         "generated_at": utc_now()
     }
-
-
-

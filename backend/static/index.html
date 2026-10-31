@@ -1,10 +1,12 @@
+
 <!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#070b14">
-  <title>Chappie V19.3 — Dashboard avancé</title>
+  <meta name="description" content="Interface cognitive et interactive de Chappie V19.3">
+  <title>Chappie V19.3 — Interface cognitive</title>
 
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 
@@ -20,10 +22,20 @@
       --text-muted:#94a3b8;
       --danger:#ef4444;
       --success:#10b981;
+      --warning:#f59e0b;
     }
 
-    * { box-sizing:border-box; margin:0; padding:0; }
-    html { min-height:100%; background:var(--bg); }
+    * {
+      box-sizing:border-box;
+      margin:0;
+      padding:0;
+    }
+
+    html {
+      min-height:100%;
+      background:var(--bg);
+      scroll-behavior:smooth;
+    }
 
     body {
       font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -35,16 +47,25 @@
       overflow:hidden;
     }
 
-    button,input,textarea { font:inherit; }
-    button { -webkit-tap-highlight-color:transparent; }
+    button,input,textarea {
+      font:inherit;
+    }
+
+    button {
+      -webkit-tap-highlight-color:transparent;
+    }
+
+    /* =========================
+       NAVIGATION PC
+    ========================= */
 
     aside {
-      width:260px;
+      width:250px;
       background:var(--sidebar-bg);
       border-right:1px solid var(--card-border);
       display:flex;
       flex-direction:column;
-      padding:16px;
+      padding:18px 14px;
       flex-shrink:0;
       overflow-y:auto;
     }
@@ -52,38 +73,48 @@
     .brand {
       display:flex;
       align-items:center;
-      gap:10px;
-      margin-bottom:20px;
+      gap:11px;
+      padding:4px 5px 20px;
+      margin-bottom:12px;
+      border-bottom:1px solid var(--card-border);
     }
 
     .brand img {
-      width:42px;
-      height:42px;
-      border-radius:10px;
+      width:45px;
+      height:45px;
+      border-radius:12px;
       object-fit:cover;
       border:1px solid var(--cyan);
     }
 
-    .brand h2 { font-size:1.15rem; font-weight:700; color:#fff; }
-    .brand p { font-size:.68rem; color:var(--text-muted); }
+    .brand h2 {
+      font-size:1.15rem;
+      font-weight:750;
+    }
+
+    .brand p {
+      color:var(--text-muted);
+      font-size:.68rem;
+      margin-top:2px;
+    }
 
     .nav-menu {
       display:flex;
       flex-direction:column;
-      gap:4px;
+      gap:5px;
       flex-grow:1;
     }
 
     .nav-item {
       display:flex;
       align-items:center;
-      gap:10px;
-      padding:10px 12px;
+      gap:11px;
+      padding:12px;
       color:var(--text-muted);
       text-decoration:none;
       border-radius:10px;
-      font-weight:500;
-      font-size:.85rem;
+      font-weight:550;
+      font-size:.84rem;
       cursor:pointer;
       border:0;
       background:transparent;
@@ -94,94 +125,374 @@
 
     .nav-item:hover,
     .nav-item.active {
-      background:var(--accent);
+      background:#2563eb;
       color:#fff;
-      box-shadow:0 0 15px #2563eb66;
+      box-shadow:0 0 15px #2563eb55;
     }
+
+    .nav-icon {
+      width:22px;
+      text-align:center;
+      font-size:1.05rem;
+    }
+
+    .token-area {
+      margin-top:16px;
+      padding-top:14px;
+      border-top:1px solid var(--card-border);
+    }
+
+    /* =========================
+       STRUCTURE PRINCIPALE
+    ========================= */
 
     main {
       flex:1;
       min-width:0;
       overflow-y:auto;
       padding:20px;
-      display:grid;
-      grid-template-columns:minmax(0,1fr);
-      gap:20px;
       overscroll-behavior:contain;
     }
 
-    main.has-sidebar {
-      grid-template-columns:minmax(0,1fr) 340px;
+    .main-content {
+      width:100%;
+      max-width:1500px;
+      margin:0 auto;
+      display:flex;
+      flex-direction:column;
+      gap:17px;
+      min-width:0;
     }
 
-    .main-content {
+    .topbar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:5px 2px 12px;
+      border-bottom:1px solid var(--card-border);
+    }
+
+    .topbar-title {
+      min-width:0;
+    }
+
+    .topbar h1 {
+      font-size:1.2rem;
+      font-weight:750;
+    }
+
+    .topbar p {
+      color:var(--text-muted);
+      font-size:.72rem;
+      margin-top:3px;
+    }
+
+    .system-status {
+      display:flex;
+      align-items:center;
+      gap:7px;
+      font-size:.72rem;
+      color:var(--cyan);
+      white-space:nowrap;
+    }
+
+    .status-dot {
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:var(--success);
+      box-shadow:0 0 10px var(--success);
+    }
+
+    .tab-section {
+      display:none;
+      min-width:0;
+    }
+
+    .tab-section.active {
       display:flex;
       flex-direction:column;
       gap:16px;
-      min-width:0;
+      animation:pageIn .25s ease;
     }
 
-    .side-column {
-      display:none;
-      flex-direction:column;
-      gap:16px;
-      min-width:0;
+    @keyframes pageIn {
+      from { opacity:0; transform:translateY(5px); }
+      to { opacity:1; transform:translateY(0); }
     }
 
-    main.has-sidebar .side-column { display:flex; }
+    /* =========================
+       PANELS
+    ========================= */
 
     .panel {
       min-width:0;
       background:var(--card-bg);
       border:1px solid var(--card-border);
-      border-radius:14px;
-      padding:16px;
-      box-shadow:0 4px 20px #0000004d;
+      border-radius:15px;
+      padding:17px;
+      box-shadow:0 4px 20px #00000035;
     }
 
     .panel h3 {
-      font-size:.95rem;
-      margin-bottom:12px;
+      font-size:.94rem;
+      margin-bottom:13px;
       color:var(--cyan);
       display:flex;
       align-items:center;
       gap:8px;
     }
 
+    .panel h4 {
+      font-size:.84rem;
+      margin-bottom:8px;
+      color:#e2e8f0;
+    }
+
+    .muted {
+      color:var(--text-muted);
+      font-size:.77rem;
+      line-height:1.55;
+    }
+
+    .small-label {
+      display:block;
+      color:var(--text-muted);
+      font-size:.7rem;
+      margin-bottom:5px;
+    }
+
+    /* =========================
+       ACCUEIL
+    ========================= */
+
     .hero-card {
       display:flex;
       flex-direction:column;
-      gap:12px;
-      background:linear-gradient(135deg,#101826f2,#1e293be6);
-      border-color:#06b6d44d;
+      gap:15px;
+      background:
+        radial-gradient(ellipse at 90% 10%,#123d5c 0%,transparent 45%),
+        linear-gradient(135deg,#101826,#0b1a2c);
+      border-color:#06b6d455;
+      overflow:hidden;
     }
 
-    .hero-top { display:flex; align-items:center; gap:14px; }
+    .hero-top {
+      display:flex;
+      align-items:center;
+      gap:15px;
+    }
 
     .hero-avatar {
-      width:70px;
-      height:70px;
-      border-radius:14px;
+      width:78px;
+      height:78px;
+      border-radius:17px;
       background:#070b14;
       overflow:hidden;
       border:2px solid var(--cyan);
       flex-shrink:0;
+      box-shadow:0 0 22px #06b6d455;
     }
 
-    .hero-avatar img { width:100%; height:100%; object-fit:cover; }
-    .hero-info h2 { font-size:1.2rem; margin-bottom:4px; color:#fff; }
-    .hero-info p { color:var(--text-muted); font-size:.78rem; line-height:1.4; }
-    .badges { display:flex; gap:6px; flex-wrap:wrap; }
+    .hero-avatar img {
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+
+    .hero-info h2 {
+      font-size:1.35rem;
+      margin-bottom:5px;
+    }
+
+    .hero-info p {
+      color:#cbd5e1;
+      font-size:.8rem;
+      line-height:1.5;
+    }
+
+    .badges {
+      display:flex;
+      gap:7px;
+      flex-wrap:wrap;
+    }
 
     .badge {
-      font-size:.65rem;
+      font-size:.68rem;
       background:#06b6d41a;
-      padding:4px 10px;
+      padding:6px 11px;
       border-radius:20px;
-      border:1px solid #06b6d44d;
+      border:1px solid #06b6d455;
       color:var(--cyan);
-      font-weight:500;
+      font-weight:600;
     }
+
+    .stat-cards {
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:10px;
+    }
+
+    .stat-card {
+      background:#070b14;
+      padding:13px 9px;
+      border-radius:12px;
+      border:1px solid var(--card-border);
+      min-width:0;
+      text-align:center;
+    }
+
+    .stat-card .stat-name {
+      font-size:.7rem;
+      color:var(--text-muted);
+    }
+
+    .stat-card .stat-value {
+      font-size:1.2rem;
+      font-weight:750;
+      margin-top:5px;
+    }
+
+    .home-grid {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:14px;
+    }
+
+    .info-card {
+      background:#070b14;
+      border:1px solid var(--card-border);
+      border-radius:12px;
+      padding:13px;
+      min-width:0;
+    }
+
+    .info-card .value {
+      font-size:1.2rem;
+      font-weight:750;
+      color:var(--cyan);
+      margin-top:5px;
+    }
+
+    /* =========================
+       BOUTONS ET FORMULAIRES
+    ========================= */
+
+    .row-btns {
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+
+    .row-btns.center {
+      justify-content:center;
+    }
+
+    button {
+      padding:10px 14px;
+      border:0;
+      border-radius:10px;
+      background:var(--accent);
+      color:#fff;
+      font-weight:650;
+      font-size:.79rem;
+      cursor:pointer;
+      transition:filter .2s,transform .15s;
+    }
+
+    button:hover {
+      filter:brightness(1.15);
+    }
+
+    button:active {
+      transform:scale(.98);
+    }
+
+    button.secondary {
+      background:#1e293b;
+      border:1px solid var(--card-border);
+    }
+
+    button.danger {
+      background:var(--danger);
+    }
+
+    button:disabled {
+      opacity:.45;
+      cursor:not-allowed;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+      outline:2px solid var(--cyan);
+      outline-offset:2px;
+    }
+
+    input,textarea {
+      width:100%;
+      padding:11px 12px;
+      background:#070b14;
+      color:var(--text);
+      border:1px solid var(--card-border);
+      border-radius:10px;
+      font-size:.84rem;
+      margin-top:4px;
+      outline:none;
+    }
+
+    input:focus,textarea:focus {
+      border-color:var(--cyan);
+    }
+
+    textarea {
+      resize:vertical;
+      min-height:65px;
+    }
+
+    /* =========================
+       BARRES DE PROGRESSION
+    ========================= */
+
+    .stat-item {
+      margin-bottom:15px;
+    }
+
+    .stat-header {
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      font-size:.77rem;
+      margin-bottom:7px;
+      color:var(--text-muted);
+      font-weight:600;
+    }
+
+    .stat-header span:last-child {
+      color:var(--cyan);
+      font-family:monospace;
+      white-space:nowrap;
+    }
+
+    .bar-bg {
+      background:#070b14;
+      border-radius:7px;
+      height:10px;
+      overflow:hidden;
+      border:1px solid var(--card-border);
+    }
+
+    .bar-fill {
+      height:100%;
+      border-radius:7px;
+      transition:width .6s ease;
+    }
+
+    /* =========================
+       VUE 3D
+    ========================= */
 
     @keyframes holoGlow {
       0%,100% {
@@ -189,23 +500,23 @@
         border-color:var(--cyan);
       }
       50% {
-        box-shadow:0 0 35px #2563ebe6,inset 0 0 25px #06b6d499;
+        box-shadow:0 0 32px #2563ebe0,inset 0 0 25px #06b6d499;
         border-color:#3b82f6;
       }
     }
 
     @keyframes scanMove {
       0% { transform:translateY(-100%); }
-      100% { transform:translateY(260%); }
+      100% { transform:translateY(400%); }
     }
 
     .robot-stage {
       position:relative;
       width:100%;
-      max-width:560px;
-      height:clamp(280px,48vh,520px);
-      margin:8px auto 12px;
-      border-radius:22px;
+      max-width:650px;
+      height:clamp(300px,58vh,570px);
+      margin:12px auto;
+      border-radius:20px;
       border:1px solid #06b6d466;
       overflow:hidden;
       isolation:isolate;
@@ -220,7 +531,7 @@
       inset:0;
       z-index:1;
       pointer-events:none;
-      opacity:.28;
+      opacity:.22;
       background:linear-gradient(transparent 49%,#06b6d42b 50%,transparent 51%);
       background-size:100% 7px;
     }
@@ -252,102 +563,121 @@
 
     .model-caption {
       color:var(--text-muted);
-      font-size:.74rem;
-      line-height:1.45;
-      max-width:620px;
-      margin:0 auto 10px;
+      font-size:.75rem;
+      line-height:1.5;
+      max-width:650px;
+      margin:0 auto 12px;
     }
 
     .model-help {
       color:#fbbf24;
       font-size:.72rem;
-      line-height:1.45;
-      margin:8px auto 0;
-      max-width:620px;
+      line-height:1.5;
+      margin:12px auto 0;
+      max-width:650px;
     }
 
-    .row-btns {
+    /* =========================
+       VOIX ET ONDE AUDIO
+    ========================= */
+
+    .voice-visual {
+      min-height:230px;
+      border:1px solid #06b6d455;
+      border-radius:17px;
+      background:
+        radial-gradient(ellipse at center,#123d5c 0%,#0b1a2c 45%,#070b14 100%);
       display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      margin-top:10px;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:17px;
+      overflow:hidden;
+      position:relative;
     }
 
-    .row-btns.center { justify-content:center; }
-    .row-btns button { flex:0 0 auto; }
+    .voice-core {
+      width:90px;
+      height:90px;
+      border-radius:50%;
+      border:2px solid var(--cyan);
+      display:grid;
+      place-items:center;
+      color:var(--cyan);
+      font-size:2rem;
+      background:#06b6d41a;
+      box-shadow:0 0 30px #06b6d455,inset 0 0 20px #06b6d433;
+      animation:corePulse 2s ease-in-out infinite;
+    }
 
-    button {
-      padding:9px 14px;
-      border:0;
+    @keyframes corePulse {
+      0%,100% { transform:scale(.96); box-shadow:0 0 20px #06b6d455; }
+      50% { transform:scale(1.05); box-shadow:0 0 40px #06b6d499; }
+    }
+
+    .waveform {
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:5px;
+      height:55px;
+    }
+
+    .waveform span {
+      display:block;
+      width:5px;
+      height:12px;
       border-radius:10px;
-      background:var(--accent);
-      color:#fff;
-      font-weight:600;
-      font-size:.8rem;
-      cursor:pointer;
-      transition:filter .2s,transform .15s;
+      background:var(--cyan);
+      box-shadow:0 0 9px #06b6d4aa;
+      animation:wave 1s ease-in-out infinite;
     }
 
-    button:hover { filter:brightness(1.15); }
-    button:active { transform:scale(.98); }
+    .waveform span:nth-child(2n) { animation-delay:.15s; }
+    .waveform span:nth-child(3n) { animation-delay:.3s; }
+    .waveform span:nth-child(4n) { animation-delay:.45s; }
+    .waveform span:nth-child(5n) { animation-delay:.6s; }
 
-    button.secondary {
-      background:#1e293b;
-      border:1px solid var(--card-border);
+    @keyframes wave {
+      0%,100% { height:10px; opacity:.55; }
+      50% { height:48px; opacity:1; }
     }
 
-    button.danger {
-      background:var(--danger);
-      box-shadow:0 0 10px #ef44444d;
+    .voice-caption {
+      color:var(--cyan);
+      font-size:.75rem;
+      letter-spacing:.08em;
+      text-transform:uppercase;
     }
 
-    button:focus-visible,
-    input:focus-visible,
-    textarea:focus-visible {
-      outline:2px solid var(--cyan);
-      outline-offset:2px;
-    }
-
-    input,textarea {
-      width:100%;
-      padding:10px 12px;
-      background:#070b14;
-      color:var(--text);
-      border:1px solid var(--card-border);
-      border-radius:10px;
-      font-size:.85rem;
-      margin-top:4px;
-      outline:none;
-      transition:border .2s;
-    }
-
-    input:focus,textarea:focus { border-color:var(--cyan); }
-    textarea { resize:vertical; }
+    /* =========================
+       CHAT ET TRANSCRIPTIONS
+    ========================= */
 
     .chat-container {
       display:flex;
       flex-direction:column;
-      gap:8px;
-      margin-bottom:10px;
-      max-height:240px;
+      gap:9px;
+      margin-bottom:12px;
+      max-height:350px;
       overflow-y:auto;
-      padding-right:4px;
+      padding:5px;
     }
 
     .msg-bubble {
-      padding:10px 14px;
-      border-radius:12px;
-      font-size:.85rem;
+      padding:11px 14px;
+      border-radius:13px;
+      font-size:.84rem;
       max-width:90%;
-      line-height:1.4;
+      line-height:1.5;
       overflow-wrap:anywhere;
+      white-space:pre-wrap;
     }
 
     .msg-user {
       background:var(--accent);
       color:#fff;
       align-self:flex-end;
-      box-shadow:0 2px 10px #2563eb4d;
     }
 
     .msg-chappie {
@@ -360,124 +690,192 @@
     .status {
       font-size:.75rem;
       color:var(--cyan);
-      margin-top:6px;
+      margin-top:8px;
       overflow-wrap:anywhere;
     }
 
-    .stat-item { margin-bottom:12px; }
-
-    .stat-header {
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      font-size:.78rem;
-      margin-bottom:6px;
-      color:var(--text-muted);
-      font-weight:600;
-    }
-
-    .stat-header span:last-child {
-      color:var(--cyan);
-      font-family:monospace;
-    }
-
-    .bar-bg {
+    .output {
+      margin-top:10px;
+      min-height:100px;
+      font-size:.8rem;
+      line-height:1.55;
       background:#070b14;
-      border-radius:6px;
-      height:10px;
-      overflow:hidden;
       border:1px solid var(--card-border);
+      padding:12px;
+      border-radius:10px;
+      overflow-wrap:anywhere;
+      white-space:pre-wrap;
     }
 
-    .bar-fill { height:100%; border-radius:6px; transition:width 0.6s ease-in-out; }
+    /* =========================
+       CAMÉRA
+    ========================= */
 
     video {
       width:100%;
-      max-height:280px;
+      max-height:350px;
       background:#070b14;
-      border-radius:10px;
+      border-radius:12px;
       object-fit:cover;
       margin-top:8px;
       border:1px solid var(--card-border);
     }
 
-    pre {
-      white-space:pre-wrap;
-      overflow-wrap:anywhere;
-      word-break:break-word;
-    }
+    /* =========================
+       ARBRE COGNITIF
+    ========================= */
 
-    .output {
-      margin-top:8px;
-      min-height:120px;
-      font-size:.8rem;
-      background:#070b14;
-      padding:10px;
-      border-radius:8px;
-      overflow-x:auto;
-    }
-
-    .tab-section { display:none; min-width:0; }
-
-    .tab-section.active {
-      display:flex;
-      flex-direction:column;
-      gap:16px;
-    }
-
-    .mobile-bottom-nav { display:none; }
-    .token-area { margin-top:10px; padding-top:10px; border-top:1px solid var(--card-border); }
-    .muted { color:var(--text-muted); font-size:.78rem; line-height:1.45; }
-
-    .stat-cards {
+    .skills-grid {
       display:grid;
-      grid-template-columns:repeat(3,minmax(0,1fr));
-      gap:10px;
-      text-align:center;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:12px;
     }
 
-    .stat-card {
+    .skill-node {
       background:#070b14;
-      padding:10px;
-      border-radius:10px;
       border:1px solid var(--card-border);
+      border-radius:12px;
+      padding:13px;
       min-width:0;
     }
 
-    .stat-card .stat-name { font-size:.7rem; color:var(--text-muted); }
-    .stat-card .stat-value { font-size:1.05rem; font-weight:bold; margin-top:4px; }
+    .skill-node h4 {
+      color:#e2e8f0;
+      font-size:.82rem;
+      margin-bottom:9px;
+    }
+
+    .skill-children {
+      display:flex;
+      flex-wrap:wrap;
+      gap:5px;
+      margin-top:10px;
+    }
+
+    .skill-child {
+      font-size:.65rem;
+      padding:4px 7px;
+      border-radius:7px;
+      background:#172235;
+      color:#a5c8e8;
+      border:1px solid #263b56;
+    }
+
+    .tree-note {
+      border-left:3px solid var(--warning);
+      padding:10px 12px;
+      background:#f59e0b0c;
+      border-radius:0 8px 8px 0;
+    }
+
+    /* =========================
+       MONDE
+    ========================= */
+
+    .world-placeholder {
+      min-height:190px;
+      padding:25px;
+      background:
+        radial-gradient(ellipse at center,#123d5c 0%,#070b14 75%);
+      border:1px dashed #2563eb88;
+      border-radius:14px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:center;
+      text-align:center;
+      gap:10px;
+    }
+
+    .world-icon {
+      font-size:2.6rem;
+    }
+
+    .world-grid {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:12px;
+    }
+
+    /* =========================
+       MÉMOIRE / RÉGLAGES
+    ========================= */
+
+    .danger-zone {
+      margin-top:15px;
+      padding-top:15px;
+      border-top:1px solid #ef444455;
+    }
+
+    .danger-zone h3 {
+      color:var(--danger);
+    }
+
+    /* =========================
+       MOBILE
+    ========================= */
+
+    .mobile-bottom-nav {
+      display:none;
+    }
 
     @media (max-width:1000px) {
-      body { display:block; height:100dvh; min-height:0; overflow:hidden; }
-      aside { display:none; }
-
-      main,main.has-sidebar {
+      body {
         display:block;
-        height:calc(100dvh - 75px);
+        height:100dvh;
+        min-height:0;
+        overflow:hidden;
+      }
+
+      aside {
+        display:none;
+      }
+
+      main {
+        display:block;
+        height:calc(100dvh - 76px);
         overflow-y:auto;
         padding:12px;
-        padding-bottom:calc(94px + env(safe-area-inset-bottom));
+        padding-bottom:calc(100px + env(safe-area-inset-bottom));
         scroll-padding-bottom:100px;
       }
 
-      .main-content { gap:12px; }
-      main.has-sidebar .side-column,.side-column { display:none!important; }
+      .main-content {
+        gap:12px;
+      }
+
+      .topbar {
+        padding:5px 2px 12px;
+      }
+
+      .topbar h1 {
+        font-size:1.05rem;
+      }
+
+      .panel {
+        padding:14px;
+        margin-bottom:12px;
+      }
+
+      .tab-section.active {
+        gap:0;
+      }
 
       .mobile-bottom-nav {
         position:fixed;
         bottom:0;
         left:0;
         width:100%;
-        height:calc(75px + env(safe-area-inset-bottom));
-        padding:0 8px env(safe-area-inset-bottom);
-        background:#0b1322f2;
-        backdrop-filter:blur(12px);
+        height:calc(76px + env(safe-area-inset-bottom));
+        padding:0 6px env(safe-area-inset-bottom);
+        background:#0b1322f5;
+        backdrop-filter:blur(14px);
         border-top:1px solid var(--card-border);
         display:flex;
         justify-content:space-around;
         align-items:center;
         z-index:1000;
-        gap:4px;
+        gap:3px;
       }
 
       .mobile-nav-btn {
@@ -488,49 +886,93 @@
         flex-direction:column;
         align-items:center;
         justify-content:center;
-        gap:4px;
-        font-size:.66rem;
-        cursor:pointer;
-        width:20%;
+        gap:5px;
+        font-size:.62rem;
+        width:19%;
         padding:6px 0;
-        min-height:48px;
+        min-height:50px;
       }
 
-      .mobile-nav-btn.active { color:var(--cyan); }
-      .mobile-nav-btn span.icon { font-size:1.2rem; line-height:1; }
+      .mobile-nav-btn.active {
+        color:var(--cyan);
+      }
+
+      .mobile-nav-btn .icon {
+        font-size:1.2rem;
+        line-height:1;
+      }
 
       .mobile-mic-btn {
-        background:radial-gradient(circle,#3b82f6 0%,#1d4ed8 100%);
-        width:50px;
-        height:50px;
-        min-width:50px;
+        background:radial-gradient(circle,#3b82f6,#1d4ed8);
+        width:49px;
+        height:49px;
+        min-width:49px;
         border-radius:50%;
         display:flex;
         align-items:center;
         justify-content:center;
         border:2px solid var(--cyan);
         box-shadow:0 0 20px #06b6d499;
-        margin-top:-18px;
+        margin-top:-17px;
         color:#fff;
-        font-size:1.25rem;
-        cursor:pointer;
+        font-size:1.2rem;
       }
 
-      .mobile-mic-btn.active { box-shadow:0 0 30px #06b6d4e6; }
-      .robot-stage { height:clamp(280px,48dvh,460px); border-radius:18px; }
-      .panel { padding:14px; margin-bottom:12px; }
-      .tab-section.active { gap:0; }
-      .row-btns button { flex:1 1 auto; }
-      #section-accueil .stat-cards { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .mobile-mic-btn.active {
+        box-shadow:0 0 30px #06b6d4e6;
+      }
+
+      .robot-stage {
+        height:clamp(300px,55dvh,470px);
+        border-radius:17px;
+      }
+
+      .row-btns button {
+        flex:1 1 auto;
+      }
+
+      .skills-grid {
+        grid-template-columns:1fr;
+      }
+
+      .home-grid {
+        grid-template-columns:1fr 1fr;
+      }
     }
 
     @media (max-width:380px) {
-      .stat-cards { gap:5px; }
-      .stat-card { padding:8px 4px; }
-      .hero-avatar { width:58px; height:58px; }
-      .panel { padding:12px; }
-      .robot-stage { height:300px; }
-      button { padding:9px 10px; }
+      .stat-cards {
+        gap:5px;
+      }
+
+      .stat-card {
+        padding:10px 4px;
+      }
+
+      .hero-avatar {
+        width:60px;
+        height:60px;
+      }
+
+      .panel {
+        padding:12px;
+      }
+
+      .hero-info h2 {
+        font-size:1.1rem;
+      }
+
+      .robot-stage {
+        height:310px;
+      }
+
+      button {
+        padding:9px 10px;
+      }
+
+      .world-grid {
+        grid-template-columns:1fr;
+      }
     }
 
     @media (prefers-reduced-motion:reduce) {
@@ -542,67 +984,135 @@
     }
   </style>
 </head>
+
 <body>
-    <!-- BARRE LATÉRALE PC -->
+
+  <!-- =========================
+       NAVIGATION PC
+  ========================= -->
+
   <aside>
     <div class="brand">
       <img src="/hero.png" alt="Portrait de Chappie" onerror="this.style.display='none'">
       <div>
-        <h2>Chappie</h2>
-        <p>Compagnon V19.3</p>
+        <h2>CHAPPIE</h2>
+        <p>Compagnon cognitif · V19.3</p>
       </div>
     </div>
 
     <nav class="nav-menu" aria-label="Navigation principale">
-      <button class="nav-item" onclick="switchTab('accueil',this)">🏠 Accueil</button>
-      <button class="nav-item" onclick="switchTab('chappie-3d',this)">🤖 Visuel &amp; 3D</button>
-      <button class="nav-item" onclick="switchTab('media',this)">🎙️ Voix &amp; Vision</button>
-      <button class="nav-item" onclick="switchTab('chat',this)">💬 Chat &amp; Direct</button>
-      <button class="nav-item" onclick="switchTab('skills',this)">🎓 Arbre Compétences</button>
-      <button class="nav-item" onclick="switchTab('world',this)">🌍 Monde</button>
-      <button class="nav-item" onclick="switchTab('memory',this)">🌙 Rêves &amp; Pensées</button>
-      <button class="nav-item" onclick="switchTab('params',this)">⚙️ Paramètres</button>
+      <button class="nav-item active" onclick="switchTab('accueil',this)">
+        <span class="nav-icon">🏠</span> Accueil
+      </button>
+
+      <button class="nav-item" onclick="switchTab('chappie-3d',this)">
+        <span class="nav-icon">🤖</span> Visuel &amp; 3D
+      </button>
+
+      <button class="nav-item" onclick="switchTab('media',this)">
+        <span class="nav-icon">🎙️</span> Voix &amp; Vision
+      </button>
+
+      <button class="nav-item" onclick="switchTab('chat',this)">
+        <span class="nav-icon">💬</span> Chat &amp; Direct
+      </button>
+
+      <button class="nav-item" onclick="switchTab('skills',this)">
+        <span class="nav-icon">🎓</span> Arbre de compétences
+      </button>
+
+      <button class="nav-item" onclick="switchTab('world',this)">
+        <span class="nav-icon">🌍</span> Monde
+      </button>
+
+      <button class="nav-item" onclick="switchTab('memory',this)">
+        <span class="nav-icon">🌙</span> Rêves &amp; Pensées
+      </button>
     </nav>
 
     <div class="token-area">
-      <label for="token" style="font-size:.7rem;color:var(--text-muted)">🔑 Jeton API</label>
-      <input id="token" type="password" autocomplete="off"
-             placeholder="CHAPPIE_API_TOKEN" oninput="syncTokens(this.value)">
+      <label for="token" class="small-label">🔑 Jeton API</label>
+      <input
+        id="token"
+        type="password"
+        autocomplete="off"
+        placeholder="CHAPPIE_API_TOKEN"
+        oninput="syncTokens(this.value)">
+      <p class="muted" style="margin-top:7px">
+        Jeton utilisé pour authentifier les requêtes.
+      </p>
     </div>
   </aside>
 
-  <!-- NAVIGATION MOBILE -->
+  <!-- =========================
+       NAVIGATION MOBILE
+  ========================= -->
+
   <nav class="mobile-bottom-nav" aria-label="Navigation mobile">
-    <button class="mobile-nav-btn" onclick="switchTab('accueil',this)">
-      <span class="icon">🏠</span>Accueil
+    <button class="mobile-nav-btn active" onclick="switchTab('accueil',this)">
+      <span class="icon">🏠</span>
+      Accueil
     </button>
+
     <button class="mobile-nav-btn" onclick="switchTab('chappie-3d',this)">
-      <span class="icon">🤖</span>Visuel
+      <span class="icon">🤖</span>
+      Visuel
     </button>
-    <button class="mobile-mic-btn active" onclick="switchTab('media',this)"
-            title="Voix et vision" aria-label="Voix et vision">🎙️</button>
+
+    <button class="mobile-mic-btn" onclick="switchTab('media',this)"
+            title="Voix et vision" aria-label="Voix et vision">
+      🎙️
+    </button>
+
     <button class="mobile-nav-btn" onclick="switchTab('skills',this)">
-      <span class="icon">🎓</span>Stats
+      <span class="icon">🎓</span>
+      Cerveau
     </button>
-    <button class="mobile-nav-btn" onclick="switchTab('params',this)">
-      <span class="icon">⚙️</span>Options
+
+    <button class="mobile-nav-btn" onclick="switchTab('memory',this)">
+      <span class="icon">🌙</span>
+      Mémoire
     </button>
   </nav>
 
-  <!-- CONTENU PRINCIPAL -->
+  <!-- =========================
+       CONTENU PRINCIPAL
+  ========================= -->
+
   <main id="mainContainer">
+
     <div class="main-content">
 
-      <!-- 1. PAGE D'ACCUEIL -->
-      <section id="section-accueil" class="tab-section">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="pageTitle">Accueil</h1>
+          <p>Interface cognitive et environnement de Chappie</p>
+        </div>
+
+        <div class="system-status">
+          <span class="status-dot"></span>
+          <span id="status">Prêt.</span>
+        </div>
+      </header>
+
+      <!-- =========================
+           1. ACCUEIL
+      ========================= -->
+
+      <section id="section-accueil" class="tab-section active">
+
         <div class="panel hero-card">
+
           <div class="hero-top">
             <div class="hero-avatar">
               <img src="/hero.png" alt="Chappie" onerror="this.style.display='none'">
             </div>
+
             <div class="hero-info">
               <h2>Salut !</h2>
-              <p>Je suis Chappie, je découvre le monde, je mémorise et j'évolue à tes côtés.</p>
+              <p>
+                Je suis Chappie, je découvre, je mémorise et j'évolue à tes côtés.
+              </p>
             </div>
           </div>
 
@@ -612,64 +1122,116 @@
             <span class="badge">🧠 Apprenant</span>
           </div>
 
-          <div style="margin-top:6px">
-            <label for="homeToken" style="font-size:.68rem;color:var(--text-muted);display:block;margin-bottom:2px">
-              🔑 Jeton d'authentification API
-            </label>
-            <input id="homeToken" type="password" autocomplete="off"
-                   placeholder="CHAPPIE_API_TOKEN..." oninput="syncTokens(this.value)">
-          </div>
+          <p class="muted">
+            Mon objectif : apprendre progressivement à comprendre le monde,
+            communiquer, mémoriser mes expériences et développer mes compétences.
+          </p>
         </div>
 
         <div class="panel">
-          <h3>📊 Attributs &amp; États Généraux</h3>
-          <div class="stat-cards">
-            <div class="stat-card">
-              <div class="stat-name">Énergie</div>
-              <div class="stat-value" style="color:var(--success)">100%</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-name">Joie</div>
-              <div class="stat-value" style="color:#f59e0b">40%</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-name">Curiosité</div>
-              <div class="stat-value" style="color:var(--cyan)">75%</div>
+          <h3>📊 Attributs et états généraux</h3>
+
+          <p class="muted" style="margin-bottom:13px">
+            Valeurs internes simulées et enregistrées par le système.
+          </p>
+
+          <div id="state">
+            <div class="stat-cards">
+              <div class="stat-card">
+                <div class="stat-name">Énergie</div>
+                <div class="stat-value">—</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-name">Joie</div>
+                <div class="stat-value">—</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-name">Curiosité</div>
+                <div class="stat-value">—</div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <div class="panel">
-          <h3>💬 Conversation rapide</h3>
-          <div id="chatHistory" class="chat-container">
-            <div class="msg-bubble msg-chappie">
-              Bonjour ! Prêt pour une nouvelle session d'apprentissage ?
-            </div>
-          </div>
-
-          <textarea id="msg" rows="2" placeholder="Écris ton message à Chappie..."></textarea>
 
           <div class="row-btns">
-            <button type="button" onclick="sendMessage()">Envoyer</button>
-            <button type="button" class="secondary" onclick="toggleMic()">🎙️ Dicter</button>
-            <button type="button" class="secondary" onclick="stopSpeech()">■ Stop</button>
+            <button type="button" class="secondary" onclick="fetchPsychology()">
+              🔄 Actualiser les états
+            </button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>🧬 Développement cognitif</h3>
+
+          <div class="home-grid">
+            <div class="info-card">
+              <span class="muted">Âge cognitif</span>
+              <div class="value">À mesurer</div>
+            </div>
+
+            <div class="info-card">
+              <span class="muted">Stade actuel</span>
+              <div class="value">Éveil</div>
+            </div>
           </div>
 
-          <div id="status" class="status">Prêt.</div>
+          <p class="muted" style="margin-top:12px">
+            L'âge cognitif devra être calculé à partir de tests et de compétences
+            mesurées. Il ne représente pas un âge humain réel.
+          </p>
+
+          <div class="row-btns">
+            <button type="button" onclick="switchTab('skills')">
+              🎓 Voir mon cerveau
+            </button>
+            <button type="button" class="secondary" onclick="switchTab('chat')">
+              💬 Discuter
+            </button>
+          </div>
         </div>
+
+        <div class="panel">
+          <h3>🔑 Connexion au cerveau</h3>
+
+          <label for="tokenMobile" class="small-label">
+            Jeton d'authentification API
+          </label>
+
+          <input
+            id="tokenMobile"
+            type="password"
+            autocomplete="off"
+            placeholder="Colle ton jeton ici..."
+            oninput="syncTokens(this.value)">
+
+          <div class="row-btns">
+            <button type="button" onclick="fetchPsychology()">
+              Connecter Chappie
+            </button>
+          </div>
+        </div>
+
       </section>
 
-      <!-- 2. PAGE VISUEL 3D -->
+      <!-- =========================
+           2. VISUEL 3D
+      ========================= -->
+
       <section id="section-chappie-3d" class="tab-section">
+
         <div class="panel" style="text-align:center;background:radial-gradient(circle,#101826 0%,#070b14 100%)">
-          <h3 style="justify-content:center">🤖 Chappie — Avatar 3D</h3>
+
+          <h3 style="justify-content:center">
+            🤖 Chappie — Avatar 3D
+          </h3>
 
           <p class="model-caption">
-            Modèle interactif en métal bleu acier, avec plaque frontale, visière noire et yeux cyan.
-            Fais glisser pour tourner le robot et pince pour zoomer.
+            Modèle 3D interactif. Fais glisser pour tourner le robot,
+            utilise deux doigts pour zoomer et découvre les possibilités
+            de réalité augmentée de ton appareil.
           </p>
 
           <div class="robot-stage">
+
             <model-viewer
               id="chappieModelMain"
               src="https://huggingface.co/datasets/wakstyprod/Chappie3D/resolve/main/model.glb"
@@ -690,10 +1252,13 @@
               loading="eager"
               reveal="auto">
 
-              <div slot="poster" style="display:grid;place-items:center;width:100%;height:100%;background:#07101d;color:#06b6d4;padding:20px;text-align:center">
+              <div slot="poster"
+                   style="display:grid;place-items:center;width:100%;height:100%;background:#07101d;color:#06b6d4;padding:20px;text-align:center">
                 <div>
                   <strong>CHAPPIE</strong>
-                  <p style="font-size:.8rem;color:#94a3b8;margin-top:8px">Chargement du modèle 3D…</p>
+                  <p style="font-size:.8rem;color:#94a3b8;margin-top:8px">
+                    Chargement du modèle 3D…
+                  </p>
                 </div>
               </div>
 
@@ -701,390 +1266,657 @@
                       style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);white-space:nowrap">
                 🥽 Voir dans mon espace
               </button>
+
             </model-viewer>
 
             <div class="holo-scan"></div>
           </div>
 
           <div class="row-btns center">
-            <button type="button" onclick="resetRobotView('chappieModelMain')">🎯 Vue de face</button>
+            <button type="button" onclick="resetRobotView('chappieModelMain')">
+              🎯 Vue de face
+            </button>
+
             <button type="button" class="secondary"
-                    onclick="toggleRobotRotation('chappieModelMain',this)">⏸ Pause rotation</button>
+                    onclick="toggleRobotRotation('chappieModelMain',this)">
+              ⏸ Pause rotation
+            </button>
+
             <button type="button" class="secondary"
-                    onclick="enterRobotAR('chappieModelMain')">🥽 Réalité augmentée</button>
+                    onclick="enterRobotAR('chappieModelMain')">
+              🥽 Réalité augmentée
+            </button>
           </div>
 
           <p class="model-help">
-            Pour obtenir une vraie ressemblance, place ton modèle personnalisé
-            <code>chappie.glb</code> à l'adresse servie par ton application.
-            Le fichier 3D doit contenir la tête, la visière, les yeux lumineux,
-            la mâchoire, le cou et les épaules métalliques.
+            Le modèle 3D est chargé depuis Hugging Face.
+            Pour améliorer la ressemblance avec le Chappie du film,
+            le modèle devra intégrer une tête détaillée, une visière noire,
+            des yeux lumineux, une mâchoire articulée et une structure
+            métallique bleue.
           </p>
 
-          <p id="modelStatusMain" class="status">Modèle chargé depuis Hugging Face.</p>
+          <p id="modelStatusMain" class="status">
+            En attente du chargement du modèle.
+          </p>
+
         </div>
+
       </section>
 
-      <!-- 3. PAGE CHAT ÉTENDU -->
-      <section id="section-chat" class="tab-section">
+      <!-- =========================
+           3. VOIX ET VISION
+      ========================= -->
+
+      <section id="section-media" class="tab-section">
+
         <div class="panel">
-          <h3>💬 Espace de discussion étendu</h3>
+          <h3>🎙️ Interface vocale de Chappie</h3>
 
-          <textarea id="msgChatTab" rows="4"
-                    placeholder="Pose une question complexe à Chappie..."></textarea>
-
-          <button type="button" onclick="sendMessageFromTab()" style="margin-top:8px">
-            Envoyer au Cerveau
-          </button>
-
-          <pre id="outChatTab" class="output">En attente de dialogue...</pre>
-        </div>
-      </section>
-
-      <!-- 4. PAGE VOIX & VISION -->
-      <section id="section-media" class="tab-section active">
-        <div class="panel" style="text-align:center;background:radial-gradient(circle,#101826 0%,#070b14 100%);border-color:#06b6d466">
-          <h3 style="justify-content:center">🤖 Chappie V19.3 — Holo Live &amp; RA</h3>
-
-          <div class="robot-stage">
-            <model-viewer
-              id="chappieModelLive"
-              src="https://huggingface.co/datasets/wakstyprod/Chappie3D/resolve/main/model.glb"
-              poster="/hero.png"
-              alt="Chappie en 3D, visière noire et yeux cyan"
-              camera-controls
-              auto-rotate
-              auto-rotate-delay="1800"
-              rotation-per-second="12deg"
-              interaction-prompt="auto"
-              ar
-              ar-modes="webxr scene-viewer quick-look"
-              camera-orbit="0deg 75deg 2.8m"
-              field-of-view="30deg"
-              shadow-intensity="1.2"
-              exposure="1.05"
-              environment-image="neutral"
-              loading="eager"
-              reveal="auto">
-
-              <button slot="ar-button" type="button"
-                      style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);white-space:nowrap">
-                🥽 Voir dans mon espace
-              </button>
-            </model-viewer>
-
-            <div class="holo-scan"></div>
-          </div>
-
-          <p class="model-caption">
-            Rotation tactile, zoom et réalité augmentée selon les capacités du navigateur et du téléphone.
+          <p class="muted" style="margin-bottom:14px">
+            Visualisation de l'activité vocale. L'animation est décorative
+            pour le moment : elle ne représente pas encore le volume audio réel.
           </p>
 
-          <div class="row-btns center">
-            <button type="button" onclick="resetRobotView('chappieModelLive')">🎯 Vue de face</button>
-            <button type="button" class="secondary"
-                    onclick="toggleRobotRotation('chappieModelLive',this)">⏸ Pause rotation</button>
-            <button type="button" class="secondary"
-                    onclick="enterRobotAR('chappieModelLive')">🥽 Activer la RA</button>
-          </div>
+          <div class="voice-visual">
+            <div class="voice-core">◉</div>
 
-          <p id="modelStatusLive" class="status">Modèle chargé depuis Hugging Face.</p>
+            <div class="waveform" aria-label="Animation vocale">
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+              <span></span>
+            </div>
+
+            <div class="voice-caption">Chappie · Système vocal</div>
+          </div>
         </div>
 
         <div class="panel">
-          <h3>🎙️ Gemini Live (Voix temps réel)</h3>
+          <h3>🎙️ Gemini Live — Conversation en temps réel</h3>
+
+          <p class="muted">
+            Conversation vocale directe avec Chappie.
+            Autorise l'accès au microphone lorsque le navigateur le demande.
+          </p>
+
           <div class="row-btns">
-            <button type="button" id="liveBtn" onclick="toggleLive()" style="flex-grow:1">
-              ▶ Démarrer la conversation live
+            <button type="button" id="liveBtn" onclick="toggleLive()" style="flex:1">
+              ▶ Démarrer la conversation
             </button>
-            <button type="button" class="danger" onclick="stopLive()">■ Arrêter</button>
+
+            <button type="button" class="danger" onclick="stopLive()">
+              ■ Arrêter
+            </button>
           </div>
-          <div id="liveStatus" class="status">Non connecté.</div>
+
+          <div id="liveStatus" class="status">
+            Non connecté.
+          </div>
+
+          <h4 style="margin-top:18px">📝 Conversation en direct</h4>
+
+          <div id="liveTranscript" class="output" style="min-height:160px">
+            Les échanges vocaux apparaîtront ici.
+          </div>
         </div>
 
         <div class="panel">
-          <h3>👁️ Vision par Caméra</h3>
+          <h3>👁️ Vision par caméra</h3>
+
+          <p class="muted">
+            Chappie peut analyser une image transmise par la caméra
+            lorsque tu actives volontairement cette fonction.
+          </p>
+
           <video id="camera" autoplay playsinline muted></video>
 
           <div class="row-btns">
-            <button type="button" class="secondary" onclick="startCamera()">Activer</button>
-            <button type="button" onclick="captureVision()">Analyser l'image</button>
-            <button type="button" class="danger" onclick="stopCamera()">Couper</button>
+            <button type="button" class="secondary" onclick="startCamera()">
+              📷 Activer
+            </button>
+
+            <button type="button" onclick="captureVision()">
+              🔍 Analyser
+            </button>
+
+            <button type="button" class="danger" onclick="stopCamera()">
+              ■ Couper
+            </button>
           </div>
 
           <pre id="visionOut" class="output">Caméra inactive.</pre>
         </div>
+
+        <div class="panel">
+          <h3>🗣️ Profil vocal</h3>
+
+          <p class="muted">
+            Gestion du profil vocal utilisé par les fonctions de reconnaissance.
+          </p>
+
+          <label for="voiceName" class="small-label" style="margin-top:12px">
+            Nom du profil
+          </label>
+
+          <input id="voiceName" type="text" placeholder="Exemple : créateur">
+
+          <div class="row-btns">
+            <button type="button" onclick="recordVoice('enroll')">
+              Enregistrer ma voix
+            </button>
+
+            <button type="button" class="secondary" onclick="recordVoice('identify')">
+              Identifier ma voix
+            </button>
+          </div>
+
+          <div id="voiceStatus" class="status">
+            Aucun enregistrement en cours.
+          </div>
+        </div>
+
       </section>
 
-      <!-- 5. PAGE ARBRE DE COMPÉTENCES -->
-      <section id="section-skills" class="tab-section">
+      <!-- =========================
+           4. CHAT ET DIRECT
+      ========================= -->
+
+      <section id="section-chat" class="tab-section">
+
         <div class="panel">
-          <h3>🎓 Arbre des Compétences &amp; Sous-branches</h3>
+          <h3>💬 Conversation avec Chappie</h3>
+
+          <p class="muted" style="margin-bottom:12px">
+            Écris librement à Chappie. Ses réponses et les résultats
+            de ses interactions seront affichés dans cette fenêtre.
+          </p>
+
+          <div id="chatHistory" class="chat-container">
+            <div class="msg-bubble msg-chappie">
+              Bonjour ! Je suis prêt à discuter et à apprendre.
+            </div>
+          </div>
+
+          <textarea
+            id="msg"
+            rows="3"
+            placeholder="Écris ton message à Chappie..."></textarea>
+
+          <div class="row-btns">
+            <button type="button" id="sendBtn" onclick="sendMessage()">
+              Envoyer
+            </button>
+
+            <button type="button" id="micBtn" class="secondary" onclick="toggleMic()">
+              🎙️ Dicter
+            </button>
+
+            <button type="button" class="secondary" onclick="stopSpeech()">
+              ■ Stop audio
+            </button>
+          </div>
+
+          <div id="out" class="output">
+            En attente de dialogue...
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>🔊 Lecture vocale</h3>
+
+          <p class="muted">
+            Chappie peut lire ses réponses à voix haute grâce au système
+            vocal connecté au serveur.
+          </p>
+
+          <div class="row-btns">
+            <button type="button" class="secondary" onclick="stopSpeech()">
+              ■ Arrêter la lecture
+            </button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- =========================
+           5. ARBRE DE COMPÉTENCES
+      ========================= -->
+
+      <section id="section-skills" class="tab-section">
+
+        <div class="panel">
+          <h3>🎓 Architecture cognitive de Chappie</h3>
 
           <p class="muted" style="margin-bottom:14px">
-            Évolution cognitive connectée aux modules cérébraux (0 à 30 par branche).
+            Le cerveau est organisé en douze systèmes principaux.
+            Chaque système pourra progressivement être développé
+            en sous-compétences et évalué par des tests.
           </p>
 
           <div class="row-btns" style="margin-bottom:16px">
             <button type="button" onclick="loadSkills()">
-              ⚡ Synchroniser le Cerveau
+              ⚡ Synchroniser le cerveau
             </button>
+
             <button type="button" class="secondary" onclick="loadGoals()">
-              🎯 Voir les Objectifs
+              🎯 Objectifs cognitifs
             </button>
           </div>
 
-          <!-- CONTENEUR GRAPHIQUE DES COMPÉTENCES -->
-          <div id="skillsVisualContainer" style="display:flex; flex-direction:column; gap:14px;">
-            
-            <!-- Branche 1 : Langage -->
-            <div class="stat-item">
-              <div class="stat-header">
-                <span>🗣️ Langage &amp; Mots</span>
-                <span id="valLang">0.0 / 30</span>
-              </div>
-              <div class="bar-bg">
-                <div id="barLang" class="bar-fill" style="width:0%; background:#3b82f6;"></div>
-              </div>
-            </div>
-
-            <!-- Branche 2 : Raisonnement -->
-            <div class="stat-item">
-              <div class="stat-header">
-                <span>🧠 Raisonnement &amp; Logique</span>
-                <span id="valLogique">0.0 / 30</span>
-              </div>
-              <div class="bar-bg">
-                <div id="barLogique" class="bar-fill" style="width:0%; background:#10b981;"></div>
-              </div>
-            </div>
-
-            <!-- Branche 3 : Créativité -->
-            <div class="stat-item">
-              <div class="stat-header">
-                <span>🎨 Créativité &amp; Âme</span>
-                <span id="valCreativite">0.0 / 30</span>
-              </div>
-              <div class="bar-bg">
-                <div id="barCreativite" class="bar-fill" style="width:0%; background:#f59e0b;"></div>
-              </div>
-            </div>
-
-            <!-- Branche 4 : Perception -->
-            <div class="stat-item">
-              <div class="stat-header">
-                <span>👁️ Perception &amp; Sens</span>
-                <span id="valPerception">0.0 / 30</span>
-              </div>
-              <div class="bar-bg">
-                <div id="barPerception" class="bar-fill" style="width:0%; background:var(--cyan);"></div>
-              </div>
-            </div>
-
-          </div>
-
-          <pre id="skillsOut" class="output" style="margin-top:16px; min-height:80px">Statut : Page blanche initiale (0.0). En attente d'interactions vocales et textuelles.</pre>
-        </div>
-      </section>
-
-      <!-- 6. PAGE MONDE -->
-      <section id="section-world" class="tab-section">
-        <div class="panel">
-          <h3>🌍 Modèle du Monde (en développement)</h3>
-
-          <p class="muted">
-            Cette section cartographie les entités, les lieux, les objets et les relations
-            que Chappie apprend à classifier au fil des interactions.
-          </p>
-
-          <div style="margin-top:15px;padding:20px;background:#070b14;border-radius:10px;text-align:center;border:1px dashed var(--card-border)">
-            <span style="font-size:2rem">🌐</span>
-            <p style="font-size:.8rem;color:var(--cyan);margin-top:6px">
-              Module d'exploration spatio-temporelle en cours de liaison.
+          <div class="tree-note">
+            <p class="muted">
+              Les douze branches sont présentées comme architecture cible.
+              Les données réellement enregistrées dépendent des modules
+              et des compétences actuellement disponibles dans le serveur.
             </p>
           </div>
         </div>
-      </section>
 
-      <!-- 7. PAGE RÊVES & PENSÉES -->
-      <section id="section-memory" class="tab-section">
         <div class="panel">
-          <h3>🌙 Rêves &amp; Pensées Autonomes</h3>
+          <h3>🌳 Les douze systèmes cognitifs</h3>
 
-          <div class="row-btns">
-            <button type="button" class="secondary" onclick="loadSummary()">Mémoire globale</button>
-            <button type="button" class="secondary" onclick="loadDreams()">🌙 Rêves</button>
-            <button type="button" class="secondary" onclick="loadThoughts()">💭 Pensées</button>
+          <div class="skills-grid">
+
+            <div class="skill-node">
+              <h4>🧠 1. La Tête — Raisonnement</h4>
+              <p class="muted">Comprendre, réfléchir et résoudre des problèmes.</p>
+              <div class="skill-children">
+                <span class="skill-child">Logique</span>
+                <span class="skill-child">Déduction</span>
+                <span class="skill-child">Analyse</span>
+                <span class="skill-child">Planification</span>
+                <span class="skill-child">Abstraction</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>🗣️ 2. Les Mots — Langage</h4>
+              <p class="muted">Comprendre et produire une communication.</p>
+              <div class="skill-children">
+                <span class="skill-child">Vocabulaire</span>
+                <span class="skill-child">Grammaire</span>
+                <span class="skill-child">Expression</span>
+                <span class="skill-child">Compréhension</span>
+                <span class="skill-child">Conversation</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>🤝 3. Le Lien — Relations</h4>
+              <p class="muted">Comprendre les interactions et les relations sociales.</p>
+              <div class="skill-children">
+                <span class="skill-child">Écoute</span>
+                <span class="skill-child">Coopération</span>
+                <span class="skill-child">Confiance</span>
+                <span class="skill-child">Empathie simulée</span>
+                <span class="skill-child">Contexte social</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>🖐️ 4. Les Mains — Action</h4>
+              <p class="muted">Organiser et contrôler des actions.</p>
+              <div class="skill-children">
+                <span class="skill-child">Coordination</span>
+                <span class="skill-child">Manipulation</span>
+                <span class="skill-child">Précision</span>
+                <span class="skill-child">Séquençage</span>
+                <span class="skill-child">Exécution</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>✨ 5. L'Âme — Identité</h4>
+              <p class="muted">Construire une identité et un profil comportemental.</p>
+              <div class="skill-children">
+                <span class="skill-child">Préférences</span>
+                <span class="skill-child">Valeurs</span>
+                <span class="skill-child">Personnalité</span>
+                <span class="skill-child">Créativité</span>
+                <span class="skill-child">Expression</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>👁️ 6. Les Sens — Perception</h4>
+              <p class="muted">Interpréter les informations provenant du monde.</p>
+              <div class="skill-children">
+                <span class="skill-child">Vision</span>
+                <span class="skill-child">Audition</span>
+                <span class="skill-child">Reconnaissance</span>
+                <span class="skill-child">Classification</span>
+                <span class="skill-child">Orientation</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>🎯 7. Attention — Concentration</h4>
+              <p class="muted">Sélectionner les informations importantes.</p>
+              <div class="skill-children">
+                <span class="skill-child">Attention sélective</span>
+                <span class="skill-child">Concentration</span>
+                <span class="skill-child">Priorisation</span>
+                <span class="skill-child">Vigilance</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>📚 8. Apprentissage — Évolution</h4>
+              <p class="muted">Apprendre à partir des expériences et des corrections.</p>
+              <div class="skill-children">
+                <span class="skill-child">Imitation</span>
+                <span class="skill-child">Enseignement</span>
+                <span class="skill-child">Expérimentation</span>
+                <span class="skill-child">Généralisation</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>🗂️ 9. Mémoire — Souvenirs</h4>
+              <p class="muted">Enregistrer, organiser et retrouver les informations.</p>
+              <div class="skill-children">
+                <span class="skill-child">Autobiographique</span>
+                <span class="skill-child">Sémantique</span>
+                <span class="skill-child">Procédurale</span>
+                <span class="skill-child">Épisodique</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>⚖️ 10. Décision — Choix</h4>
+              <p class="muted">Comparer les possibilités et choisir une action.</p>
+              <div class="skill-children">
+                <span class="skill-child">Évaluation</span>
+                <span class="skill-child">Conséquences</span>
+                <span class="skill-child">Incertitude</span>
+                <span class="skill-child">Arbitrage</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>🔥 11. Motivation — Objectifs</h4>
+              <p class="muted">Maintenir des objectifs et organiser les efforts.</p>
+              <div class="skill-children">
+                <span class="skill-child">Curiosité</span>
+                <span class="skill-child">Persévérance</span>
+                <span class="skill-child">Initiative</span>
+                <span class="skill-child">Priorités</span>
+              </div>
+            </div>
+
+            <div class="skill-node">
+              <h4>🔍 12. Métacognition — Réflexion</h4>
+              <p class="muted">Évaluer ses propres résultats et ses limites.</p>
+              <div class="skill-children">
+                <span class="skill-child">Auto-évaluation</span>
+                <span class="skill-child">Doute</span>
+                <span class="skill-child">Confiance</span>
+                <span class="skill-child">Correction</span>
+              </div>
+            </div>
+
           </div>
+        </div>
 
-          <pre id="summary" class="output" style="min-height:140px">
-Sélectionne une option ci-dessus.
+        <div class="panel">
+          <h3>📈 Progression cognitive enregistrée</h3>
+
+          <p class="muted">
+            Les valeurs ci-dessous sont chargées depuis le serveur
+            lorsque la synchronisation des compétences est lancée.
+          </p>
+
+          <pre id="summary" class="output">
+En attente de synchronisation du cerveau...
           </pre>
         </div>
+
       </section>
 
-      <!-- 8. PAGE PARAMÈTRES -->
-      <section id="section-params" class="tab-section">
+      <!-- =========================
+           6. MONDE
+      ========================= -->
+
+      <section id="section-world" class="tab-section">
+
         <div class="panel">
-          <h3>⚙️ Configuration &amp; Jeton API</h3>
+          <h3>🌍 Modèle du monde de Chappie</h3>
 
-          <label for="mobileToken" style="font-size:.75rem;color:var(--text-muted);display:block;margin-bottom:4px">
-            🔑 Jeton d'authentification API (CHAPPIE_API_TOKEN)
-          </label>
+          <p class="muted">
+            Cette page est destinée à représenter l'environnement connu
+            de Chappie : lieux, objets, personnes et relations.
+          </p>
 
-          <input id="mobileToken"
-                 type="password"
-                 autocomplete="off"
-                 placeholder="Colle ton jeton ici..."
-                 style="font-size:.8rem;padding:8px;margin-bottom:12px"
-                 oninput="syncTokens(this.value)">
+          <div class="world-placeholder" style="margin-top:15px">
+            <div class="world-icon">🌐</div>
+            <h4>Carte de l'environnement</h4>
+            <p class="muted">
+              Le système de localisation et l'historique des lieux
+              restent à connecter au backend.
+            </p>
+            <span class="badge">Module en développement</span>
+          </div>
+        </div>
 
-          <h3 style="margin-top:15px">⚙️ Paramètres &amp; Maintenance</h3>
+        <div class="panel">
+          <h3>📍 Lieux connus</h3>
+
+          <div class="world-grid">
+            <div class="info-card">
+              <h4>🏠 Lieux personnels</h4>
+              <p class="muted">À renseigner avec autorisation.</p>
+            </div>
+
+            <div class="info-card">
+              <h4>🌳 Lieux explorés</h4>
+              <p class="muted">Historique à connecter.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>👥 Personnes rencontrées</h3>
+
+          <p class="muted">
+            Chappie pourra conserver des fiches de personnes uniquement
+            lorsque les informations auront été volontairement fournies
+            ou confirmées avec leur accord.
+          </p>
+
+          <div class="world-placeholder" style="margin-top:13px;min-height:130px">
+            <div class="world-icon">👤</div>
+            <p class="muted">
+              Aucune fiche de personne affichée.
+            </p>
+            <span class="badge">Gestion des relations à connecter</span>
+          </div>
+
+          <p class="muted" style="margin-top:12px">
+            Les liens familiaux, surnoms et relations ne doivent pas
+            être déduits automatiquement à partir d'une image ou d'une voix.
+          </p>
+        </div>
+
+      </section>
+
+      <!-- =========================
+           7. RÊVES ET PENSÉES
+      ========================= -->
+
+      <section id="section-memory" class="tab-section">
+
+        <div class="panel">
+          <h3>🌙 Rêves et pensées autonomes</h3>
+
+          <p class="muted" style="margin-bottom:13px">
+            Consulte les contenus produits et enregistrés par les
+            différents mécanismes cognitifs de Chappie.
+          </p>
 
           <div class="row-btns">
-            <button type="button" class="secondary" onclick="consolidate()">
+            <button type="button" class="secondary" onclick="loadSummary()">
+              🗂️ Mémoire globale
+            </button>
+
+            <button type="button" class="secondary" onclick="loadDreams()">
+              🌙 Rêves
+            </button>
+
+            <button type="button" class="secondary" onclick="loadThoughts()">
+              💭 Pensées
+            </button>
+
+            <button type="button" class="secondary" onclick="loadMoodHistory()">
+              📊 Historique émotionnel
+            </button>
+          </div>
+
+          <pre id="memoryOutput" class="output" style="min-height:120px">
+Sélectionne une catégorie pour consulter les données.
+          </pre>
+        </div>
+
+        <div class="panel">
+          <h3>🎯 Objectifs et évolution</h3>
+
+          <div class="row-btns">
+            <button type="button" onclick="loadGoals()">
+              Voir les objectifs
+            </button>
+
+            <button type="button" class="secondary" onclick="loadSkills()">
+              Voir les compétences
+            </button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>🧠 Consolidation de la mémoire</h3>
+
+          <p class="muted">
+            La consolidation permet de lancer le mécanisme serveur
+            prévu pour organiser les souvenirs et les informations.
+          </p>
+
+          <div class="row-btns">
+            <button type="button" onclick="consolidate()">
               Consolider la mémoire
             </button>
           </div>
-
-          <div style="margin-top:20px;padding-top:15px;border-top:1px solid var(--card-border)">
-            <h3 style="color:var(--danger)">⚠️ Zone de Danger</h3>
-
-            <p class="muted" style="margin-bottom:10px">
-              La remise à zéro efface l'historique et réinitialise Chappie au stade 0 (Page blanche).
-            </p>
-
-            <button type="button" class="danger" onclick="resetLife()">
-              🐣 Page Blanche (Reset Total)
-            </button>
-          </div>
-
-          <pre id="sysOut" class="output"></pre>
         </div>
+
+        <div class="panel">
+          <h3>⚙️ Configuration et authentification</h3>
+
+          <label for="tokenMemory" class="small-label">
+            Jeton API
+          </label>
+
+          <input
+            id="tokenMemory"
+            type="password"
+            autocomplete="off"
+            placeholder="Jeton API"
+            oninput="syncTokens(this.value)">
+
+          <p class="muted" style="margin-top:8px">
+            Le jeton est utilisé par les requêtes authentifiées de l'interface.
+          </p>
+        </div>
+
+        <div class="panel danger-zone">
+          <h3>⚠️ Zone de réinitialisation</h3>
+
+          <p class="muted" style="margin-bottom:12px">
+            La remise à zéro totale efface les données cognitives,
+            les souvenirs, les objectifs et les historiques enregistrés.
+            Cette opération est irréversible sans sauvegarde.
+          </p>
+
+          <button type="button" class="danger" onclick="resetLife()">
+            🐣 Réinitialiser Chappie — Stade 0
+          </button>
+        </div>
+
       </section>
 
     </div>
-
-    <!-- COLONNE DE DROITE SUR PC -->
-    <div class="side-column">
-      <div class="panel">
-        <h3>🎯 Niveau de maturité</h3>
-
-        <div style="text-align:center;margin:8px 0">
-          <span id="sideMaturityVal" style="font-size:2rem;font-weight:bold;color:var(--cyan)">0.0</span>
-          <span style="color:var(--text-muted)"> / 30</span>
-          <p id="sideMaturityText" class="muted" style="margin-top:2px">Nouveau-né / Éveil</p>
-        </div>
-
-        <div class="stat-item">
-          <div class="stat-header">
-            <span>Progression globale</span><span id="sideProgPercent">0%</span>
-          </div>
-          <div class="bar-bg">
-            <div id="sideBarGlobal" class="bar-fill" style="width:0%;background:var(--cyan)"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h3>⚡ Compétences principales</h3>
-
-        <div class="stat-item">
-          <div class="stat-header">
-            <span>Langage</span><span id="sideLangVal">0.0/30</span>
-          </div>
-          <div class="bar-bg">
-            <div id="sideBarLang" class="bar-fill" style="width:0%;background:#3b82f6"></div>
-          </div>
-        </div>
-
-        <div class="stat-item">
-          <div class="stat-header">
-            <span>Raisonnement</span><span id="sideLogiqueVal">0.0/30</span>
-          </div>
-          <div class="bar-bg">
-            <div id="sideBarLogique" class="bar-fill" style="width:0%;background:#10b981"></div>
-          </div>
-        </div>
-
-        <div class="stat-item">
-          <div class="stat-header">
-            <span>Créativité</span><span id="sideCreativiteVal">0.0/30</span>
-          </div>
-          <div class="bar-bg">
-            <div id="sideBarCreativite" class="bar-fill" style="width:0%;background:#f59e0b"></div>
-          </div>
-        </div>
-
-        <div class="stat-item">
-          <div class="stat-header">
-            <span>Perception</span><span id="sidePerceptionVal">0.0/30</span>
-          </div>
-          <div class="bar-bg">
-            <div id="sideBarPerception" class="bar-fill" style="width:0%;background:var(--cyan)"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h3>🟢 État du système</h3>
-
-        <div style="font-size:.78rem;display:flex;flex-direction:column;gap:6px;color:var(--text-muted)">
-          <div>✔️ Cognition active</div>
-          <div>✔️ Mémoire unifiée</div>
-          <div>✔️ Apprentissage en ligne</div>
-        </div>
-      </div>
-    </div>
   </main>
 
+  <!-- =========================
+       NAVIGATION ET SYNCHRONISATION
+  ========================= -->
+
   <script>
+    const pageTitles = {
+      accueil: "Accueil",
+      "chappie-3d": "Visuel & 3D",
+      media: "Voix & Vision",
+      chat: "Chat & Direct",
+      skills: "Arbre de compétences",
+      world: "Modèle du monde",
+      memory: "Rêves & Pensées"
+    };
+
     function switchTab(tabId, btnElement) {
-      document.querySelectorAll('.tab-section').forEach(el => {
-        el.classList.remove('active');
+      document.querySelectorAll(".tab-section").forEach(section => {
+        section.classList.remove("active");
       });
 
       document.querySelectorAll(
-        '.nav-item,.mobile-nav-btn,.mobile-mic-btn'
-      ).forEach(el => {
-        el.classList.remove('active');
+        ".nav-item,.mobile-nav-btn,.mobile-mic-btn"
+      ).forEach(button => {
+        button.classList.remove("active");
       });
 
-      const target = document.getElementById('section-' + tabId);
+      const target = document.getElementById("section-" + tabId);
 
       if (target) {
-        target.classList.add('active');
+        target.classList.add("active");
       }
 
       if (btnElement) {
-        btnElement.classList.add('active');
+        btnElement.classList.add("active");
       } else {
-        document.querySelectorAll(`[onclick*="'${tabId}'"]`).forEach(el => {
-          el.classList.add('active');
+        document.querySelectorAll(
+          `[onclick*="'${tabId}'"]`
+        ).forEach(button => {
+          button.classList.add("active");
         });
       }
 
-      const mainContainer = document.getElementById('mainContainer');
+      const title = document.getElementById("pageTitle");
 
-      if (mainContainer) {
-        mainContainer.classList.toggle(
-          'has-sidebar',
-          tabId === 'skills' &&
-          window.matchMedia('(min-width: 1001px)').matches
-        );
+      if (title) {
+        title.textContent = pageTitles[tabId] || "Chappie";
       }
 
-      if (target) {
-        const scroller = document.getElementById('mainContainer');
+      const main = document.getElementById("mainContainer");
 
-        if (scroller) {
-          scroller.scrollTo({ top: 0, behavior: 'smooth' });
-        }
+      if (main) {
+        main.scrollTo({
+          top:0,
+          behavior:"smooth"
+        });
       }
     }
 
+    /*
+      Synchronisation des champs API.
+      Le script.js V19.3 lit token et tokenMobile.
+      On conserve ces deux identifiants et on synchronise les autres champs.
+    */
+
     function syncTokens(value) {
-      ['token', 'mobileToken', 'homeToken'].forEach(id => {
+      const ids = [
+        "token",
+        "tokenMobile",
+        "tokenMemory"
+      ];
+
+      ids.forEach(id => {
         const field = document.getElementById(id);
 
         if (field && field.value !== value) {
@@ -1093,16 +1925,20 @@ Sélectionne une option ci-dessus.
       });
     }
 
+    /* =========================
+       COMMANDES DU MODÈLE 3D
+    ========================= */
+
     function resetRobotView(id) {
       const model = document.getElementById(id);
 
       if (!model) return;
 
-      model.cameraOrbit = '0deg 75deg 2.8m';
-      model.fieldOfView = '30deg';
+      model.cameraOrbit = "0deg 75deg 2.8m";
+      model.fieldOfView = "30deg";
       model.autoRotate = true;
 
-      if (typeof model.jumpCameraToGoal === 'function') {
+      if (typeof model.jumpCameraToGoal === "function") {
         model.jumpCameraToGoal();
       }
     }
@@ -1116,19 +1952,15 @@ Sélectionne une option ci-dessus.
 
       if (button) {
         button.textContent = model.autoRotate
-          ? '⏸ Pause rotation'
-          : '▶ Reprendre rotation';
+          ? "⏸ Pause rotation"
+          : "▶ Reprendre rotation";
       }
     }
 
     async function enterRobotAR(id) {
       const model = document.getElementById(id);
 
-      const status = document.getElementById(
-        id === 'chappieModelMain'
-          ? 'modelStatusMain'
-          : 'modelStatusLive'
-      );
+      const status = document.getElementById("modelStatusMain");
 
       if (!model) return;
 
@@ -1136,9 +1968,7 @@ Sélectionne une option ci-dessus.
         if (!model.canActivateAR) {
           if (status) {
             status.textContent =
-              'La réalité augmentée n’est pas disponible. ' +
-              'Vérifie la compatibilité du navigateur, le chargement ' +
-              'du modèle 3D et les fonctions AR de ton appareil.';
+              "La réalité augmentée n'est pas disponible sur cet appareil ou navigateur.";
           }
 
           return;
@@ -1149,180 +1979,96 @@ Sélectionne une option ci-dessus.
       } catch (error) {
         if (status) {
           status.textContent =
-            'Impossible de démarrer la réalité augmentée. ' +
-            'Vérifie le navigateur, les permissions et le modèle 3D.';
+            "Impossible de démarrer la réalité augmentée.";
         }
 
-        console.warn('Activation AR impossible :', error);
+        console.warn("Activation AR impossible :",error);
       }
     }
 
-    // Mise à jour graphique de l'arbre et de la sidebar (Échelle 0 à 30)
-    function updateSkillBars(lang, logique, creativite, perception) {
-      const max = 30;
-      
-      document.getElementById('valLang').textContent = lang.toFixed(1) + ' / 30';
-      document.getElementById('barLang').style.width = Math.min(100, (lang / max) * 100) + '%';
+    function setupRobotModel() {
+      const model = document.getElementById("chappieModelMain");
 
-      document.getElementById('valLogique').textContent = logique.toFixed(1) + ' / 30';
-      document.getElementById('barLogique').style.width = Math.min(100, (logique / max) * 100) + '%';
-
-      document.getElementById('valCreativite').textContent = creativite.toFixed(1) + ' / 30';
-      document.getElementById('barCreativite').style.width = Math.min(100, (creativite / max) * 100) + '%';
-
-      document.getElementById('valPerception').textContent = perception.toFixed(1) + ' / 30';
-      document.getElementById('barPerception').style.width = Math.min(100, (perception / max) * 100) + '%';
-
-      document.getElementById('sideLangVal').textContent = lang.toFixed(1) + '/30';
-      document.getElementById('sideBarLang').style.width = Math.min(100, (lang / max) * 100) + '%';
-
-      document.getElementById('sideLogiqueVal').textContent = logique.toFixed(1) + '/30';
-      document.getElementById('sideBarLogique').style.width = Math.min(100, (logique / max) * 100) + '%';
-
-      document.getElementById('sideCreativiteVal').textContent = creativite.toFixed(1) + '/30';
-      document.getElementById('sideBarCreativite').style.width = Math.min(100, (creativite / max) * 100) + '%';
-
-      document.getElementById('sidePerceptionVal').textContent = perception.toFixed(1) + '/30';
-      document.getElementById('sideBarPerception').style.width = Math.min(100, (perception / max) * 100) + '%';
-
-      const avgGlobal = (lang + logique + creativite + perception) / 4;
-      const percentGlobal = (avgGlobal / max) * 100;
-
-      document.getElementById('sideMaturityVal').textContent = avgGlobal.toFixed(1);
-      document.getElementById('sideProgPercent').textContent = Math.round(percentGlobal) + '%';
-      document.getElementById('sideBarGlobal').style.width = percentGlobal + '%';
-
-      let stageText = "Nouveau-né / Éveil";
-      if (avgGlobal > 5) stageText = "Enfant / Apprenti";
-      if (avgGlobal > 15) stageText = "Adolescent / Explorateur";
-      if (avgGlobal > 25) stageText = "Conscience Autonome Avancée";
-      document.getElementById('sideMaturityText').textContent = stageText;
-    }
-
-    // Fonction de synchronisation corrigée et universelle pour l'API /api/skills/creator
-    async function loadSkills() {
-      const out = document.getElementById('skillsOut');
-      if (out) out.textContent = "🔄 Synchronisation avec les modules cérébraux du serveur...";
-
-      try {
-        const tokenInput = document.getElementById('mobileToken') || document.getElementById('token') || document.getElementById('homeToken');
-        const token = tokenInput ? tokenInput.value.trim() : '';
-
-        const response = await fetch('/api/skills/creator', {
-          headers: {
-            'Authorization': 'Bearer ' + token
-          }
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          let lang = 0.0, logique = 0.0, creativite = 0.0, perception = 0.0;
-
-          // Analyse compatible avec les dictionnaires directs (ex: data.MOTS, data.LIEN) ou tableaux
-          const processModule = (key, item) => {
-            const name = key.toLowerCase();
-            const level = item.level !== undefined ? item.level : 1;
-            const xp = item.xp !== undefined ? item.xp : 0.0;
-            
-            // Calcul de la valeur (Niveau * 3 + fraction d'XP) sur une échelle de 30 max
-            const val = (level - 1) * 3.0 + (xp / 33.33);
-
-            if (name === 'mots' || name === 'lang' || name === 'lien') {
-              lang = Math.max(lang, val);
-            }
-            if (name === 'tete' || name === 'logique' || name === 'mains') {
-              logique = Math.max(logique, val);
-            }
-            if (name === 'ame' || name === 'creativite') {
-              creativite = Math.max(creativite, val);
-            }
-            if (name === 'sens' || name === 'perception') {
-              perception = Math.max(perception, val);
-            }
-          };
-
-          if (Array.isArray(data)) {
-            data.forEach(s => processModule(s.skill_name || s.name || '', s));
-          } else if (typeof data === 'object' && data !== null) {
-            // Parcourt les clés directes du JSON (ex: AME, LIEN, MAINS, MOTS, SENS, TETE)
-            Object.keys(data).forEach(key => {
-              const item = data[key];
-              if (item && typeof item === 'object' && (item.level !== undefined || item.xp !== undefined)) {
-                processModule(key, item);
-              }
-            });
-            // Si les données sont enveloppées dans un champ skills ou systems
-            if (data.skills && Array.isArray(data.skills)) {
-              data.skills.forEach(s => processModule(s.skill_name || s.name || '', s));
-            }
-            if (data.systems && typeof data.systems === 'object') {
-              Object.keys(data.systems).forEach(key => processModule(key, data.systems[key]));
-            }
-          }
-
-          updateSkillBars(
-            Math.min(30, lang), 
-            Math.min(30, logique), 
-            Math.min(30, creativite), 
-            Math.min(30, perception)
-          );
-
-          if (out) out.textContent = "✔️ Arbre des compétences synchronisé avec succès !";
-        } else {
-          throw new Error("Jeton manquant ou invalide (401).");
-        }
-      } catch (err) {
-        console.warn("Erreur de synchro compétences :", err);
-        if (out) out.textContent = "⚠️ Échec de synchro : Vérifie ton jeton API dans l'onglet Options.";
-      }
-    }
-
-    function loadGoals() {
-      const out = document.getElementById('skillsOut');
-      if (out) {
-        out.textContent = "🎯 Objectifs cognitifs en cours :\n1. Enregistrer les premiers stimuli textuels et vocaux.\n2. Établir les premières connexions synaptiques.";
-      }
-    }
-
-    // Hook automatique après l'envoi d'un message dans le chat rapide ou synchro périodique
-    window.addEventListener('DOMContentLoaded', () => {
-      updateSkillBars(0.0, 0.0, 0.0, 0.0);
-      setupRobotModel('chappieModelMain');
-      setupRobotModel('chappieModelLive');
-      loadSkills(); // Premier appel au chargement
-
-      // Synchronisation automatique toutes les 10 secondes en arrière-plan
-      setInterval(loadSkills, 10000);
-
-      // Interception optionnelle pour rafraîchir après un envoi de message
-      const originalSendMessage = window.sendMessage;
-      if (typeof originalSendMessage === 'function') {
-        window.sendMessage = async function() {
-          await originalSendMessage.apply(this, arguments);
-          setTimeout(loadSkills, 1500); // Actualise l'arbre 1.5s après la réponse
-        };
-      }
-    });
-
-    function setupRobotModel(id) {
-      const model = document.getElementById(id);
       if (!model) return;
-      model.addEventListener('load', () => {
-        const status = document.getElementById(id === 'chappieModelMain' ? 'modelStatusMain' : 'modelStatusLive');
-        if (status) status.textContent = 'Modèle 3D chargé avec succès.';
+
+      model.addEventListener("load",() => {
+        const status = document.getElementById("modelStatusMain");
+
+        if (status) {
+          status.textContent = "Modèle 3D chargé avec succès.";
+        }
+      });
+
+      model.addEventListener("error",() => {
+        const status = document.getElementById("modelStatusMain");
+
+        if (status) {
+          status.textContent =
+            "Erreur de chargement du modèle 3D. Vérifie l'adresse du fichier GLB.";
+        }
       });
     }
 
-    window.addEventListener('resize', () => {
-      const skillsActive = document.getElementById('section-skills')?.classList.contains('active');
-      document.getElementById('mainContainer')?.classList.toggle(
-        'has-sidebar',
-        Boolean(skillsActive && window.matchMedia('(min-width: 1001px)').matches)
-      );
+    /*
+      Affichage des résultats du cerveau.
+      Le script.js V19.3 utilise #summary pour ses fonctions cognitives.
+      On déplace visuellement ce même élément vers la page concernée
+      lorsque l'utilisateur consulte les compétences ou la mémoire.
+    */
+
+    function moveCognitiveOutput() {
+      const summary = document.getElementById("summary");
+      const memoryOutput = document.getElementById("memoryOutput");
+      const skillsSection = document.getElementById("section-skills");
+      const memorySection = document.getElementById("section-memory");
+
+      if (!summary || !memoryOutput) return;
+
+      if (skillsSection && skillsSection.classList.contains("active")) {
+        const destination = document.getElementById("skillsOutput");
+
+        if (destination) {
+          destination.appendChild(summary);
+        }
+      } else if (memorySection && memorySection.classList.contains("active")) {
+        memoryOutput.replaceWith(summary);
+        summary.id = "summary";
+      }
+    }
+
+    /*
+      Le déplacement du résumé n'est volontairement pas déclenché
+      automatiquement : le script externe conserve son propre élément #summary.
+    */
+
+    window.addEventListener("DOMContentLoaded",() => {
+      setupRobotModel();
+
+      const token = document.getElementById("token");
+      const tokenMobile = document.getElementById("tokenMobile");
+
+      if (token && tokenMobile) {
+        token.addEventListener("input",() => {
+          syncTokens(token.value);
+        });
+
+        tokenMobile.addEventListener("input",() => {
+          syncTokens(tokenMobile.value);
+        });
+      }
+
+      window.addEventListener("resize",() => {
+        const main = document.getElementById("mainContainer");
+
+        if (main) {
+          main.classList.remove("has-sidebar");
+        }
+      });
     });
   </script>
 
-  <!-- Script externe global -->
-  <script src="/script.js" defer></script>
+  <!-- Script externe de Chappie V19.3 -->
+  <script src="/script.js?v=19.3" defer></script>
+
 </body>
 </html>

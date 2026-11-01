@@ -24,6 +24,27 @@ CATALOG_VERSION = "19.3"
 
 
 # ============================================================
+# VALIDATION DES VALEURS
+# ============================================================
+
+def _is_valid_weight(value: Any) -> bool:
+    """Vérifie qu'un poids est fini et strictement positif."""
+
+    if isinstance(value, bool):
+        return False
+
+    if not isinstance(value, (int, float)):
+        return False
+
+    try:
+        numeric_value = float(value)
+    except (ValueError, TypeError, OverflowError):
+        return False
+
+    return math.isfinite(numeric_value) and numeric_value > 0
+
+
+# ============================================================
 # CATALOGUE COGNITIF OFFICIEL
 # ============================================================
 
@@ -619,7 +640,7 @@ def get_system_total_weight(system_id: str) -> float:
     if not isinstance(system, dict):
         return 0.0
 
-    branches = system.get("sub_branches", {})
+    branches = system.get("sub_branches")
 
     if not isinstance(branches, dict):
         return 0.0
@@ -631,17 +652,10 @@ def get_system_total_weight(system_id: str) -> float:
         if not isinstance(branch, dict):
             continue
 
-        weight = branch.get("weight", 0)
+        weight = branch.get("weight")
 
-        if (
-            isinstance(weight, bool)
-            or not isinstance(weight, (int, float))
-            or not math.isfinite(weight)
-            or weight <= 0
-        ):
-            continue
-
-        total += float(weight)
+        if _is_valid_weight(weight):
+            total += float(weight)
 
     return round(total, 4)
 
@@ -656,9 +670,9 @@ def get_system_average_weight(system_id: str) -> float:
     if not isinstance(system, dict):
         return 0.0
 
-    branches = system.get("sub_branches", {})
+    branches = system.get("sub_branches")
 
-    if not isinstance(branches, dict) or not branches:
+    if not isinstance(branches, dict):
         return 0.0
 
     valid_weights = []
@@ -668,25 +682,15 @@ def get_system_average_weight(system_id: str) -> float:
         if not isinstance(branch, dict):
             continue
 
-        weight = branch.get("weight", 0)
+        weight = branch.get("weight")
 
-        if (
-            isinstance(weight, bool)
-            or not isinstance(weight, (int, float))
-            or not math.isfinite(weight)
-            or weight <= 0
-        ):
-            continue
-
-        valid_weights.append(float(weight))
+        if _is_valid_weight(weight):
+            valid_weights.append(float(weight))
 
     if not valid_weights:
         return 0.0
 
-    return round(
-        sum(valid_weights) / len(valid_weights),
-        4
-    )
+    return round(sum(valid_weights) / len(valid_weights), 4)
 
 
 def get_total_catalog_weight() -> float:
@@ -710,14 +714,9 @@ def get_branch_weight(
     if branch is None:
         return 0.0
 
-    weight = branch.get("weight", 0)
+    weight = branch.get("weight")
 
-    if (
-        isinstance(weight, bool)
-        or not isinstance(weight, (int, float))
-        or not math.isfinite(weight)
-        or weight <= 0
-    ):
+    if not _is_valid_weight(weight):
         return 0.0
 
     return float(weight)
@@ -742,30 +741,60 @@ def validate_cognitive_catalog() -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
 
+    if not isinstance(COGNITIVE_CATALOG, dict):
+        return {
+            "valid": False,
+            "version": CATALOG_VERSION,
+            "total_systems": 0,
+            "total_sub_branches": 0,
+            "total_weight": 0.0,
+            "historical_systems": list(HISTORICAL_SYSTEMS),
+            "invisible_systems": list(INVISIBLE_SYSTEMS),
+            "errors": [
+                "COGNITIVE_CATALOG doit être un dictionnaire."
+            ],
+            "warnings": [],
+        }
+
     actual_systems = set(COGNITIVE_CATALOG.keys())
     expected_systems = set(EXPECTED_SYSTEMS)
 
-    missing_systems = sorted(
-        expected_systems - actual_systems
-    )
-
-    unexpected_systems = sorted(
-        actual_systems - expected_systems
-    )
+    missing_systems = expected_systems - actual_systems
+    unexpected_systems = actual_systems - expected_systems
 
     if missing_systems:
         errors.append(
-            f"Systèmes manquants : {', '.join(missing_systems)}"
+            "Systèmes manquants : "
+            + ", ".join(sorted(missing_systems))
         )
 
     if unexpected_systems:
         warnings.append(
-            f"Systèmes supplémentaires : {', '.join(unexpected_systems)}"
+            "Systèmes supplémentaires : "
+            + ", ".join(
+                sorted(str(item) for item in unexpected_systems)
+            )
+        )
+
+    official_order = tuple(
+        key for key in COGNITIVE_CATALOG
+        if key in expected_systems
+    )
+
+    if official_order != EXPECTED_SYSTEMS:
+        warnings.append(
+            "L'ordre des 12 systèmes officiels a été modifié."
         )
 
     seen_branch_ids: dict[str, str] = {}
 
     for system_id, system in COGNITIVE_CATALOG.items():
+
+        if not isinstance(system_id, str) or not system_id.strip():
+            errors.append(
+                f"Identifiant de système invalide : {system_id!r}."
+            )
+            continue
 
         if not isinstance(system, dict):
             errors.append(
@@ -825,22 +854,10 @@ def validate_cognitive_catalog() -> dict[str, Any]:
 
             weight = branch.get("weight")
 
-            if (
-                isinstance(weight, bool)
-                or not isinstance(weight, (int, float))
-            ):
+            if not _is_valid_weight(weight):
                 errors.append(
-                    f"{system_id}.{branch_id} : poids non numérique."
-                )
-
-            elif not math.isfinite(weight):
-                errors.append(
-                    f"{system_id}.{branch_id} : poids non fini."
-                )
-
-            elif weight <= 0:
-                errors.append(
-                    f"{system_id}.{branch_id} : le poids doit être positif."
+                    f"{system_id}.{branch_id} : "
+                    "le poids doit être un nombre fini strictement positif."
                 )
 
     return {
@@ -883,7 +900,11 @@ def get_catalog_statistics() -> dict[str, Any]:
                 {
                     "id": branch_id,
                     "name": branch.get("name", branch_id),
-                    "weight": branch.get("weight", 1.0),
+                    "weight": (
+                        float(branch["weight"])
+                        if _is_valid_weight(branch.get("weight"))
+                        else 0.0
+                    ),
                 }
                 for branch_id, branch in branches.items()
                 if isinstance(branch, dict)

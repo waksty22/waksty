@@ -5,7 +5,7 @@ Chappie V19.3 — Moteur cognitif adaptatif.
 Responsabilités :
 - Calcul du profil cognitif global.
 - Calcul des niveaux des 12 systèmes cognitifs.
-- Pondération des sous-branches.
+- Évaluation pondérée des 92 sous-branches.
 - Analyse de l'asymétrie cognitive.
 - Détection des forces et faiblesses.
 - Évaluation de la maturité cognitive.
@@ -16,6 +16,27 @@ Le moteur est synchrone et ne réalise aucun appel réseau.
 
 Les données d'apprentissage restent stockées en base.
 Le cache ne contient que les résultats calculés.
+
+Format des données attendu :
+
+{
+    "tete": {
+        "logique_formelle": {
+            "level": 1,
+            "mastery": 0,
+            "confidence": 0.5,
+            "xp": 0
+        }
+    },
+    "mots": {
+        "vocabulaire": {
+            "level": 1,
+            "mastery": 0,
+            "confidence": 0.5,
+            "xp": 0
+        }
+    }
+}
 """
 
 from __future__ import annotations
@@ -57,7 +78,7 @@ DEFAULT_CACHE_TTL = 60.0
 MASTERY_INFLUENCE = 0.15
 
 # Conservées pour compatibilité avec d'éventuels imports.
-# Elles ne gonflent plus la maturité.
+# La confiance et l'XP ne gonflent pas la maturité.
 CONFIDENCE_INFLUENCE = 0.10
 XP_INFLUENCE = 0.05
 
@@ -66,6 +87,9 @@ MAX_WEIGHT = 1000.0
 
 STRENGTHS_LIMIT = 5
 WEAKNESSES_LIMIT = 5
+
+# Le calcul global donne le même poids à chaque système.
+# Les pondérations ne s'appliquent qu'à l'intérieur du système.
 
 
 # ============================================================
@@ -78,6 +102,7 @@ def _safe_number(
     minimum: float,
     maximum: float
 ) -> float:
+    """Convertit une valeur en nombre fini borné."""
 
     if isinstance(value, bool):
         return float(default)
@@ -103,6 +128,7 @@ def _safe_integer(
     minimum: int,
     maximum: int
 ) -> int:
+    """Convertit une valeur en entier borné."""
 
     if isinstance(value, bool):
         return default
@@ -123,16 +149,34 @@ def _safe_integer(
 
 
 def _safe_weight(value: Any) -> float:
+    """
+    Retourne un poids valide.
 
-    return _safe_number(
-        value,
-        default=1.0,
-        minimum=0.0,
-        maximum=MAX_WEIGHT
-    )
+    Un poids invalide retourne 0.0 :
+    il ne doit jamais être remplacé par 1.0,
+    car cela modifierait silencieusement les pondérations.
+    """
+
+    if isinstance(value, bool):
+        return 0.0
+
+    try:
+        number = float(value)
+
+        if not math.isfinite(number):
+            return 0.0
+
+        if number <= 0:
+            return 0.0
+
+        return min(number, MAX_WEIGHT)
+
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
 
 
 def _normalize_user_id(user_id: Any) -> str:
+    """Valide et normalise un identifiant utilisateur."""
 
     if not isinstance(user_id, str):
         raise ValueError(
@@ -158,8 +202,9 @@ def _normalize_skill_data(
     data: Any
 ) -> Dict[str, Any]:
     """
-    Format attendu :
+    Normalise les données d'une sous-branche.
 
+    Format :
     {
         "level": 1,
         "mastery": 0,
@@ -204,6 +249,22 @@ def _normalize_skill_data(
     }
 
 
+def _get_catalog_branches(
+    system_info: Any
+) -> Dict[str, Any]:
+    """Retourne les sous-branches d'un système si elles sont valides."""
+
+    if not isinstance(system_info, dict):
+        return {}
+
+    branches = system_info.get("sub_branches", {})
+
+    if not isinstance(branches, dict):
+        return {}
+
+    return branches
+
+
 # ============================================================
 # SIGNATURE DES DONNÉES POUR LE CACHE
 # ============================================================
@@ -214,20 +275,21 @@ def _build_skills_fingerprint(
     """
     Construit une signature déterministe des données utilisées.
 
-    Si les compétences changent, le cache n'est plus réutilisé.
+    Une modification de niveau, maîtrise, confiance ou XP
+    d'une sous-branche invalide automatiquement le cache.
     """
+
+    if not isinstance(db_skills_data, dict):
+        db_skills_data = {}
 
     fingerprint = []
 
     for system_id, system_info in COGNITIVE_CATALOG.items():
 
-        if not isinstance(system_info, dict):
+        if not isinstance(system_id, str):
             continue
 
-        branches = system_info.get("sub_branches", {})
-
-        if not isinstance(branches, dict):
-            continue
+        branches = _get_catalog_branches(system_info)
 
         user_system_data = db_skills_data.get(
             system_id,
@@ -240,6 +302,9 @@ def _build_skills_fingerprint(
         system_signature = []
 
         for branch_id in branches:
+
+            if not isinstance(branch_id, str):
+                continue
 
             normalized = _normalize_skill_data(
                 user_system_data.get(branch_id, {})
@@ -262,10 +327,40 @@ def _build_skills_fingerprint(
 
 
 # ============================================================
+# CALCUL DES NIVEAUX EFFECTIFS
+# ============================================================
+
+def _calculate_effective_level(
+    level: int,
+    mastery: float
+) -> float:
+    """
+    Calcule le niveau effectif d'une compétence.
+
+    Le niveau reste compris entre 1 et 30.
+
+    La maîtrise apporte une correction maximale de 0.15.
+    La confiance et l'XP sont affichées séparément.
+    """
+
+    mastery_bonus = (
+        mastery / 100.0
+    ) * MASTERY_INFLUENCE
+
+    effective_level = float(level) + mastery_bonus
+
+    return max(
+        float(MIN_LEVEL),
+        min(float(MAX_LEVEL), effective_level)
+    )
+
+
+# ============================================================
 # MOTEUR COGNITIF
 # ============================================================
 
 class CognitiveEngine:
+    """Moteur de calcul du profil cognitif de Chappie."""
 
     def __init__(
         self,
@@ -291,11 +386,19 @@ class CognitiveEngine:
         self,
         user_id: Optional[str] = None
     ) -> None:
+        """Invalide le cache d'un utilisateur ou de tous."""
 
         with self._lock:
 
             if user_id is not None:
-                self._user_caches.pop(str(user_id), None)
+
+                try:
+                    normalized_id = _normalize_user_id(user_id)
+                except ValueError:
+                    return
+
+                self._user_caches.pop(normalized_id, None)
+
             else:
                 self._user_caches.clear()
 
@@ -306,14 +409,25 @@ class CognitiveEngine:
         fingerprint: tuple
     ) -> Optional[Dict[str, Any]]:
 
+        if self._cache_ttl <= 0:
+            return None
+
         with self._lock:
 
             cached = self._user_caches.get(user_id)
 
-            if not cached:
+            if not isinstance(cached, dict):
                 return None
 
             timestamp = cached.get("timestamp", 0.0)
+
+            if (
+                not isinstance(timestamp, (int, float))
+                or isinstance(timestamp, bool)
+                or not math.isfinite(float(timestamp))
+            ):
+                self._user_caches.pop(user_id, None)
+                return None
 
             if current_time - timestamp >= self._cache_ttl:
                 self._user_caches.pop(user_id, None)
@@ -339,6 +453,9 @@ class CognitiveEngine:
         fingerprint: tuple
     ) -> None:
 
+        if self._cache_ttl <= 0:
+            return
+
         with self._lock:
 
             self._user_caches[user_id] = {
@@ -357,6 +474,22 @@ class CognitiveEngine:
         db_skills_data: Dict[str, Any],
         force_recompute: bool = False
     ) -> Dict[str, Any]:
+        """
+        Calcule le profil cognitif complet.
+
+        db_skills_data doit respecter la structure :
+
+        {
+            "tete": {
+                "logique_formelle": {
+                    "level": 1,
+                    "mastery": 0,
+                    "confidence": 0.5,
+                    "xp": 0
+                }
+            }
+        }
+        """
 
         user_id = _normalize_user_id(user_id)
 
@@ -399,16 +532,13 @@ class CognitiveEngine:
 
         for sys_key, sys_info in COGNITIVE_CATALOG.items():
 
+            if not isinstance(sys_key, str):
+                continue
+
             if not isinstance(sys_info, dict):
                 continue
 
-            sub_branches = sys_info.get(
-                "sub_branches",
-                {}
-            )
-
-            if not isinstance(sub_branches, dict):
-                sub_branches = {}
+            sub_branches = _get_catalog_branches(sys_info)
 
             user_system_data = db_skills_data.get(
                 sys_key,
@@ -428,6 +558,7 @@ class CognitiveEngine:
             system_xp_sum = 0
 
             system_branch_count = 0
+            system_valid_weight_count = 0
 
             # ------------------------------------------------
             # SOUS-BRANCHES
@@ -435,11 +566,14 @@ class CognitiveEngine:
 
             for sub_key, sub_meta in sub_branches.items():
 
+                if not isinstance(sub_key, str):
+                    continue
+
                 if not isinstance(sub_meta, dict):
                     sub_meta = {}
 
                 weight = _safe_weight(
-                    sub_meta.get("weight", 1.0)
+                    sub_meta.get("weight")
                 )
 
                 sub_data = _normalize_skill_data(
@@ -451,16 +585,9 @@ class CognitiveEngine:
                 confidence = sub_data["confidence"]
                 xp = sub_data["xp"]
 
-                # La maîtrise apporte une petite correction.
-                # L'XP et la confiance restent des indicateurs séparés.
-
-                mastery_bonus = (
-                    mastery / 100.0
-                ) * MASTERY_INFLUENCE
-
-                effective_level = min(
-                    float(MAX_LEVEL),
-                    float(level) + mastery_bonus
+                effective_level = _calculate_effective_level(
+                    level,
+                    mastery
                 )
 
                 branch_result = {
@@ -481,21 +608,24 @@ class CognitiveEngine:
 
                 sub_branches_scores[sub_key] = branch_result
 
-                if weight <= 0:
-                    continue
+                total_branches += 1
+                system_branch_count += 1
 
-                sys_weighted_sum += effective_level * weight
-                sys_weight_total += weight
+                if level > DEFAULT_LEVEL or mastery > 0 or xp > 0:
+                    developed_branches += 1
 
                 system_mastery_sum += mastery
                 system_confidence_sum += confidence
                 system_xp_sum += xp
 
-                system_branch_count += 1
-                total_branches += 1
+                # Une pondération invalide ne participe
+                # pas à la moyenne pondérée.
+                if weight <= 0:
+                    continue
 
-                if level > DEFAULT_LEVEL or mastery > 0 or xp > 0:
-                    developed_branches += 1
+                sys_weighted_sum += effective_level * weight
+                sys_weight_total += weight
+                system_valid_weight_count += 1
 
                 all_branch_scores.append({
                     "system": sys_key,
@@ -541,13 +671,19 @@ class CognitiveEngine:
             avg_mastery = (
                 system_mastery_sum / system_branch_count
                 if system_branch_count > 0
-                else 0.0
+                else DEFAULT_MASTERY
             )
 
             avg_confidence = (
                 system_confidence_sum / system_branch_count
                 if system_branch_count > 0
                 else DEFAULT_CONFIDENCE
+            )
+
+            avg_xp = (
+                system_xp_sum / system_branch_count
+                if system_branch_count > 0
+                else DEFAULT_XP
             )
 
             if sys_weight_total > 0:
@@ -571,9 +707,16 @@ class CognitiveEngine:
                     3
                 ),
 
+                "average_xp": round(
+                    avg_xp,
+                    2
+                ),
+
                 "total_xp": system_xp_sum,
 
                 "branch_count": system_branch_count,
+
+                "valid_weight_count": system_valid_weight_count,
 
                 "sub_branches": sub_branches_scores
             }
@@ -582,11 +725,17 @@ class CognitiveEngine:
         # MATURITÉ GLOBALE
         # ----------------------------------------------------
 
+        # Chaque système possède le même poids global.
+        # Les pondérations sont appliquées uniquement
+        # à l'intérieur de chaque système.
+
         if system_maturity_values:
+
             global_maturity_score = (
                 sum(system_maturity_values)
                 / len(system_maturity_values)
             )
+
         else:
             global_maturity_score = float(DEFAULT_LEVEL)
 
@@ -615,15 +764,24 @@ class CognitiveEngine:
         # DÉVELOPPEMENT
         # ----------------------------------------------------
 
+        development_percentage = (
+            developed_branches / total_branches * 100.0
+            if total_branches > 0
+            else 0.0
+        )
+
         development = {
             "total_branches": total_branches,
 
             "developed_branches": developed_branches,
 
+            "undeveloped_branches": max(
+                0,
+                total_branches - developed_branches
+            ),
+
             "development_percentage": round(
-                (
-                    developed_branches / total_branches * 100
-                ) if total_branches else 0.0,
+                development_percentage,
                 2
             ),
 
@@ -690,6 +848,13 @@ class CognitiveEngine:
         self,
         branches: list[Dict[str, Any]]
     ) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        """
+        Identifie les compétences les plus et les moins développées.
+
+        Les listes sont disjointes :
+        une compétence ne peut pas être simultanément
+        une force et une faiblesse.
+        """
 
         if not branches:
             return [], []
@@ -699,19 +864,24 @@ class CognitiveEngine:
             key=lambda item: (
                 item.get("effective_level", 0),
                 item.get("mastery", 0),
-                item.get("level", 0)
+                item.get("level", 0),
+                item.get("system", ""),
+                item.get("branch", "")
             ),
             reverse=True
         )
 
         branch_count = len(ordered)
 
+        # Pour les petits profils, on évite que les mêmes
+        # compétences soient dans les deux listes.
         selection_count = min(
             STRENGTHS_LIMIT,
             max(1, branch_count // 2)
         )
 
         strengths = ordered[:selection_count]
+
         remaining = ordered[selection_count:]
 
         weaknesses = sorted(
@@ -719,7 +889,9 @@ class CognitiveEngine:
             key=lambda item: (
                 item.get("effective_level", 0),
                 item.get("mastery", 0),
-                item.get("level", 0)
+                item.get("level", 0),
+                item.get("system", ""),
+                item.get("branch", "")
             )
         )[:WEAKNESSES_LIMIT]
 
@@ -737,6 +909,7 @@ class CognitiveEngine:
         systems: Dict[str, Any],
         highest: bool = True
     ) -> Optional[Dict[str, Any]]:
+        """Retourne le système le plus ou le moins développé."""
 
         if not systems:
             return None
@@ -751,26 +924,32 @@ class CognitiveEngine:
             return None
 
         if highest:
+
             key, data = max(
                 valid_systems,
                 key=lambda item: item[1].get(
                     "average_level",
-                    0
+                    DEFAULT_LEVEL
                 )
             )
+
         else:
+
             key, data = min(
                 valid_systems,
                 key=lambda item: item[1].get(
                     "average_level",
-                    0
+                    DEFAULT_LEVEL
                 )
             )
 
         return {
             "id": key,
             "name": data.get("name", key),
-            "average_level": data.get("average_level", 1.0)
+            "average_level": data.get(
+                "average_level",
+                float(DEFAULT_LEVEL)
+            )
         }
 
     # ========================================================
@@ -782,7 +961,7 @@ class CognitiveEngine:
         systems: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Traduit les compétences en comportements concrets.
+        Traduit les compétences en paramètres comportementaux.
 
         Ces caractéristiques influencent le comportement généré,
         mais ne constituent pas une conscience réelle.
@@ -802,23 +981,23 @@ class CognitiveEngine:
             lien = {}
 
         tete_lvl = _safe_number(
-            tete.get("average_level", 1.0),
-            1.0,
-            1.0,
+            tete.get("average_level", DEFAULT_LEVEL),
+            DEFAULT_LEVEL,
+            MIN_LEVEL,
             MAX_LEVEL
         )
 
         mots_lvl = _safe_number(
-            mots.get("average_level", 1.0),
-            1.0,
-            1.0,
+            mots.get("average_level", DEFAULT_LEVEL),
+            DEFAULT_LEVEL,
+            MIN_LEVEL,
             MAX_LEVEL
         )
 
         lien_lvl = _safe_number(
-            lien.get("average_level", 1.0),
-            1.0,
-            1.0,
+            lien.get("average_level", DEFAULT_LEVEL),
+            DEFAULT_LEVEL,
+            MIN_LEVEL,
             MAX_LEVEL
         )
 
@@ -831,16 +1010,23 @@ class CognitiveEngine:
         if not isinstance(mots_branches, dict):
             mots_branches = {}
 
-        humour = _normalize_skill_data(
+        humour_data = _normalize_skill_data(
             mots_branches.get("humour_ironie", {})
         )
 
-        incertitude = _normalize_skill_data(
+        incertitude_data = _normalize_skill_data(
             tete_branches.get("gestion_incertitude", {})
         )
 
-        humour_lvl = humour["level"]
-        incertitude_lvl = incertitude["level"]
+        humour_level = _calculate_effective_level(
+            humour_data["level"],
+            humour_data["mastery"]
+        )
+
+        uncertainty_level = _calculate_effective_level(
+            incertitude_data["level"],
+            incertitude_data["mastery"]
+        )
 
         # ----------------------------------------------------
         # COMPLEXITÉ DES RÉPONSES
@@ -848,8 +1034,10 @@ class CognitiveEngine:
 
         if tete_lvl > 6:
             response_complexity = "expert"
+
         elif tete_lvl > 3:
             response_complexity = "intermediate"
+
         else:
             response_complexity = "simple"
 
@@ -859,8 +1047,10 @@ class CognitiveEngine:
 
         if mots_lvl > 6:
             vocabulary_richness = "high"
+
         elif mots_lvl > 3:
             vocabulary_richness = "moderate"
+
         else:
             vocabulary_richness = "basic"
 
@@ -868,7 +1058,7 @@ class CognitiveEngine:
         # HUMOUR
         # ----------------------------------------------------
 
-        humor_enabled = humour_lvl >= 4
+        humor_enabled = humour_level >= 4
 
         humor_description = (
             "Comprend progressivement l'ironie, "
@@ -883,13 +1073,16 @@ class CognitiveEngine:
         # INCERTITUDE
         # ----------------------------------------------------
 
-        if incertitude_lvl >= 5:
+        if uncertainty_level >= 5:
+
             uncertainty_handling = (
                 "Admet ses lacunes, distingue les faits "
                 "des hypothèses et pose des questions "
                 "lorsqu'une information manque."
             )
+
         else:
+
             uncertainty_handling = (
                 "La gestion de l'incertitude est encore "
                 "en développement. Doit privilégier "
@@ -902,12 +1095,15 @@ class CognitiveEngine:
         # ----------------------------------------------------
 
         if lien_lvl > 5:
+
             empathy_depth = (
                 "Lecture plus fine des intentions, "
                 "du contexte relationnel et adaptation "
                 "du soutien apporté."
             )
+
         else:
+
             empathy_depth = (
                 "Relation directe et factuelle. "
                 "La compréhension des intentions et "
@@ -923,11 +1119,11 @@ class CognitiveEngine:
 
             "humor_description": humor_description,
 
-            "humor_level": humour_lvl,
+            "humor_level": round(humour_level, 3),
 
             "uncertainty_handling": uncertainty_handling,
 
-            "uncertainty_level": incertitude_lvl,
+            "uncertainty_level": round(uncertainty_level, 3),
 
             "empathy_depth": empathy_depth,
 

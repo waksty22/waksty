@@ -469,8 +469,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 2. Montage du dossier static juste après
-app.mount("/", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+# 2. Montage du dossier static sur /static pour ne pas bloquer la racine
+app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 
 @app.middleware("http")

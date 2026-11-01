@@ -1,4 +1,3 @@
-# backend/cognition/engine.py
 
 """
 Chappie V19.3 — Moteur cognitif adaptatif.
@@ -10,14 +9,13 @@ Responsabilités :
 - Analyse de l'asymétrie cognitive.
 - Détection des forces et faiblesses.
 - Évaluation de la maturité cognitive.
-- Adaptation comportementale de Chappie.
+- Adaptation comportementale.
 - Cache isolé par utilisateur.
 
-Le moteur est volontairement léger et synchrone :
-il ne réalise aucun appel réseau et ne bloque pas Gemini Live.
+Le moteur est synchrone et ne réalise aucun appel réseau.
 
-Les données d'apprentissage restent stockées dans la base de données.
-Le cache ne contient que des résultats calculés.
+Les données d'apprentissage restent stockées en base.
+Le cache ne contient que les résultats calculés.
 """
 
 from __future__ import annotations
@@ -56,11 +54,18 @@ MAX_XP = 10**12
 
 DEFAULT_CACHE_TTL = 60.0
 
-# Une branche est considérée comme réellement développée
-# lorsque son niveau et sa maîtrise progressent.
 MASTERY_INFLUENCE = 0.15
+
+# Conservées pour compatibilité avec d'éventuels imports.
+# Elles ne gonflent plus la maturité.
 CONFIDENCE_INFLUENCE = 0.10
 XP_INFLUENCE = 0.05
+
+MAX_USER_ID_LENGTH = 256
+MAX_WEIGHT = 1000.0
+
+STRENGTHS_LIMIT = 5
+WEAKNESSES_LIMIT = 5
 
 
 # ============================================================
@@ -73,25 +78,23 @@ def _safe_number(
     minimum: float,
     maximum: float
 ) -> float:
-    """
-    Convertit une valeur en nombre avec protection contre :
-    - None
-    - Les chaînes invalides
-    - Les NaN
-    - Les infinis
-    - Les valeurs hors limites
-    """
+
+    if isinstance(value, bool):
+        return float(default)
 
     try:
         number = float(value)
 
         if not math.isfinite(number):
-            return default
+            return float(default)
 
-        return max(minimum, min(maximum, number))
+        return max(
+            float(minimum),
+            min(float(maximum), number)
+        )
 
     except (TypeError, ValueError, OverflowError):
-        return default
+        return float(default)
 
 
 def _safe_integer(
@@ -100,12 +103,11 @@ def _safe_integer(
     minimum: int,
     maximum: int
 ) -> int:
-    """Convertit une valeur en entier sécurisé."""
+
+    if isinstance(value, bool):
+        return default
 
     try:
-        if isinstance(value, bool):
-            return default
-
         number = float(value)
 
         if not math.isfinite(number):
@@ -121,28 +123,41 @@ def _safe_integer(
 
 
 def _safe_weight(value: Any) -> float:
-    """
-    Vérifie le poids d'une sous-branche.
 
-    Un poids nul ou négatif ne contribue pas au calcul.
-    """
-
-    weight = _safe_number(
+    return _safe_number(
         value,
         default=1.0,
         minimum=0.0,
-        maximum=1000.0
+        maximum=MAX_WEIGHT
     )
 
-    return weight
+
+def _normalize_user_id(user_id: Any) -> str:
+
+    if not isinstance(user_id, str):
+        raise ValueError(
+            "L'identifiant utilisateur doit être une chaîne."
+        )
+
+    normalized = user_id.strip()
+
+    if not normalized:
+        raise ValueError(
+            "Un identifiant utilisateur est obligatoire."
+        )
+
+    if len(normalized) > MAX_USER_ID_LENGTH:
+        raise ValueError(
+            "L'identifiant utilisateur est trop long."
+        )
+
+    return normalized
 
 
 def _normalize_skill_data(
     data: Any
 ) -> Dict[str, Any]:
     """
-    Normalise les données d'une compétence.
-
     Format attendu :
 
     {
@@ -156,41 +171,94 @@ def _normalize_skill_data(
     if not isinstance(data, dict):
         data = {}
 
-    level = _safe_integer(
-        data.get("level", DEFAULT_LEVEL),
-        DEFAULT_LEVEL,
-        MIN_LEVEL,
-        MAX_LEVEL
-    )
-
-    mastery = _safe_number(
-        data.get("mastery", DEFAULT_MASTERY),
-        DEFAULT_MASTERY,
-        MIN_MASTERY,
-        MAX_MASTERY
-    )
-
-    confidence = _safe_number(
-        data.get("confidence", DEFAULT_CONFIDENCE),
-        DEFAULT_CONFIDENCE,
-        MIN_CONFIDENCE,
-        MAX_CONFIDENCE
-    )
-
-    xp = _safe_integer(
-        data.get("xp", DEFAULT_XP),
-        DEFAULT_XP,
-        0,
-        MAX_XP
-    )
-
     return {
         **data,
-        "level": level,
-        "mastery": mastery,
-        "confidence": confidence,
-        "xp": xp
+
+        "level": _safe_integer(
+            data.get("level", DEFAULT_LEVEL),
+            DEFAULT_LEVEL,
+            MIN_LEVEL,
+            MAX_LEVEL
+        ),
+
+        "mastery": _safe_number(
+            data.get("mastery", DEFAULT_MASTERY),
+            DEFAULT_MASTERY,
+            MIN_MASTERY,
+            MAX_MASTERY
+        ),
+
+        "confidence": _safe_number(
+            data.get("confidence", DEFAULT_CONFIDENCE),
+            DEFAULT_CONFIDENCE,
+            MIN_CONFIDENCE,
+            MAX_CONFIDENCE
+        ),
+
+        "xp": _safe_integer(
+            data.get("xp", DEFAULT_XP),
+            DEFAULT_XP,
+            0,
+            MAX_XP
+        )
     }
+
+
+# ============================================================
+# SIGNATURE DES DONNÉES POUR LE CACHE
+# ============================================================
+
+def _build_skills_fingerprint(
+    db_skills_data: Dict[str, Any]
+) -> tuple:
+    """
+    Construit une signature déterministe des données utilisées.
+
+    Si les compétences changent, le cache n'est plus réutilisé.
+    """
+
+    fingerprint = []
+
+    for system_id, system_info in COGNITIVE_CATALOG.items():
+
+        if not isinstance(system_info, dict):
+            continue
+
+        branches = system_info.get("sub_branches", {})
+
+        if not isinstance(branches, dict):
+            continue
+
+        user_system_data = db_skills_data.get(
+            system_id,
+            {}
+        )
+
+        if not isinstance(user_system_data, dict):
+            user_system_data = {}
+
+        system_signature = []
+
+        for branch_id in branches:
+
+            normalized = _normalize_skill_data(
+                user_system_data.get(branch_id, {})
+            )
+
+            system_signature.append((
+                branch_id,
+                normalized["level"],
+                normalized["mastery"],
+                normalized["confidence"],
+                normalized["xp"]
+            ))
+
+        fingerprint.append((
+            system_id,
+            tuple(system_signature)
+        ))
+
+    return tuple(fingerprint)
 
 
 # ============================================================
@@ -198,14 +266,6 @@ def _normalize_skill_data(
 # ============================================================
 
 class CognitiveEngine:
-    """
-    Moteur central de calcul cognitif de Chappie.
-
-    Chaque utilisateur possède son propre cache.
-
-    Le profil cognitif est calculé à partir du catalogue
-    et des compétences enregistrées en base de données.
-    """
 
     def __init__(
         self,
@@ -214,17 +274,13 @@ class CognitiveEngine:
 
         self._user_caches: Dict[str, Dict[str, Any]] = {}
 
-        self._cache_ttl = max(
+        self._cache_ttl = _safe_number(
+            cache_ttl,
+            DEFAULT_CACHE_TTL,
             0.0,
-            _safe_number(
-                cache_ttl,
-                DEFAULT_CACHE_TTL,
-                0.0,
-                86400.0
-            )
+            86400.0
         )
 
-        # Protège le cache si plusieurs requêtes arrivent simultanément.
         self._lock = threading.RLock()
 
     # ========================================================
@@ -235,26 +291,20 @@ class CognitiveEngine:
         self,
         user_id: Optional[str] = None
     ) -> None:
-        """
-        Invalide le cache d'un utilisateur.
-
-        Sans user_id, tous les caches sont supprimés.
-        """
 
         with self._lock:
 
             if user_id is not None:
                 self._user_caches.pop(str(user_id), None)
-
             else:
                 self._user_caches.clear()
 
     def _get_cached_profile(
         self,
         user_id: str,
-        current_time: float
+        current_time: float,
+        fingerprint: tuple
     ) -> Optional[Dict[str, Any]]:
-        """Récupère un profil en cache s'il est encore valide."""
 
         with self._lock:
 
@@ -269,23 +319,32 @@ class CognitiveEngine:
                 self._user_caches.pop(user_id, None)
                 return None
 
-            # Retourne une copie pour empêcher une modification
-            # accidentelle du profil conservé dans le cache.
-            return copy.deepcopy(cached["profile"])
+            if cached.get("fingerprint") != fingerprint:
+                self._user_caches.pop(user_id, None)
+                return None
+
+            profile = cached.get("profile")
+
+            if not isinstance(profile, dict):
+                self._user_caches.pop(user_id, None)
+                return None
+
+            return copy.deepcopy(profile)
 
     def _save_cached_profile(
         self,
         user_id: str,
         profile: Dict[str, Any],
-        current_time: float
+        current_time: float,
+        fingerprint: tuple
     ) -> None:
-        """Enregistre le profil cognitif dans le cache."""
 
         with self._lock:
 
             self._user_caches[user_id] = {
                 "profile": copy.deepcopy(profile),
-                "timestamp": current_time
+                "timestamp": current_time,
+                "fingerprint": fingerprint
             }
 
     # ========================================================
@@ -298,56 +357,18 @@ class CognitiveEngine:
         db_skills_data: Dict[str, Any],
         force_recompute: bool = False
     ) -> Dict[str, Any]:
-        """
-        Calcule le profil cognitif complet de Chappie.
 
-        Paramètres :
-            user_id :
-                Identifiant de l'utilisateur.
-
-            db_skills_data :
-                Compétences récupérées depuis la base.
-
-            force_recompute :
-                Ignore le cache et recalcule le profil.
-
-        Retour :
-            {
-                "version": "19.3",
-                "global_maturity": 1.0,
-                "systems": {},
-                "behavior": {},
-                "strengths": [],
-                "weaknesses": [],
-                "development": {},
-                "updated_at": ...
-            }
-
-        Structure attendue des données :
-
-            {
-                "tete": {
-                    "raisonnement": {
-                        "level": 2,
-                        "mastery": 30,
-                        "confidence": 0.7,
-                        "xp": 120
-                    }
-                }
-            }
-        """
-
-        user_id = str(user_id or "").strip()
-
-        if not user_id:
-            raise ValueError(
-                "Un identifiant utilisateur est obligatoire."
-            )
+        user_id = _normalize_user_id(user_id)
 
         if not isinstance(db_skills_data, dict):
             db_skills_data = {}
 
-        current_time = time.time()
+        cache_time = time.monotonic()
+        updated_at = time.time()
+
+        fingerprint = _build_skills_fingerprint(
+            db_skills_data
+        )
 
         # ----------------------------------------------------
         # CACHE
@@ -357,25 +378,24 @@ class CognitiveEngine:
 
             cached_profile = self._get_cached_profile(
                 user_id,
-                current_time
+                cache_time,
+                fingerprint
             )
 
             if cached_profile is not None:
                 return cached_profile
 
         # ----------------------------------------------------
-        # CALCUL
+        # CALCUL DES SYSTÈMES
         # ----------------------------------------------------
 
         systems_profile: Dict[str, Any] = {}
-
-        total_weighted_level = 0.0
-        total_weights_sum = 0.0
 
         total_branches = 0
         developed_branches = 0
 
         all_branch_scores = []
+        system_maturity_values = []
 
         for sys_key, sys_info in COGNITIVE_CATALOG.items():
 
@@ -409,6 +429,10 @@ class CognitiveEngine:
 
             system_branch_count = 0
 
+            # ------------------------------------------------
+            # SOUS-BRANCHES
+            # ------------------------------------------------
+
             for sub_key, sub_meta in sub_branches.items():
 
                 if not isinstance(sub_meta, dict):
@@ -418,13 +442,8 @@ class CognitiveEngine:
                     sub_meta.get("weight", 1.0)
                 )
 
-                raw_data = user_system_data.get(
-                    sub_key,
-                    {}
-                )
-
                 sub_data = _normalize_skill_data(
-                    raw_data
+                    user_system_data.get(sub_key, {})
                 )
 
                 level = sub_data["level"]
@@ -432,62 +451,28 @@ class CognitiveEngine:
                 confidence = sub_data["confidence"]
                 xp = sub_data["xp"]
 
-                # ------------------------------------------------
-                # SCORE DE DÉVELOPPEMENT
-                # ------------------------------------------------
-
-                # Le niveau représente la progression générale.
-                # La maîtrise affine l'évaluation de la compétence.
-                #
-                # La confiance est une mesure de fiabilité déclarée,
-                # et non une preuve que la compétence est acquise.
-                #
-                # L'XP permet de suivre l'expérience accumulée.
-
-                normalized_mastery = mastery / 100.0
-
-                normalized_xp = min(
-                    1.0,
-                    xp / 10000.0
-                )
+                # La maîtrise apporte une petite correction.
+                # L'XP et la confiance restent des indicateurs séparés.
 
                 mastery_bonus = (
-                    normalized_mastery * MASTERY_INFLUENCE
-                )
-
-                confidence_bonus = (
-                    confidence * CONFIDENCE_INFLUENCE
-                )
-
-                xp_bonus = (
-                    normalized_xp * XP_INFLUENCE
-                )
-
-                # Le niveau reste la donnée principale.
-                # Les autres données affinent le score.
-                effective_level = (
-                    float(level)
-                    + mastery_bonus
-                    + confidence_bonus
-                    + xp_bonus
-                )
+                    mastery / 100.0
+                ) * MASTERY_INFLUENCE
 
                 effective_level = min(
                     float(MAX_LEVEL),
-                    effective_level
+                    float(level) + mastery_bonus
                 )
-
-                # ------------------------------------------------
-                # DONNÉES DE LA SOUS-BRANCHE
-                # ------------------------------------------------
 
                 branch_result = {
                     **sub_data,
+
                     "effective_level": round(
                         effective_level,
                         3
                     ),
+
                     "weight": weight,
+
                     "name": sub_meta.get(
                         "name",
                         sub_key
@@ -496,50 +481,56 @@ class CognitiveEngine:
 
                 sub_branches_scores[sub_key] = branch_result
 
-                if weight > 0:
+                if weight <= 0:
+                    continue
 
-                    sys_weighted_sum += (
-                        effective_level * weight
-                    )
+                sys_weighted_sum += effective_level * weight
+                sys_weight_total += weight
 
-                    sys_weight_total += weight
+                system_mastery_sum += mastery
+                system_confidence_sum += confidence
+                system_xp_sum += xp
 
-                    system_mastery_sum += mastery
-                    system_confidence_sum += confidence
-                    system_xp_sum += xp
+                system_branch_count += 1
+                total_branches += 1
 
-                    system_branch_count += 1
+                if level > DEFAULT_LEVEL or mastery > 0 or xp > 0:
+                    developed_branches += 1
 
-                    total_branches += 1
+                all_branch_scores.append({
+                    "system": sys_key,
 
-                    if level > 1 or mastery > 0 or xp > 0:
-                        developed_branches += 1
+                    "system_name": sys_info.get(
+                        "name",
+                        sys_key
+                    ),
 
-                    all_branch_scores.append({
-                        "system": sys_key,
-                        "system_name": sys_info.get(
-                            "name",
-                            sys_key
-                        ),
-                        "branch": sub_key,
-                        "branch_name": sub_meta.get(
-                            "name",
-                            sub_key
-                        ),
-                        "level": level,
-                        "effective_level": round(
-                            effective_level,
-                            3
-                        ),
-                        "mastery": mastery,
-                        "confidence": confidence,
-                        "xp": xp,
-                        "weight": weight
-                    })
+                    "branch": sub_key,
 
-            # ----------------------------------------------------
+                    "branch_name": sub_meta.get(
+                        "name",
+                        sub_key
+                    ),
+
+                    "level": level,
+
+                    "effective_level": round(
+                        effective_level,
+                        3
+                    ),
+
+                    "mastery": mastery,
+
+                    "confidence": confidence,
+
+                    "xp": xp,
+
+                    "weight": weight
+                })
+
+            # ------------------------------------------------
             # MOYENNES DU SYSTÈME
-            # ----------------------------------------------------
+            # ------------------------------------------------
 
             avg_sys_level = (
                 sys_weighted_sum / sys_weight_total
@@ -559,11 +550,11 @@ class CognitiveEngine:
                 else DEFAULT_CONFIDENCE
             )
 
+            if sys_weight_total > 0:
+                system_maturity_values.append(avg_sys_level)
+
             systems_profile[sys_key] = {
-                "name": sys_info.get(
-                    "name",
-                    sys_key
-                ),
+                "name": sys_info.get("name", sys_key),
 
                 "average_level": round(
                     avg_sys_level,
@@ -587,38 +578,42 @@ class CognitiveEngine:
                 "sub_branches": sub_branches_scores
             }
 
-            total_weighted_level += sys_weighted_sum
-            total_weights_sum += sys_weight_total
+        # ----------------------------------------------------
+        # MATURITÉ GLOBALE
+        # ----------------------------------------------------
 
-        # --------------------------------------------------------
-        # MATURITÉ COGNITIVE GLOBALE
-        # --------------------------------------------------------
+        if system_maturity_values:
+            global_maturity_score = (
+                sum(system_maturity_values)
+                / len(system_maturity_values)
+            )
+        else:
+            global_maturity_score = float(DEFAULT_LEVEL)
 
-        global_maturity_score = (
-            total_weighted_level / total_weights_sum
-            if total_weights_sum > 0
-            else float(DEFAULT_LEVEL)
+        global_maturity_score = max(
+            float(MIN_LEVEL),
+            min(float(MAX_LEVEL), global_maturity_score)
         )
 
-        # --------------------------------------------------------
+        # ----------------------------------------------------
         # FORCES ET FAIBLESSES
-        # --------------------------------------------------------
+        # ----------------------------------------------------
 
         strengths, weaknesses = self._derive_strengths_weaknesses(
             all_branch_scores
         )
 
-        # --------------------------------------------------------
+        # ----------------------------------------------------
         # COMPORTEMENT
-        # --------------------------------------------------------
+        # ----------------------------------------------------
 
         behavior_traits = self._derive_behavioral_traits(
             systems_profile
         )
 
-        # --------------------------------------------------------
+        # ----------------------------------------------------
         # DÉVELOPPEMENT
-        # --------------------------------------------------------
+        # ----------------------------------------------------
 
         development = {
             "total_branches": total_branches,
@@ -642,12 +637,20 @@ class CognitiveEngine:
             "weakest_system": self._get_extreme_system(
                 systems_profile,
                 highest=False
-            )
+            ),
+
+            "maturity_method": "equal_system_weighted_branches",
+
+            "mastery_influence": MASTERY_INFLUENCE,
+
+            "confidence_affects_maturity": False,
+
+            "xp_affects_maturity": False
         }
 
-        # --------------------------------------------------------
+        # ----------------------------------------------------
         # PROFIL FINAL
-        # --------------------------------------------------------
+        # ----------------------------------------------------
 
         profile = {
             "version": ENGINE_VERSION,
@@ -667,17 +670,14 @@ class CognitiveEngine:
 
             "development": development,
 
-            "updated_at": current_time
+            "updated_at": updated_at
         }
-
-        # --------------------------------------------------------
-        # CACHE
-        # --------------------------------------------------------
 
         self._save_cached_profile(
             user_id,
             profile,
-            current_time
+            cache_time,
+            fingerprint
         )
 
         return copy.deepcopy(profile)
@@ -690,35 +690,38 @@ class CognitiveEngine:
         self,
         branches: list[Dict[str, Any]]
     ) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
-        """
-        Identifie les compétences les plus développées
-        et les domaines qui nécessitent davantage d'apprentissage.
-
-        Cette asymétrie permet à Chappie d'avoir des profils
-        de compétences différents selon les domaines.
-        """
 
         if not branches:
             return [], []
 
         ordered = sorted(
             branches,
-            key=lambda item: item.get(
-                "effective_level",
-                0
+            key=lambda item: (
+                item.get("effective_level", 0),
+                item.get("mastery", 0),
+                item.get("level", 0)
             ),
             reverse=True
         )
 
-        strengths = ordered[:5]
+        branch_count = len(ordered)
+
+        selection_count = min(
+            STRENGTHS_LIMIT,
+            max(1, branch_count // 2)
+        )
+
+        strengths = ordered[:selection_count]
+        remaining = ordered[selection_count:]
 
         weaknesses = sorted(
-            branches,
+            remaining,
             key=lambda item: (
                 item.get("effective_level", 0),
-                item.get("mastery", 0)
+                item.get("mastery", 0),
+                item.get("level", 0)
             )
-        )[:5]
+        )[:WEAKNESSES_LIMIT]
 
         return (
             copy.deepcopy(strengths),
@@ -726,7 +729,7 @@ class CognitiveEngine:
         )
 
     # ========================================================
-    # IDENTIFICATION DES SYSTÈMES EXTRÊMES
+    # SYSTÈMES EXTRÊMES
     # ========================================================
 
     def _get_extreme_system(
@@ -734,7 +737,6 @@ class CognitiveEngine:
         systems: Dict[str, Any],
         highest: bool = True
     ) -> Optional[Dict[str, Any]]:
-        """Retourne le système le plus fort ou le plus faible."""
 
         if not systems:
             return None
@@ -748,23 +750,22 @@ class CognitiveEngine:
         if not valid_systems:
             return None
 
-        key, data = (
-            max(
+        if highest:
+            key, data = max(
                 valid_systems,
                 key=lambda item: item[1].get(
                     "average_level",
                     0
                 )
             )
-            if highest
-            else min(
+        else:
+            key, data = min(
                 valid_systems,
                 key=lambda item: item[1].get(
                     "average_level",
                     0
                 )
             )
-        )
 
         return {
             "id": key,
@@ -783,11 +784,7 @@ class CognitiveEngine:
         """
         Traduit les compétences en comportements concrets.
 
-        Ces informations peuvent être injectées dans le prompt
-        de Gemini pour adapter les réponses de Chappie.
-
-        Attention :
-        ces caractéristiques influencent le comportement généré,
+        Ces caractéristiques influencent le comportement généré,
         mais ne constituent pas une conscience réelle.
         """
 
@@ -825,15 +822,8 @@ class CognitiveEngine:
             MAX_LEVEL
         )
 
-        tete_branches = tete.get(
-            "sub_branches",
-            {}
-        )
-
-        mots_branches = mots.get(
-            "sub_branches",
-            {}
-        )
+        tete_branches = tete.get("sub_branches", {})
+        mots_branches = mots.get("sub_branches", {})
 
         if not isinstance(tete_branches, dict):
             tete_branches = {}
@@ -858,23 +848,19 @@ class CognitiveEngine:
 
         if tete_lvl > 6:
             response_complexity = "expert"
-
         elif tete_lvl > 3:
             response_complexity = "intermediate"
-
         else:
             response_complexity = "simple"
 
         # ----------------------------------------------------
-        # RICHESSE DU VOCABULAIRE
+        # VOCABULAIRE
         # ----------------------------------------------------
 
         if mots_lvl > 6:
             vocabulary_richness = "high"
-
         elif mots_lvl > 3:
             vocabulary_richness = "moderate"
-
         else:
             vocabulary_richness = "basic"
 
@@ -894,19 +880,16 @@ class CognitiveEngine:
         )
 
         # ----------------------------------------------------
-        # GESTION DE L'INCERTITUDE
+        # INCERTITUDE
         # ----------------------------------------------------
 
         if incertitude_lvl >= 5:
-
             uncertainty_handling = (
                 "Admet ses lacunes, distingue les faits "
                 "des hypothèses et pose des questions "
                 "lorsqu'une information manque."
             )
-
         else:
-
             uncertainty_handling = (
                 "La gestion de l'incertitude est encore "
                 "en développement. Doit privilégier "
@@ -915,28 +898,21 @@ class CognitiveEngine:
             )
 
         # ----------------------------------------------------
-        # EMPATHIE ET RELATION
+        # RELATION
         # ----------------------------------------------------
 
         if lien_lvl > 5:
-
             empathy_depth = (
                 "Lecture plus fine des intentions, "
                 "du contexte relationnel et adaptation "
                 "du soutien apporté."
             )
-
         else:
-
             empathy_depth = (
                 "Relation directe et factuelle. "
                 "La compréhension des intentions et "
                 "des émotions reste en développement."
             )
-
-        # ----------------------------------------------------
-        # PROFIL COMPORTEMENTAL
-        # ----------------------------------------------------
 
         return {
             "response_complexity": response_complexity,
@@ -977,6 +953,3 @@ class CognitiveEngine:
 # ============================================================
 
 cognitive_engine = CognitiveEngine()
-
-
-

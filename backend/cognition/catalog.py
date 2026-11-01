@@ -5,7 +5,7 @@ Chappie V19.3 — Catalogue officiel des 12 systèmes cognitifs.
 Définit :
 - Les 12 systèmes cognitifs.
 - Leur arborescence asymétrique.
-- Les sous-branches spécialisées.
+- Les 92 sous-branches spécialisées.
 - Les pondérations relatives.
 - Les outils de consultation et de validation.
 
@@ -28,7 +28,7 @@ CATALOG_VERSION = "19.3"
 # ============================================================
 
 def _is_valid_weight(value: Any) -> bool:
-    """Vérifie qu'un poids est fini et strictement positif."""
+    """Vérifie qu'un poids est numérique, fini et strictement positif."""
 
     if isinstance(value, bool):
         return False
@@ -42,6 +42,15 @@ def _is_valid_weight(value: Any) -> bool:
         return False
 
     return math.isfinite(numeric_value) and numeric_value > 0
+
+
+def _safe_weight(value: Any) -> float:
+    """Retourne un poids valide ou 0.0."""
+
+    if not _is_valid_weight(value):
+        return 0.0
+
+    return float(value)
 
 
 # ============================================================
@@ -526,6 +535,135 @@ EXPECTED_SYSTEMS = HISTORICAL_SYSTEMS + INVISIBLE_SYSTEMS
 
 
 # ============================================================
+# IDENTIFIANTS OFFICIELS DES 92 SOUS-BRANCHES
+# ============================================================
+
+EXPECTED_SUB_BRANCHES = {
+    "tete": (
+        "logique_formelle",
+        "logique_inductive",
+        "raisonnement_causal",
+        "decomposition",
+        "planification_mentale",
+        "autocorrection",
+        "gestion_incertitude",
+        "flexibilite",
+        "abstraction",
+        "metacognition",
+    ),
+    "mots": (
+        "vocabulaire",
+        "syntaxe",
+        "contexte_sens",
+        "construction_phrases",
+        "metaphores",
+        "humour_ironie",
+        "expressions",
+        "art_question",
+        "narration",
+        "adaptation_langage",
+        "sous_entendus",
+    ),
+    "lien": (
+        "reconnaissance_emotions",
+        "intentions",
+        "roles_sociaux",
+        "point_de_vue",
+        "empathie_cognitive",
+        "soutien",
+        "gestion_desaccords",
+        "reparation_sociale",
+        "limites_consentement",
+        "confiance_calibree",
+        "reciprocite",
+    ),
+    "mains": (
+        "decomposition_tache",
+        "utilisation_outils",
+        "programmation_debug",
+        "erreurs_systeme",
+        "tests_verification",
+        "organisation_projet",
+        "essai_erreur",
+        "choix_methodes",
+        "gestion_echecs",
+        "respect_limites",
+    ),
+    "ame": (
+        "association_idees",
+        "imagination",
+        "metaphores_recits",
+        "sensibilite_musicale",
+        "gouts_persistants",
+        "audace_creative",
+        "combinaison_concepts",
+        "autocritique_art",
+    ),
+    "sens": (
+        "reconnaissance_visuelle",
+        "localisation_spatiale",
+        "analyse_mouvements",
+        "perception_auditive",
+        "sons_non_verbaux",
+        "attention_details",
+        "observation_vs_hypothese",
+        "fiabilite_perception",
+    ),
+    "attention": (
+        "selection_info",
+        "attention_soutenue",
+        "alternance_taches",
+        "resistance_distractions",
+        "detection_nouveautes",
+        "gestion_contexte",
+    ),
+    "apprentissage": (
+        "enseignement_explicite",
+        "imitation",
+        "experience_directe",
+        "generalisation",
+        "transfert_competences",
+        "desapprentissage",
+    ),
+    "memoire": (
+        "memoire_travail",
+        "memoire_episodique",
+        "memoire_autobiographique",
+        "memoire_semantique",
+        "rappel_contextuel",
+        "provenance_confiance",
+    ),
+    "decision": (
+        "hierarchisation_objectifs",
+        "comparaison_options",
+        "evaluation_risques",
+        "arbitrage_vitesse_precision",
+        "decision_incertitude",
+        "validation_sensible",
+    ),
+    "motivation": (
+        "curiosite",
+        "perseverance",
+        "recherche_nouveaute",
+        "equilibre_exploration",
+        "gestion_charge",
+    ),
+    "metacognition": (
+        "connaissance_limites",
+        "estimation_confiance",
+        "coherence_preferences",
+        "revision_croyances",
+        "explication_decisions",
+    ),
+}
+
+EXPECTED_SUB_BRANCH_COUNT = sum(
+    len(branches)
+    for branches in EXPECTED_SUB_BRANCHES.values()
+)
+
+
+# ============================================================
 # CONSULTATION DU CATALOGUE
 # ============================================================
 
@@ -534,12 +672,21 @@ def get_total_systems_count() -> int:
 
 
 def get_total_sub_branches_count() -> int:
-    return sum(
-        len(system.get("sub_branches", {}))
-        for system in COGNITIVE_CATALOG.values()
-        if isinstance(system, dict)
-        and isinstance(system.get("sub_branches"), dict)
-    )
+    """Compte les sous-branches réellement présentes."""
+
+    total = 0
+
+    for system in COGNITIVE_CATALOG.values():
+
+        if not isinstance(system, dict):
+            continue
+
+        branches = system.get("sub_branches")
+
+        if isinstance(branches, dict):
+            total += len(branches)
+
+    return total
 
 
 def get_system(system_id: str) -> Optional[dict[str, Any]]:
@@ -547,11 +694,9 @@ def get_system(system_id: str) -> Optional[dict[str, Any]]:
     if not isinstance(system_id, str):
         return None
 
-    system = COGNITIVE_CATALOG.get(
-        system_id.strip().lower()
-    )
+    system = COGNITIVE_CATALOG.get(system_id.strip().lower())
 
-    return deepcopy(system) if system is not None else None
+    return deepcopy(system) if isinstance(system, dict) else None
 
 
 def get_sub_branch(
@@ -573,7 +718,7 @@ def get_sub_branch(
     if not isinstance(system, dict):
         return None
 
-    branches = system.get("sub_branches", {})
+    branches = system.get("sub_branches")
 
     if not isinstance(branches, dict):
         return None
@@ -593,7 +738,11 @@ def get_sub_branch(
 
 
 def get_all_system_ids() -> list[str]:
-    return list(COGNITIVE_CATALOG.keys())
+    return [
+        system_id
+        for system_id in COGNITIVE_CATALOG
+        if isinstance(system_id, str)
+    ]
 
 
 def get_all_sub_branches() -> list[dict[str, Any]]:
@@ -602,15 +751,21 @@ def get_all_sub_branches() -> list[dict[str, Any]]:
 
     for system_id, system in COGNITIVE_CATALOG.items():
 
+        if not isinstance(system_id, str):
+            continue
+
         if not isinstance(system, dict):
             continue
 
-        sub_branches = system.get("sub_branches", {})
+        sub_branches = system.get("sub_branches")
 
         if not isinstance(sub_branches, dict):
             continue
 
         for branch_id, branch in sub_branches.items():
+
+            if not isinstance(branch_id, str):
+                continue
 
             if not isinstance(branch, dict):
                 continue
@@ -620,7 +775,7 @@ def get_all_sub_branches() -> list[dict[str, Any]]:
                 "system_id": system_id,
                 "system_name": system.get("name", system_id),
                 "name": branch.get("name", branch_id),
-                "weight": branch.get("weight", 1.0),
+                "weight": _safe_weight(branch.get("weight")),
             })
 
     return branches
@@ -645,17 +800,11 @@ def get_system_total_weight(system_id: str) -> float:
     if not isinstance(branches, dict):
         return 0.0
 
-    total = 0.0
-
-    for branch in branches.values():
-
-        if not isinstance(branch, dict):
-            continue
-
-        weight = branch.get("weight")
-
-        if _is_valid_weight(weight):
-            total += float(weight)
+    total = sum(
+        _safe_weight(branch.get("weight"))
+        for branch in branches.values()
+        if isinstance(branch, dict)
+    )
 
     return round(total, 4)
 
@@ -675,17 +824,12 @@ def get_system_average_weight(system_id: str) -> float:
     if not isinstance(branches, dict):
         return 0.0
 
-    valid_weights = []
-
-    for branch in branches.values():
-
-        if not isinstance(branch, dict):
-            continue
-
-        weight = branch.get("weight")
-
-        if _is_valid_weight(weight):
-            valid_weights.append(float(weight))
+    valid_weights = [
+        _safe_weight(branch.get("weight"))
+        for branch in branches.values()
+        if isinstance(branch, dict)
+        and _is_valid_weight(branch.get("weight"))
+    ]
 
     if not valid_weights:
         return 0.0
@@ -699,8 +843,9 @@ def get_total_catalog_weight() -> float:
         sum(
             get_system_total_weight(system_id)
             for system_id in COGNITIVE_CATALOG
+            if isinstance(system_id, str)
         ),
-        4
+        4,
     )
 
 
@@ -714,12 +859,7 @@ def get_branch_weight(
     if branch is None:
         return 0.0
 
-    weight = branch.get("weight")
-
-    if not _is_valid_weight(weight):
-        return 0.0
-
-    return float(weight)
+    return _safe_weight(branch.get("weight"))
 
 
 # ============================================================
@@ -729,12 +869,12 @@ def get_branch_weight(
 def validate_cognitive_catalog() -> dict[str, Any]:
     """
     Vérifie :
-    - Les systèmes attendus.
-    - Les noms.
-    - Les sous-branches.
-    - Les identifiants.
+    - Les 12 systèmes officiels.
+    - Les noms des systèmes.
+    - Les 92 identifiants de sous-branches.
+    - Les noms des sous-branches.
     - Les pondérations.
-    - Les doublons de branches.
+    - Les doublons d'identifiants.
     - Les valeurs numériques finies.
     """
 
@@ -747,6 +887,7 @@ def validate_cognitive_catalog() -> dict[str, Any]:
             "version": CATALOG_VERSION,
             "total_systems": 0,
             "total_sub_branches": 0,
+            "expected_sub_branches": EXPECTED_SUB_BRANCH_COUNT,
             "total_weight": 0.0,
             "historical_systems": list(HISTORICAL_SYSTEMS),
             "invisible_systems": list(INVISIBLE_SYSTEMS),
@@ -777,7 +918,8 @@ def validate_cognitive_catalog() -> dict[str, Any]:
         )
 
     official_order = tuple(
-        key for key in COGNITIVE_CATALOG
+        key
+        for key in COGNITIVE_CATALOG
         if key in expected_systems
     )
 
@@ -823,6 +965,28 @@ def validate_cognitive_catalog() -> dict[str, Any]:
             )
             continue
 
+        expected_branches = set(
+            EXPECTED_SUB_BRANCHES.get(system_id, ())
+        )
+        actual_branches = set(branches.keys())
+
+        missing_branches = expected_branches - actual_branches
+        unexpected_branches = actual_branches - expected_branches
+
+        if missing_branches:
+            errors.append(
+                f"{system_id} : sous-branches manquantes : "
+                + ", ".join(sorted(missing_branches))
+            )
+
+        if unexpected_branches:
+            warnings.append(
+                f"{system_id} : sous-branches supplémentaires : "
+                + ", ".join(
+                    sorted(str(item) for item in unexpected_branches)
+                )
+            )
+
         for branch_id, branch in branches.items():
 
             if not isinstance(branch_id, str) or not branch_id.strip():
@@ -857,7 +1021,8 @@ def validate_cognitive_catalog() -> dict[str, Any]:
             if not _is_valid_weight(weight):
                 errors.append(
                     f"{system_id}.{branch_id} : "
-                    "le poids doit être un nombre fini strictement positif."
+                    "le poids doit être un nombre fini "
+                    "strictement positif."
                 )
 
     return {
@@ -865,6 +1030,7 @@ def validate_cognitive_catalog() -> dict[str, Any]:
         "version": CATALOG_VERSION,
         "total_systems": get_total_systems_count(),
         "total_sub_branches": get_total_sub_branches_count(),
+        "expected_sub_branches": EXPECTED_SUB_BRANCH_COUNT,
         "total_weight": get_total_catalog_weight(),
         "historical_systems": list(HISTORICAL_SYSTEMS),
         "invisible_systems": list(INVISIBLE_SYSTEMS),
@@ -883,38 +1049,47 @@ def get_catalog_statistics() -> dict[str, Any]:
 
     for system_id, system in COGNITIVE_CATALOG.items():
 
+        if not isinstance(system_id, str):
+            continue
+
         if not isinstance(system, dict):
             continue
 
-        branches = system.get("sub_branches", {})
+        branches = system.get("sub_branches")
 
         if not isinstance(branches, dict):
             branches = {}
 
+        valid_branches = []
+
+        for branch_id, branch in branches.items():
+
+            if not isinstance(branch_id, str):
+                continue
+
+            if not isinstance(branch, dict):
+                continue
+
+            valid_branches.append({
+                "id": branch_id,
+                "name": branch.get("name", branch_id),
+                "weight": _safe_weight(branch.get("weight")),
+            })
+
         systems[system_id] = {
             "name": system.get("name", system_id),
             "sub_branches_count": len(branches),
+            "valid_sub_branches_count": len(valid_branches),
             "total_weight": get_system_total_weight(system_id),
             "average_weight": get_system_average_weight(system_id),
-            "sub_branches": [
-                {
-                    "id": branch_id,
-                    "name": branch.get("name", branch_id),
-                    "weight": (
-                        float(branch["weight"])
-                        if _is_valid_weight(branch.get("weight"))
-                        else 0.0
-                    ),
-                }
-                for branch_id, branch in branches.items()
-                if isinstance(branch, dict)
-            ],
+            "sub_branches": valid_branches,
         }
 
     return {
         "version": CATALOG_VERSION,
         "total_systems": get_total_systems_count(),
         "total_sub_branches": get_total_sub_branches_count(),
+        "expected_sub_branches": EXPECTED_SUB_BRANCH_COUNT,
         "total_weight": get_total_catalog_weight(),
         "historical_systems_count": len(HISTORICAL_SYSTEMS),
         "invisible_systems_count": len(INVISIBLE_SYSTEMS),

@@ -6,12 +6,6 @@ pas une conscience démontrée.
 """
 from __future__ import annotations
 
-from fastapi.staticfiles import StaticFiles
-
-# Monter le dossier static pour servir les scripts, images et styles
-app.mount("/", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
-
-
 import sys
 from pathlib import Path
 
@@ -47,6 +41,7 @@ from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 )
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from utils.validators import normalize_and_validate_user_id
@@ -463,6 +458,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
+# 1. Initialisation de l'application FastAPI en premier
 app = FastAPI(
     title=APP_NAME,
     version="19.3.1",
@@ -472,6 +468,9 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+# 2. Montage du dossier static juste après
+app.mount("/", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 
 @app.middleware("http")

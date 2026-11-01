@@ -7,10 +7,15 @@ Gère :
 - L'évaluation du doute cognitif.
 - La calibration de la confiance.
 - Les audits métacognitifs.
-- L'analyse des tendances de raisonnement.
+- L'analyse des tendances de confiance.
 - L'historique des réflexions et ajustements.
 
 Compatible avec l'architecture Chappie V19.3.
+
+Important :
+- Les fonctions ne font pas de commit explicite.
+- La gestion des transactions appartient à server.py.
+- La confiance représente une estimation, pas une preuve de justesse.
 """
 
 from __future__ import annotations
@@ -38,6 +43,8 @@ MAX_USER_ID_LENGTH = 255
 MAX_THOUGHT_TYPE_LENGTH = 100
 MAX_CONTEXT_LENGTH = 20000
 MAX_DECISION_LENGTH = 20000
+MAX_REFLECTION_LENGTH = 20000
+MAX_ADJUSTMENT_LENGTH = 20000
 
 
 # ============================================================
@@ -101,6 +108,9 @@ def _validate_text(
 def _safe_float(value: Any) -> float:
     """Convertit une valeur en nombre flottant fini."""
 
+    if isinstance(value, bool):
+        raise ValueError("Une valeur booléenne n'est pas un nombre valide.")
+
     try:
         result = float(value)
 
@@ -128,6 +138,9 @@ def _clamp(
 def _safe_limit(limit: Any) -> int:
     """Valide et limite le nombre de traces à analyser."""
 
+    if isinstance(limit, bool):
+        return DEFAULT_AUDIT_LIMIT
+
     try:
         value = int(limit)
 
@@ -141,13 +154,7 @@ def _row_to_dict(
     row: Any,
     columns: tuple[str, ...],
 ) -> dict[str, Any]:
-    """Convertit une ligne SQLite en dictionnaire.
-
-    Compatible avec :
-    - sqlite3.Row
-    - dict
-    - tuple retourné par SQLite
-    """
+    """Convertit une ligne SQLite en dictionnaire."""
 
     if isinstance(row, sqlite3.Row):
         return dict(row)
@@ -165,6 +172,30 @@ def _row_to_dict(
     return {}
 
 
+def _count_from_row(row: Any) -> int:
+    """Récupère un compteur depuis une ligne SQLite."""
+
+    if row is None:
+        return 0
+
+    if isinstance(row, dict):
+        value = next(iter(row.values()), 0)
+
+    elif isinstance(row, sqlite3.Row):
+        value = row[0] if len(row) else 0
+
+    elif isinstance(row, (tuple, list)):
+        value = row[0] if row else 0
+
+    else:
+        value = 0
+
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 # ============================================================
 # INITIALISATION DES TABLES
 # ============================================================
@@ -174,6 +205,8 @@ def init_cognition_tables(db: sqlite3.Connection) -> None:
 
     Les tables existantes sont conservées.
     Les index sont ajoutés pour accélérer les recherches.
+
+    Aucun commit explicite n'est effectué ici.
     """
 
     db.executescript("""
@@ -217,8 +250,6 @@ def init_cognition_tables(db: sqlite3.Connection) -> None:
     CREATE INDEX IF NOT EXISTS idx_metacognition_logs_user_id
         ON metacognition_logs(user_id, id DESC);
     """)
-
-    db.commit()
 
 
 # ============================================================
@@ -294,14 +325,11 @@ def log_cognitive_trace(
         ),
     )
 
-    trace_id = cursor.lastrowid
-
-    db.commit()
-
     return {
-        "id": trace_id,
+        "id": cursor.lastrowid,
         "user_id": user_id,
         "thought_type": thought_type,
+        "context_summary": context_summary,
         "decision_made": decision_made,
         "confidence": confidence,
         "recorded_at": now,
@@ -318,17 +346,14 @@ def evaluate_decision_doubt(
 ) -> dict[str, Any]:
     """Évalue si Chappie doit douter de sa décision.
 
-    Trois comportements sont possibles :
-
     ask_clarification :
-        Le niveau de confiance est trop faible.
-        Chappie devrait demander des informations supplémentaires.
+        La confiance est inférieure au seuil de doute.
 
     proceed_with_caution :
-        Chappie peut avancer, mais doit rester prudent.
+        La confiance est insuffisante pour avancer normalement.
 
     proceed_confidently :
-        Chappie peut poursuivre normalement.
+        La confiance atteint le seuil demandé.
 
     Cette fonction fournit une recommandation.
     Elle ne prend pas automatiquement la décision à la place
@@ -336,21 +361,22 @@ def evaluate_decision_doubt(
     """
 
     confidence = _clamp(confidence)
-
     threshold = _clamp(threshold)
+
+    doubt_threshold = min(
+        DEFAULT_DOUBT_THRESHOLD,
+        threshold,
+    )
 
     is_uncertain = confidence < threshold
 
-    if confidence < DEFAULT_DOUBT_THRESHOLD:
-
+    if confidence < doubt_threshold:
         action = "ask_clarification"
 
     elif is_uncertain:
-
         action = "proceed_with_caution"
 
     else:
-
         action = "proceed_confidently"
 
     if confidence < 0.25:
@@ -371,6 +397,7 @@ def evaluate_decision_doubt(
     return {
         "confidence": round(confidence, 4),
         "threshold": round(threshold, 4),
+        "doubt_threshold": round(doubt_threshold, 4),
         "is_uncertain": is_uncertain,
         "doubt_level": doubt_level,
         "recommended_action": action,
@@ -494,8 +521,11 @@ def run_metacognitive_audit(
     - Les types de raisonnements les plus fréquents.
     - Les ajustements comportementaux recommandés.
 
-    L'audit ne modifie jamais les traces historiques.
+    Attention :
+    Une hausse de confiance ne prouve pas une amélioration
+    de la qualité ou de l'exactitude du raisonnement.
 
+    L'audit ne modifie jamais les traces historiques.
     Il enregistre sa réflexion dans metacognition_logs.
     """
 
@@ -508,82 +538,66 @@ def run_metacognitive_audit(
         limit,
     )
 
+    now = utc_now()
+
     # --------------------------------------------------------
     # Absence de données
     # --------------------------------------------------------
 
     if not traces:
-
         return {
             "user_id": user_id,
             "trace_count": 0,
             "average_confidence": None,
+            "recent_average_confidence": None,
+            "older_average_confidence": None,
+            "trend": "unknown",
+            "trend_measure": "confidence_only",
+            "thought_types": {},
+            "most_common_thoughts": [],
             "reflection": "Pas assez de données pour l'audit.",
             "adjustment": "aucun",
             "adjustment_made": "aucun",
-            "trend": "unknown",
-            "created_at": utc_now(),
+            "created_at": now,
         }
 
     # --------------------------------------------------------
     # Calcul de la confiance moyenne
     # --------------------------------------------------------
 
-    confidences = []
+    confidences = [
+        _clamp(trace.get("confidence", 0.0))
+        for trace in traces
+    ]
 
-    for trace in traces:
-
-        confidence = _clamp(
-            trace.get("confidence", 0.0)
-        )
-
-        confidences.append(confidence)
-
-    avg_confidence = (
-        sum(confidences) / len(confidences)
-    )
+    avg_confidence = sum(confidences) / len(confidences)
 
     # --------------------------------------------------------
-    # Analyse de la tendance
+    # Analyse de la tendance de confiance
     # --------------------------------------------------------
-
-    # Les traces sont classées de la plus récente
-    # à la plus ancienne.
 
     if len(confidences) >= 4:
 
-        half = max(
-            1,
-            len(confidences) // 2,
-        )
+        half = max(1, len(confidences) // 2)
 
         recent_values = confidences[:half]
         older_values = confidences[half:]
 
-        recent_average = (
-            sum(recent_values) / len(recent_values)
-        )
-
-        older_average = (
-            sum(older_values) / len(older_values)
-        )
+        recent_average = sum(recent_values) / len(recent_values)
+        older_average = sum(older_values) / len(older_values)
 
         difference = recent_average - older_average
 
         if difference >= 0.10:
-
-            trend = "improving"
+            trend = "increasing_confidence"
 
         elif difference <= -0.10:
-
-            trend = "declining"
+            trend = "decreasing_confidence"
 
         else:
-
-            trend = "stable"
+            trend = "stable_confidence"
 
     else:
-
         recent_average = avg_confidence
         older_average = avg_confidence
         trend = "insufficient_data"
@@ -595,7 +609,6 @@ def run_metacognitive_audit(
     thought_counts: dict[str, int] = {}
 
     for trace in traces:
-
         thought_type = str(
             trace.get("thought_type", "unknown")
         )
@@ -606,8 +619,7 @@ def run_metacognitive_audit(
 
     most_common_thoughts = sorted(
         thought_counts.items(),
-        key=lambda item: item[1],
-        reverse=True,
+        key=lambda item: (-item[1], item[0]),
     )
 
     # --------------------------------------------------------
@@ -697,30 +709,29 @@ def run_metacognitive_audit(
     # Ajout de la tendance à la réflexion
     # --------------------------------------------------------
 
-    if trend == "improving":
+    if trend == "increasing_confidence":
 
         reflection += (
-            " La confiance progresse dans les traces récentes."
+            " La confiance déclarée progresse dans les traces "
+            "récentes. Cela ne démontre pas une hausse de précision."
         )
 
-    elif trend == "declining":
+    elif trend == "decreasing_confidence":
 
         reflection += (
-            " Une diminution de confiance est observée "
+            " Une diminution de confiance déclarée est observée "
             "dans les traces récentes."
         )
 
-    elif trend == "stable":
+    elif trend == "stable_confidence":
 
         reflection += (
-            " Le niveau de confiance reste relativement stable."
+            " Le niveau de confiance déclaré reste relativement stable."
         )
 
     # --------------------------------------------------------
     # Enregistrement de l'audit
     # --------------------------------------------------------
-
-    now = utc_now()
 
     db.execute(
         """
@@ -740,7 +751,8 @@ def run_metacognitive_audit(
         ),
     )
 
-    db.commit()
+    # Pas de commit ici :
+    # server.py contrôle la transaction.
 
     # --------------------------------------------------------
     # Résultat
@@ -759,6 +771,7 @@ def run_metacognitive_audit(
             4,
         ),
         "trend": trend,
+        "trend_measure": "confidence_only",
         "thought_types": thought_counts,
         "most_common_thoughts": [
             {
@@ -803,7 +816,7 @@ def get_cognition_statistics(
 
     audit_row = db.execute(
         """
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM metacognition_logs
         WHERE user_id = ?
         """,
@@ -823,7 +836,6 @@ def get_cognition_statistics(
     )
 
     average = stats.get("average_confidence")
-
     minimum = stats.get("minimum_confidence")
     maximum = stats.get("maximum_confidence")
 
@@ -847,7 +859,7 @@ def get_cognition_statistics(
             if maximum is not None
             else None
         ),
-        "total_metacognitive_audits": int(
-            audit_row[0] or 0
+        "total_metacognitive_audits": _count_from_row(
+            audit_row
         ),
     }

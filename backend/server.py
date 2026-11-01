@@ -41,6 +41,8 @@ from fastapi.responses import (
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from utils.validators import normalize_and_validate_user_id
+
 from memory.episodic_memory import (
     init_memory_tables,
     save_episodic_memory,
@@ -134,6 +136,7 @@ CHAPPIE_TIMEZONE = os.getenv(
 MAX_MESSAGE_CHARS = env_int(
     "MAX_MESSAGE_CHARS", 8000, 100, 20_000
 )
+MAX_MESSAGE_LENGTH = MAX_MESSAGE_CHARS
 
 MAX_TOOL_ROUNDS = env_int(
     "MAX_TOOL_ROUNDS", 4, 1, 8
@@ -365,12 +368,12 @@ def init_db() -> None:
 
 
 def valid_user(user_id: str) -> str:
-    user_id = user_id.strip()
-
-    if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,80}", user_id):
+    try:
+        user_id = normalize_and_validate_user_id(user_id)
+    except ValueError as e:
         raise HTTPException(
             400,
-            "Identifiant utilisateur invalide.",
+            str(e),
         )
 
     if not hmac.compare_digest(user_id, CHAPPIE_OWNER_ID):
@@ -419,7 +422,6 @@ async def require_auth(
     bucket.append(now)
     _rate_buckets[ip] = bucket
 
-    # Évite une croissance infinie du dictionnaire en cas de nombreuses IP.
     if len(_rate_buckets) > 5000:
         cutoff = now - RATE_LIMIT_WINDOW
         for address in list(_rate_buckets):
@@ -481,9 +483,6 @@ async def body_size_guard(request: Request, call_next):
                 status_code=400,
             )
 
-    # Protection complémentaire pour les requêtes sans Content-Length.
-    # Le contrôle exact du flux est appliqué aux routes qui lisent
-    # directement le corps dans les parties suivantes.
     response = await call_next(request)
 
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -500,7 +499,7 @@ class ChatRequest(BaseModel):
         default="creator",
         min_length=1,
         max_length=80,
-        pattern=r"^[A-Za-z0-9_.@-]+$",
+        pattern=r"^[\w\-]{3,64}$",
     )
     message: str = Field(
         min_length=1,
@@ -525,7 +524,7 @@ class MemoryRequest(BaseModel):
         default="creator",
         min_length=1,
         max_length=80,
-        pattern=r"^[A-Za-z0-9_.@-]+$",
+        pattern=r"^[\w\-]{3,64}$",
     )
     content: str = Field(min_length=1, max_length=4000)
     category: str = Field(default="general", min_length=1, max_length=60)
@@ -585,7 +584,6 @@ class DreamRequest(BaseModel):
 
 
 def get_emotions(user_id: str) -> dict[str, Any]:
-    """Initialise toutes les données de base, même si les émotions existent déjà."""
     user_id = valid_user(user_id)
     now = utc_now()
 
@@ -718,9 +716,6 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
 
     skills_list = [dict(row) for row in rows]
 
-    # Format historique : une compétence simple est convertie en branche
-    # "default". Les vraies branches V19 sont traitées par le moteur
-    # cognitif lorsqu'elles sont présentes dans la base.
     db_skills_data: dict[str, Any] = {}
 
     for skill in skills_list:
@@ -770,8 +765,6 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM metacognition_logs WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM cognitive_milestones WHERE user_id=?", (user_id,))
 
-        # Le FTS est global : on ne le vide pas ici car il peut contenir
-        # des entrées d'autres utilisateurs ou des lignes non synchronisées.
         db.execute(
             "DELETE FROM conversations WHERE user_id=?",
             (user_id,),
@@ -903,8 +896,6 @@ def update_skill(
             ),
         )
 
-        # Évite d'appeler le moteur avec une connexion SQLite qui serait
-        # ensuite modifiée par une autre opération.
         db.commit()
 
     skills_summary = get_skills_summary(user_id)
@@ -923,9 +914,7 @@ def update_skill(
         "xp": new_xp,
         "updated": True,
     }
-    # ============================================================
-# ÉMOTIONS ET INTENTIONS
-# ============================================================
+
 
 def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
     msg = message.casefold()
@@ -1086,7 +1075,6 @@ def update_emotions_once(
         frustration += 0.5
         event = "correction à examiner"
 
-    # Une conversation consomme légèrement de l'énergie simulée.
     energy -= 1.5
 
     vals = {
@@ -1148,10 +1136,6 @@ def update_emotions_once(
 
     return vals
 
-
-# ============================================================
-# MÉMOIRE ÉPISODIQUE
-# ============================================================
 
 def remember(
     user_id: str,
@@ -1248,9 +1232,6 @@ def retrieve_memories(
         if results:
             return results
 
-        # Compatibilité avec les souvenirs historiques V16.
-        # Si une recherche précise ne renvoie rien, on ne présente
-        # pas toute la mémoire comme si elle correspondait à la requête.
         if query.strip():
             return []
 
@@ -1283,10 +1264,6 @@ def retrieve_memories(
 
         return fallback_results
 
-
-# ============================================================
-# MÉMOIRE AUTOBIOGRAPHIQUE ET CONVERSATIONS
-# ============================================================
 
 def get_latest_summary(user_id: str) -> str:
     with db_connection() as db:
@@ -1540,10 +1517,6 @@ def save_conversation_turn(
         )
 
 
-# ============================================================
-# IDENTITÉ ET MATURITÉ COGNITIVE
-# ============================================================
-
 def get_identity_prompt(user_id: str) -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
@@ -1582,8 +1555,6 @@ def get_identity_prompt(user_id: str) -> str:
         for s in skills
     ) or "Aucune compétence enregistrée."
 
-    # Maturité globale sur 30 niveaux.
-    # Les stades suivent une progression graduelle.
     if avg_level < 3.0:
         stage_instruction = (
             "STADE 0-2 : ROBOT NOUVEAU-NÉ.\n"
@@ -1696,10 +1667,6 @@ Résumé autobiographique :
 6. Ne prétends pas être réellement conscient ou humain.
 """
 
-
-# ============================================================
-# OUTILS GEMINI
-# ============================================================
 
 TOOLS = [{
     "functionDeclarations": [
@@ -1916,10 +1883,6 @@ async def call_gemini(
         )
 
 
-# ============================================================
-# CERVEAU CONVERSATIONNEL
-# ============================================================
-
 async def run_brain(
     user_id: str,
     message: str,
@@ -1942,7 +1905,6 @@ async def run_brain(
 
     update_emotions_once(user_id, message)
 
-    # Progression conversationnelle limitée.
     update_skill(
         user_id,
         "mots",
@@ -2136,10 +2098,6 @@ async def run_brain(
     }
 
 
-# ============================================================
-# OBJECTIFS
-# ============================================================
-
 def create_goal(
     user_id: str,
     title: str,
@@ -2244,10 +2202,6 @@ def update_goal_progress(
         (progress, status, utc_now(), goal_id),
     )
 
-
-# ============================================================
-# RÊVES ET PENSÉES
-# ============================================================
 
 def generate_dream(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
@@ -2392,10 +2346,6 @@ def generate_rumination(user_id: str) -> dict[str, Any]:
     }
 
 
-# ============================================================
-# MAINTENANCE AUTONOME
-# ============================================================
-
 async def autonomous_maintenance_loop() -> None:
     while True:
         await asyncio.sleep(BACKGROUND_INTERVAL_SECONDS)
@@ -2442,7 +2392,6 @@ async def autonomous_maintenance_loop() -> None:
                 ).fetchone()
 
                 if em:
-                    # Baisse modérée et bornée de l'énergie simulée.
                     energy = max(
                         0.0,
                         float(em["energy"]) - 1.0,
@@ -2490,8 +2439,6 @@ async def autonomous_maintenance_loop() -> None:
                     except (ValueError, TypeError):
                         pass
 
-                # Une rumination ne doit pas être créée à chaque cycle.
-                # On impose au moins 8 heures entre deux pensées.
                 latest_thought = db.execute(
                     """
                     SELECT created_at
@@ -2557,33 +2504,7 @@ async def autonomous_maintenance_loop() -> None:
             )
 
 
-# ============================================================
-# FIN DE LA PARTIE 2
-# ============================================================
-# ============================================================
-# CHAPPIE V19.3 — PARTIE 3/3
-# Routes API, vision, voix, cognition, objectifs et démarrage
-# ============================================================
-
-from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
-from pathlib import Path
-import base64
-import binascii
-import time
-import traceback
-
-
-# ------------------------------------------------------------
-# OUTILS COMMUNS AUX ROUTES
-# ------------------------------------------------------------
-
 def _authenticated_user(auth):
-    """
-    Récupère l'identifiant renvoyé par require_auth.
-    Le compte creator est utilisé uniquement si l'authentification
-    renvoie explicitement cette valeur.
-    """
     if isinstance(auth, str) and auth.strip():
         user_id = auth.strip()
     elif isinstance(auth, dict):
@@ -2594,10 +2515,7 @@ def _authenticated_user(auth):
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentification invalide.")
 
-    if not valid_user(user_id):
-        raise HTTPException(status_code=403, detail="Utilisateur non autorisé.")
-
-    return user_id
+    return valid_user(user_id)
 
 
 def _safe_dict(value):
@@ -2617,10 +2535,6 @@ def _model_value(model, name, default=None):
 
 
 def _decode_data_url(value, max_bytes):
-    """
-    Décode une image transmise en base64.
-    Accepte une data URL ou une chaîne base64 simple.
-    """
     if not isinstance(value, str) or not value.strip():
         raise HTTPException(status_code=400, detail="Image manquante.")
 
@@ -2662,15 +2576,8 @@ def _decode_data_url(value, max_bytes):
     return decoded
 
 
-# ------------------------------------------------------------
-# PAGE WEB
-# ------------------------------------------------------------
-
 @app.get("/", response_class=HTMLResponse)
 async def homepage():
-    """
-    Sert l'interface principale.
-    """
     static_dir = Path(__file__).resolve().parent / "static"
     index_file = static_dir / "index.html"
 
@@ -2685,10 +2592,6 @@ async def homepage():
 
 @app.get("/health")
 async def health():
-    """
-    Vérification technique minimale.
-    Ne révèle ni clé API ni jeton d'authentification.
-    """
     return {
         "status": "ok",
         "application": "Chappie",
@@ -2696,10 +2599,6 @@ async def health():
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
-
-# ------------------------------------------------------------
-# ÉTAT GÉNÉRAL
-# ------------------------------------------------------------
 
 @app.get("/api/emotions")
 async def api_emotions(auth=Depends(require_auth)):
@@ -2739,10 +2638,6 @@ async def api_status(auth=Depends(require_auth)):
     }
 
 
-# ------------------------------------------------------------
-# DISCUSSION AVEC CHAPPIE
-# ------------------------------------------------------------
-
 @app.post("/api/chat")
 async def api_chat(
     request: ChatRequest,
@@ -2781,10 +2676,6 @@ async def api_chat(
             detail="Une erreur est survenue pendant la réflexion de Chappie."
         )
 
-
-# ------------------------------------------------------------
-# MÉMOIRE
-# ------------------------------------------------------------
 
 @app.post("/api/memory")
 async def api_memory(
@@ -2850,10 +2741,6 @@ async def api_memory_summary(auth=Depends(require_auth)):
         "summary": summary,
     }
 
-
-# ------------------------------------------------------------
-# COMPÉTENCES ET DÉVELOPPEMENT COGNITIF
-# ------------------------------------------------------------
 
 @app.get("/api/skills")
 async def api_skills(auth=Depends(require_auth)):
@@ -2950,10 +2837,6 @@ async def api_cognition_milestones(auth=Depends(require_auth)):
     }
 
 
-# ------------------------------------------------------------
-# MONDE ET RELATIONS
-# ------------------------------------------------------------
-
 @app.get("/api/world")
 async def api_world(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
@@ -2987,10 +2870,6 @@ async def api_world_relations(auth=Depends(require_auth)):
         "relations": relations,
     }
 
-
-# ------------------------------------------------------------
-# RÊVES ET PENSÉES
-# ------------------------------------------------------------
 
 @app.get("/api/dreams")
 async def api_dreams(auth=Depends(require_auth)):
@@ -3070,10 +2949,6 @@ async def api_thoughts(auth=Depends(require_auth)):
     }
 
 
-# ------------------------------------------------------------
-# OBJECTIFS
-# ------------------------------------------------------------
-
 @app.get("/api/goals")
 async def api_goals(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
@@ -3152,22 +3027,15 @@ async def api_goal_progress(
     if goal_id is None:
         raise HTTPException(status_code=400, detail="Objectif manquant.")
 
-    result = await update_goal_progress(
-        user_id=user_id,
-        goal_id=goal_id,
-        step_id=step_id,
-        completed=completed,
-    )
+    with db_connection() as db:
+        result = update_goal_progress(db, goal_id)
+        db.commit()
 
     return {
         "success": True,
         "result": result,
     }
 
-
-# ------------------------------------------------------------
-# VOIX — SYNTHÈSE VOCALE
-# ------------------------------------------------------------
 
 @app.post("/api/speak")
 async def api_speak(
@@ -3236,10 +3104,6 @@ async def api_speak(
             detail="La synthèse vocale est indisponible."
         )
 
-
-# ------------------------------------------------------------
-# VISION
-# ------------------------------------------------------------
 
 @app.post("/api/vision/analyze")
 async def api_vision_analyze(
@@ -3310,10 +3174,6 @@ async def api_vision_analyze(
         if not answer:
             answer = "Je n'ai pas réussi à analyser cette image."
 
-        # Une simple analyse visuelle ne donne pas automatiquement
-        # des points XP : cela évite de pouvoir faire progresser
-        # artificiellement les compétences en répétant les requêtes.
-
         return {
             "success": True,
             "analysis": answer,
@@ -3329,10 +3189,6 @@ async def api_vision_analyze(
             detail="L'analyse visuelle a échoué."
         )
 
-
-# ------------------------------------------------------------
-# RESET DE CHAPPIE
-# ------------------------------------------------------------
 
 @app.post("/api/reset")
 async def api_reset(auth=Depends(require_auth)):
@@ -3355,10 +3211,6 @@ async def api_reset(auth=Depends(require_auth)):
         )
 
 
-# ------------------------------------------------------------
-# ROUTE DE CONFIGURATION
-# ------------------------------------------------------------
-
 @app.get("/api/config")
 async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
@@ -3375,19 +3227,8 @@ async def api_config(auth=Depends(require_auth)):
     }
 
 
-# ------------------------------------------------------------
-# WEBSOCKET — AUTHENTIFICATION
-# ------------------------------------------------------------
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    Connexion WebSocket authentifiée.
-
-    Le jeton est demandé dans le premier message JSON plutôt
-    que dans l'URL, afin d'éviter de l'exposer dans les journaux
-    d'accès HTTP.
-    """
     await websocket.accept()
 
     try:
@@ -3398,8 +3239,6 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=1008)
             return
 
-        # require_auth est une dépendance HTTP ; on valide ici
-        # le jeton avec le même mécanisme que l'API.
         try:
             user_id = valid_user(token)
         except Exception:
@@ -3477,10 +3316,6 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
 
 
-# ------------------------------------------------------------
-# FIN DU SERVEUR
-# ------------------------------------------------------------
-
 if __name__ == "__main__":
     import uvicorn
 
@@ -3490,4 +3325,4 @@ if __name__ == "__main__":
         app,
         host="0.0.0.0",
         port=port,
-              )
+    )

@@ -1,4 +1,3 @@
-
 'use strict';
 
 /* ============================================================
@@ -6,9 +5,7 @@
    Conversation • Voix • Vision • Mémoire • Émotions
    Gemini Live • Compétences • Objectifs • Profils vocaux
 
-   Compatible avec les routes V19.3 connues.
-   Les nouvelles fonctions cognitives nécessitent leur
-   implémentation correspondante dans backend/server.py.
+   Compatible avec les routes V19.3 corrigées dans server.py.
    ============================================================ */
 
 /* ============================================================
@@ -53,15 +50,15 @@ const LIVE_OUTPUT_RATE = 24000;
 const API = {
   chat: '/api/chat',
   speak: '/api/speak',
-  emotions: `/api/emotions/${CREATOR_ID}`,
-  skills: `/api/skills/${CREATOR_ID}`,
+  emotions: '/api/emotions',
+  skills: '/api/skills',
   summary: '/api/memory/summary',
   mood: '/api/mood/history?limit=10',
-  dreams: `/api/dreams/${CREATOR_ID}`,
-  thoughts: `/api/thoughts/${CREATOR_ID}`,
+  dreams: '/api/dreams',
+  thoughts: '/api/thoughts',
   goals: '/api/goals',
   consolidate: '/api/memory/consolidate',
-  reset: '/api/reset-life',
+  reset: '/api/reset',
   vision: '/api/vision/analyze'
 };
 
@@ -229,18 +226,6 @@ async function apiRequest(url, options = {}) {
    3. ANIMATION DE LA VOIX
    ============================================================ */
 
-/*
-  Pour utiliser cette animation, ajoute dans ton HTML :
-
-  <div id="voiceWaveform">
-    <span></span><span></span><span></span>
-    <span></span><span></span><span></span>
-    <span></span><span></span><span></span>
-  </div>
-
-  Puis ajoute du CSS pour la classe .speaking.
-*/
-
 function setVoiceActivity(active) {
   const waveform = $('voiceWaveform');
 
@@ -393,8 +378,8 @@ async function fetchPsychology() {
   try {
     const data = await apiRequest(API.emotions);
 
-    if (data.psychology) {
-      renderEmotionsDashboard(data.psychology);
+    if (data.emotions) {
+      renderEmotionsDashboard(data.emotions);
     }
   } catch (error) {
     console.warn('Émotions :', error.message);
@@ -905,11 +890,13 @@ async function loadSkills() {
   try {
     const data = await apiRequest(API.skills);
 
-    if (!Array.isArray(data.skills)) {
+    const skillsArray = data.skills?.skills || data.skills;
+
+    if (!Array.isArray(skillsArray)) {
       throw new Error('Format de réponse inattendu.');
     }
 
-    if (!data.skills.length) {
+    if (!skillsArray.length) {
       setText(
         'summary',
         'Aucune compétence enregistrée.'
@@ -918,8 +905,8 @@ async function loadSkills() {
     }
 
     const maturity = Number(
-      data.cognitive_profile?.global_maturity ??
-      data.average_level ??
+      data.cognition?.global_maturity ??
+      data.skills?.average_level ??
       1
     );
 
@@ -929,7 +916,7 @@ async function loadSkills() {
         Number.isFinite(maturity) ? maturity.toFixed(1) : '—'
       }/10\n\n`;
 
-    data.skills.forEach(skill => {
+    skillsArray.forEach(skill => {
       const level = Number(skill.level ?? 0);
       const xp = Number(skill.xp ?? 0);
 
@@ -945,7 +932,7 @@ async function loadSkills() {
         `   Preuve : ${skill.evidence || 'Aucune'}\n\n`;
     });
 
-    const behavior = data.cognitive_profile?.behavior;
+    const behavior = data.cognition?.behavior || data.skills?.cognitive_profile?.behavior;
 
     if (behavior) {
       output +=
@@ -1325,7 +1312,7 @@ async function toggleLive() {
         : 'ws:';
 
     const socket = new WebSocket(
-      `${scheme}//${location.host}/ws/live?token=${encodeURIComponent(getToken())}`
+      `${scheme}//${location.host}/ws?token=${encodeURIComponent(getToken())}`
     );
 
     liveSocket = socket;
@@ -1885,13 +1872,13 @@ async function captureVision() {
     const result = await apiRequest(API.vision, {
       method: 'POST',
       body: jsonBody({
-        image_data_url: imageData,
-        prompt:
+        image: imageData,
+        question:
           'Décris ce que tu vois. Distingue les éléments certains des suppositions. Décris les objets, les couleurs, les positions et le contexte. Si une personne est visible, décris son apparence sans chercher à déterminer son identité.'
       })
     });
 
-    const description = result.description;
+    const description = result.analysis;
 
     if (!description) {
       throw new Error(

@@ -6,6 +6,12 @@ pas une conscience démontrée.
 """
 from __future__ import annotations
 
+from fastapi.staticfiles import StaticFiles
+
+# Monter le dossier static pour servir les scripts, images et styles
+app.mount("/", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+
+
 import sys
 from pathlib import Path
 

@@ -1050,7 +1050,6 @@ class CognitiveEngine:
         # HUMOUR
         # ----------------------------------------------------
 
-        # CORRECTION : utilisation de humour_level au lieu de humor_level
         humor_enabled = humour_level >= 4
 
         humor_description = (
@@ -1155,7 +1154,7 @@ def calculate_cognitive_profile(
     """
     if db_skills_data is None:
         # Récupération automatique depuis la base de données si aucun dictionnaire n'est passé
-        from backend.server import db_connection # type: ignore
+        from server import db_connection # type: ignore
         try:
             with db_connection() as db:
                 rows = db.execute(

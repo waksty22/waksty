@@ -452,44 +452,6 @@
     }
 
     /* =========================
-       BARRES DE PROGRESSION
-    ========================= */
-
-    .stat-item {
-      margin-bottom:15px;
-    }
-
-    .stat-header {
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      font-size:.77rem;
-      margin-bottom:7px;
-      color:var(--text-muted);
-      font-weight:600;
-    }
-
-    .stat-header span:last-child {
-      color:var(--cyan);
-      font-family:monospace;
-      white-space:nowrap;
-    }
-
-    .bar-bg {
-      background:#070b14;
-      border-radius:7px;
-      height:10px;
-      overflow:hidden;
-      border:1px solid var(--card-border);
-    }
-
-    .bar-fill {
-      height:100%;
-      border-radius:7px;
-      transition:width .6s ease;
-    }
-
-    /* =========================
        VUE 3D
     ========================= */
 
@@ -995,7 +957,7 @@
       <img src="/static/chappie-hero.png" alt="Portrait de Chappie" onerror="this.style.display='none'">
       <div>
         <h2>CHAPPIE</h2>
-        <p>Compagnon cognitif · V19.3</p>
+        <p>Compagnon cognitif · V19.4</p>
       </div>
     </div>
 
@@ -2002,26 +1964,6 @@ Sélectionne une catégorie pour consulter les données.
       });
     }
 
-    function moveCognitiveOutput() {
-      const summary = document.getElementById("summary");
-      const memoryOutput = document.getElementById("memoryOutput");
-      const skillsSection = document.getElementById("section-skills");
-      const memorySection = document.getElementById("section-memory");
-
-      if (!summary || !memoryOutput) return;
-
-      if (skillsSection && skillsSection.classList.contains("active")) {
-        const destination = document.getElementById("skillsOutput");
-
-        if (destination) {
-          destination.appendChild(summary);
-        }
-      } else if (memorySection && memorySection.classList.contains("active")) {
-        memoryOutput.replaceWith(summary);
-        summary.id = "summary";
-      }
-    }
-
     window.addEventListener("DOMContentLoaded",() => {
       setupRobotModel();
 
@@ -2037,14 +1979,6 @@ Sélectionne une catégorie pour consulter les données.
           syncTokens(tokenMobile.value);
         });
       }
-
-      window.addEventListener("resize",() => {
-        const main = document.getElementById("mainContainer");
-
-        if (main) {
-          main.classList.remove("has-sidebar");
-        }
-      });
     });
   </script>
 

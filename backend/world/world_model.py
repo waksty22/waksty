@@ -1,4 +1,3 @@
-
 """
 Chappie V19.3 — modèle du monde.
 
@@ -393,7 +392,7 @@ def upsert_world_entity(
     db: sqlite3.Connection,
     user_id: str,
     entity_id: str,
-    entity_type: str,
+    entity_type: str = "general",
     properties: dict[str, Any] | None = None,
     source_type: str = "observed",
     confidence: float = 0.8
@@ -578,25 +577,24 @@ def add_world_relation(
     db: sqlite3.Connection,
     user_id: str,
     subject_id: str,
-    predicate: str,
     object_id: str,
+    relation_type: str = "relates_to",
+    weight: float = 1.0,
     source_type: str = "observed",
     confidence: float = 0.8
 ) -> dict[str, Any]:
     """
     Crée ou met à jour une relation orientée :
 
-        Sujet -> Prédicat -> Objet
+        Sujet -> Prédicat (relation_type) -> Objet
 
-    Exemple :
-
-        Chappie -> connaît -> Julien
-        Julien -> possède -> voiture
-        voiture -> située_dans -> garage
-
-    Les deux entités doivent exister et appartenir au même utilisateur.
+    Supporte à la fois les signatures (db, user_id, subject, target, relation_type, weight)
+    et (db, user_id, subject_id, predicate, object_id, source_type, confidence).
     """
 
+    # Gestion de la compatibilité des noms de paramètres selon les appels
+    predicate = relation_type
+    
     user_id = _validate_user_id(user_id)
 
     subject_id = _validate_text(
@@ -740,55 +738,89 @@ def add_world_relation(
 # ============================================================
 
 def get_entity_relations(
-    db: sqlite3.Connection,
-    user_id: str,
-    entity_id: str
+    db_or_user_id: sqlite3.Connection | str,
+    user_id_or_entity_id: str,
+    entity_id_opt: str | None = None
 ) -> list[dict[str, Any]]:
     """
     Récupère toutes les relations dans lesquelles une entité apparaît.
-
-    L'entité peut être :
-    - Le sujet de la relation.
-    - L'objet de la relation.
+    
+    Compatible avec les deux signatures possibles :
+    1. get_entity_relations(db, user_id, entity_id)
+    2. get_entity_relations(user_id, entity_id) [rétrocompatibilité]
     """
+    if isinstance(db_or_user_id, sqlite3.Connection):
+        db = db_or_user_id
+        user_id = _validate_user_id(user_id_or_entity_id)
+        entity_id = _validate_text(entity_id_opt, "entity_id", MAX_ID_LENGTH)
+        close_db = False
+    else:
+        # Signature alternative sans connexion SQLite explicite
+        from server import db_connection
+        db = db_connection()
+        close_db = True
+        user_id = _validate_user_id(db_or_user_id)
+        entity_id = _validate_text(user_id_or_entity_id, "entity_id", MAX_ID_LENGTH)
 
-    user_id = _validate_user_id(user_id)
+    try:
+        return _fetch_dicts(
+            db,
+            """
+            SELECT
+                id,
+                user_id,
+                subject_id,
+                predicate,
+                object_id,
+                source_type,
+                confidence,
+                updated_at
 
-    entity_id = _validate_text(
-        entity_id,
-        "entity_id",
-        MAX_ID_LENGTH
-    )
+            FROM world_relations
 
-    return _fetch_dicts(
-        db,
-        """
-        SELECT
-            id,
-            user_id,
-            subject_id,
-            predicate,
-            object_id,
-            source_type,
-            confidence,
-            updated_at
+            WHERE user_id = ?
+              AND (
+                  subject_id = ?
+                  OR object_id = ?
+              )
 
-        FROM world_relations
-
-        WHERE user_id = ?
-          AND (
-              subject_id = ?
-              OR object_id = ?
-          )
-
-        ORDER BY updated_at DESC, id DESC
-        """,
-        (
-            user_id,
-            entity_id,
-            entity_id
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (
+                user_id,
+                entity_id,
+                entity_id
+            )
         )
-    )
+    finally:
+        if close_db:
+            db.close()
+
+
+# ============================================================
+# RÉSUMÉ ET STATISTIQUES DU MONDE
+# ============================================================
+
+def get_world_summary(user_id: str) -> dict[str, Any]:
+    """
+    Renvoie un résumé complet des entités et relations du monde pour un utilisateur.
+    """
+    user_id = _validate_user_id(user_id)
+    from server import db_connection
+    with db_connection() as db:
+        entities = db.execute(
+            "SELECT * FROM world_entities WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
+        relations = db.execute(
+            "SELECT * FROM world_relations WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
+
+        return {
+            "entities": [dict(e) for e in entities],
+            "relations": [dict(r) for r in relations],
+        }
 
 
 # ============================================================

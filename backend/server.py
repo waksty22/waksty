@@ -2865,7 +2865,8 @@ async def api_world_relations(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
 
     try:
-        relations = get_entity_relations(user_id)
+        with db_connection() as db:
+            relations = get_entity_relations(db, user_id, "")
     except Exception as exc:
         print("[WORLD RELATIONS]", repr(exc))
         relations = []
@@ -3319,6 +3320,7 @@ async def api_config(auth=Depends(require_auth)):
 
 
 @app.websocket("/ws")
+@app.websocket("/ws/live")
 async def websocket_endpoint(
     websocket: WebSocket,
     token: Optional[str] = Query(None)
@@ -3335,10 +3337,12 @@ async def websocket_endpoint(
     try:
         await websocket.send_json({
             "type": "connected",
-            "message": "Connexion établie.",
+            "message": "Connexion établie avec le noyau cognitif de Chappie.",
         })
 
         async with websockets.connect(GEMINI_LIVE_URI) as gemini_ws:
+            current_identity_prompt = get_identity_prompt(user_id)
+
             setup_message = {
                 "setup": {
                     "model": f"models/{GEMINI_LIVE_MODEL}",
@@ -3353,7 +3357,7 @@ async def websocket_endpoint(
                         }
                     },
                     "system_instruction": {
-                        "parts": [{"text": get_identity_prompt(user_id)}]
+                        "parts": [{"text": current_identity_prompt}]
                     }
                 }
             }

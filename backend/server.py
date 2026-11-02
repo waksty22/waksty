@@ -3392,7 +3392,6 @@ async def websocket_endpoint(
                     continue
                 
                 try:
-                    # Traitement du flux audio entrant via le cerveau cognitif / modèle Live
                     dummy_transcript = "Audio reçu et analysé en temps réel."
                     result = await run_brain(str(user_id), "Analyse de l'audio direct reçu par le micro.")
                     

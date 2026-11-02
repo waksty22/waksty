@@ -1,3 +1,4 @@
+# Backend/cognition/engine.py
 
 """
 Chappie V19.3 — Moteur cognitif adaptatif.
@@ -725,10 +726,6 @@ class CognitiveEngine:
         # MATURITÉ GLOBALE
         # ----------------------------------------------------
 
-        # Chaque système possède le même poids global.
-        # Les pondérations sont appliquées uniquement
-        # à l'intérieur de chaque système.
-
         if system_maturity_values:
 
             global_maturity_score = (
@@ -873,8 +870,6 @@ class CognitiveEngine:
 
         branch_count = len(ordered)
 
-        # Pour les petits profils, on évite que les mêmes
-        # compétences soient dans les deux listes.
         selection_count = min(
             STRENGTHS_LIMIT,
             max(1, branch_count // 2)
@@ -962,9 +957,6 @@ class CognitiveEngine:
     ) -> Dict[str, Any]:
         """
         Traduit les compétences en paramètres comportementaux.
-
-        Ces caractéristiques influencent le comportement généré,
-        mais ne constituent pas une conscience réelle.
         """
 
         tete = systems.get("tete", {})
@@ -1058,7 +1050,7 @@ class CognitiveEngine:
         # HUMOUR
         # ----------------------------------------------------
 
-        humor_enabled = humour_level >= 4
+        humor_enabled = humor_level >= 4
 
         humor_description = (
             "Comprend progressivement l'ironie, "
@@ -1145,7 +1137,44 @@ class CognitiveEngine:
 
 
 # ============================================================
-# INSTANCE GLOBALE
+# INSTANCE GLOBALE ET FONCTION DE COMPATIBILITÉ
 # ============================================================
 
 cognitive_engine = CognitiveEngine()
+
+
+def calculate_cognitive_profile(
+    user_id: str,
+    db_skills_data: Optional[Dict[str, Any]] = None,
+    force_recompute: bool = False
+) -> Dict[str, Any]:
+    """
+    Fonction utilitaire globale pour calculer ou récupérer le profil cognitif.
+    Permet de résoudre l'importation attendue par server.py.
+    """
+    if db_skills_data is None:
+        # Récupération automatique depuis la base de données si aucun dictionnaire n'est passé
+        from backend.server import db_connection # type: ignore
+        try:
+            with db_connection() as db:
+                rows = db.execute(
+                    "SELECT skill_name, level, xp, evidence FROM skills WHERE user_id=?",
+                    (user_id,)
+                ).fetchall()
+                db_skills_data = {}
+                for row in rows:
+                    db_skills_data[row["skill_name"]] = {
+                        "default": {
+                            "level": row["level"],
+                            "xp": row["xp"],
+                            "confidence": 0.8
+                        }
+                    }
+        except Exception:
+            db_skills_data = {}
+
+    return cognitive_engine.compute_cognitive_profile(
+        user_id,
+        db_skills_data,
+        force_recompute
+    )

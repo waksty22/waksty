@@ -1,3 +1,4 @@
+
 """Chappie V19.3 — architecture cognitive complète.
 Python 3.11+. Les émotions et les rêves sont des états logiciels simulés,
 pas une conscience démontrée.
@@ -30,6 +31,7 @@ from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
+import websockets
 from dotenv import load_dotenv
 from fastapi import (
     Depends, FastAPI, HTTPException, Request, Security,
@@ -163,6 +165,11 @@ RATE_LIMIT_WINDOW = env_int(
 GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
+)
+
+GEMINI_LIVE_URI = (
+    "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha."
+    f"GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
 )
 
 logging.basicConfig(
@@ -3332,7 +3339,6 @@ async def websocket_endpoint(
         return
 
     user_id = CHAPPIE_OWNER_ID
-
     await websocket.accept()
 
     try:
@@ -3341,90 +3347,83 @@ async def websocket_endpoint(
             "message": "Connexion établie.",
         })
 
-        while True:
-            payload = await websocket.receive_json()
+        # Connexion au WebSocket natif Gemini Live API
+        async with websockets.connect(GEMINI_LIVE_URI) as gemini_ws:
+            
+            # Configuration initiale de la voix Live avec l'identité de Chappie
+            setup_message = {
+                "setup": {
+                    "model": f"models/{GEMINI_LIVE_MODEL}",
+                    "generation_config": {
+                        "response_modalities": ["AUDIO"],
+                        "speech_config": {
+                            "voice_config": {
+                                "prebuilt_voice_config": {
+                                    "voice_name": "Puck"
+                                }
+                            }
+                        }
+                    },
+                    "system_instruction": {
+                        "parts": [{"text": get_identity_prompt(user_id)}]
+                    }
+                }
+            }
+            await gemini_ws.send(json.dumps(setup_message))
 
-            action = str(payload.get("action") or "").strip()
-
-            if action == "ping":
-                await websocket.send_json({
-                    "type": "pong",
-                    "timestamp": time.time(),
-                })
-                continue
-
-            if action == "chat":
-                message = str(payload.get("message") or "").strip()
-
-                if not message:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Message vide.",
-                    })
-                    continue
-
-                if len(message) > MAX_MESSAGE_LENGTH:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Message trop long.",
-                    })
-                    continue
-
+            async def forward_client_to_gemini():
                 try:
-                    result = await run_brain(str(user_id), message)
+                    while True:
+                        raw_data = await websocket.receive_text()
+                        payload = json.loads(raw_data)
+                        action = str(payload.get("action") or "").strip()
 
-                    await websocket.send_json({
-                        "type": "chat",
-                        "data": result,
-                    })
+                        if action == "ping":
+                            await websocket.send_json({"type": "pong", "timestamp": time.time()})
+                            continue
 
-                except Exception as exc:
-                    print("[WEBSOCKET CHAT]", repr(exc))
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Erreur pendant la réponse de Chappie.",
-                    })
+                        if action == "chat":
+                            message = str(payload.get("message") or "").strip()
+                            if message:
+                                result = await run_brain(str(user_id), message)
+                                await websocket.send_json({"type": "chat", "data": result})
+                            continue
 
-                continue
+                        if action == "audio_chunk":
+                            pcm_data = payload.get("pcm_data")
+                            if pcm_data:
+                                await gemini_ws.send(json.dumps({
+                                    "realtime_input": {
+                                        "media_chunks": [{
+                                            "mime_type": "audio/pcm",
+                                            "data": pcm_data
+                                        }]
+                                    }
+                                }))
+                except Exception:
+                    pass
 
-            if action == "audio" or action == "audio_stream":
-                user_spoken_text = str(payload.get("message") or "").strip()
-                if not user_spoken_text:
-                    user_spoken_text = "Coucou Chappie, tu m'entends ?"
-                
+            async def forward_gemini_to_client():
                 try:
-                    # Le cerveau de Chappie réfléchit et génère le texte de réponse
-                    result = await run_brain(str(user_id), user_spoken_text)
-                    reply_text = result.get("reply", "")
+                    async for msg in gemini_ws:
+                        response = json.loads(msg)
+                        parts = response.get("serverContent", {}).get("modelTurn", {}).get("parts", [])
+                        for part in parts:
+                            if "inlineData" in part:
+                                audio_b64 = part["inlineData"]["data"]
+                                await websocket.send_json({
+                                    "type": "audio_stream",
+                                    "audio": audio_b64
+                                })
+                except Exception:
+                    pass
 
-                    # On renvoie uniquement le texte et la psychologie (sans edge_tts ni audio base64)
-                    # pour éliminer totalement les bruits parasites / grésillements audio côté front
-                    await websocket.send_json({
-                        "type": "audio_response",
-                        "user_text": user_spoken_text,
-                        "text": reply_text,
-                        "audio": "", 
-                        "psychology": result.get("psychology", {})
-                    })
-                except Exception as exc:
-                    print("[WEBSOCKET AUDIO]", repr(exc))
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Erreur de traitement audio en direct.",
-                    })
-                continue
-
-            await websocket.send_json({
-                "type": "error",
-                "message": "Action WebSocket inconnue.",
-            })
+            await asyncio.gather(forward_client_to_gemini(), forward_gemini_to_client())
 
     except WebSocketDisconnect:
         print("[WEBSOCKET] Client déconnecté.")
-
     except Exception as exc:
         print("[WEBSOCKET ERROR]", repr(exc))
-
         try:
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         except Exception:

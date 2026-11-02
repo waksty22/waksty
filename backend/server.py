@@ -28,14 +28,14 @@ import sqlite3
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import (
     Depends, FastAPI, HTTPException, Request, Security,
-    WebSocket, WebSocketDisconnect
+    WebSocket, WebSocketDisconnect, Query, status
 )
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -3322,26 +3322,25 @@ async def api_config(auth=Depends(require_auth)):
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: Optional[str] = Query(None)
+):
+    token = str(token or "").strip()
+
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    try:
+        user_id = valid_user(token)
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await websocket.accept()
 
     try:
-        auth_message = await websocket.receive_json()
-        token = str(auth_message.get("token") or "").strip()
-
-        if not token:
-            await websocket.close(code=1008)
-            return
-
-        try:
-            user_id = valid_user(token)
-        except Exception:
-            user_id = False
-
-        if not user_id:
-            await websocket.close(code=1008)
-            return
-
         await websocket.send_json({
             "type": "connected",
             "message": "Connexion établie.",

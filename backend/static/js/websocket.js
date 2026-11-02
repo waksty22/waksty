@@ -1,7 +1,7 @@
 // static/js/websocket.js
 
 export function initWebSocket(url, onMessageCallback) {
-    const ws = new WebSocket(url);
+    let ws = new WebSocket(url);
 
     ws.onopen = () => {
         console.log("Connexion WebSocket établie.");
@@ -22,7 +22,10 @@ export function initWebSocket(url, onMessageCallback) {
 
     ws.onclose = () => {
         console.warn("Connexion WebSocket fermée. Tentative de reconnexion dans 5s...");
-        setTimeout(() => initWebSocket(url, onMessageCallback), 5000);
+        setTimeout(() => {
+            // Réassigne la nouvelle instance pour maintenir la connexion active
+            ws = initWebSocket(url, onMessageCallback);
+        }, 5000);
     };
 
     return ws;

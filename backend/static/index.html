@@ -576,6 +576,13 @@
       50% { transform:scale(1.05); box-shadow:0 0 40px #06b6d499; }
     }
 
+    /* Animation dynamique de la voix lors du déclenchement */
+    .voice-core.speaking {
+      border-color: var(--success);
+      color: var(--success);
+      box-shadow: 0 0 45px var(--success), inset 0 0 25px var(--success);
+    }
+
     .waveform {
       display:flex;
       align-items:center;
@@ -998,7 +1005,7 @@
         type="password"
         autocomplete="off"
         placeholder="CHAPPIE_API_TOKEN"
-        oninput="syncTokens(this.value)">
+        oninput="syncTokens('desktop')">
       <p class="muted" style="margin-top:7px">
         Jeton utilisé pour authentifier les requêtes.
       </p>
@@ -1162,7 +1169,7 @@
             type="password"
             autocomplete="off"
             placeholder="Colle ton jeton ici..."
-            oninput="syncTokens(this.value)">
+            oninput="syncTokens('mobile')">
 
           <div class="row-btns">
             <button type="button" onclick="fetchPsychology()">
@@ -1275,8 +1282,7 @@
           <h3>🎙️ Interface vocale de Chappie</h3>
 
           <p class="muted" style="margin-bottom:14px">
-            Visualisation de l'activité vocale. L'animation est décorative
-            pour le moment : elle ne représente pas encore le volume audio réel.
+            Visualisation de l'activité vocale et de l'écoute temps réel.
           </p>
 
           <div class="voice-visual">
@@ -1780,7 +1786,7 @@ Sélectionne une catégorie pour consulter les données.
             type="password"
             autocomplete="off"
             placeholder="Jeton API"
-            oninput="syncTokens(this.value)">
+            oninput="syncTokens('desktop')">
 
           <p class="muted" style="margin-top:8px">
             Le jeton est utilisé par les requêtes authentifiées de l'interface.
@@ -1862,22 +1868,6 @@ Sélectionne une catégorie pour consulter les données.
           behavior:"smooth"
         });
       }
-    }
-
-    function syncTokens(value) {
-      const ids = [
-        "token",
-        "tokenMobile",
-        "tokenMemory"
-      ];
-
-      ids.forEach(id => {
-        const field = document.getElementById(id);
-
-        if (field && field.value !== value) {
-          field.value = value;
-        }
-      });
     }
 
     /* =========================
@@ -1967,22 +1957,17 @@ Sélectionne une catégorie pour consulter les données.
     window.addEventListener("DOMContentLoaded",() => {
       setupRobotModel();
 
-      const token = document.getElementById("token");
-      const tokenMobile = document.getElementById("tokenMobile");
+      window.addEventListener("resize",() => {
+        const main = document.getElementById("mainContainer");
 
-      if (token && tokenMobile) {
-        token.addEventListener("input",() => {
-          syncTokens(token.value);
-        });
-
-        tokenMobile.addEventListener("input",() => {
-          syncTokens(tokenMobile.value);
-        });
-      }
+        if (main) {
+          main.classList.remove("has-sidebar");
+        }
+      });
     });
   </script>
 
-  <!-- Script externe de Chappie V19.4 mis à jour sur /static/ -->
+  <!-- Script externe de Chappie V19.4 relié au serveur -->
   <script src="/static/script.js?v=19.4" defer></script>
 
 </body>

@@ -3328,15 +3328,11 @@ async def websocket_endpoint(
 ):
     token = str(token or "").strip()
 
-    if not token:
+    if not CHAPPIE_API_TOKEN or not token or not hmac.compare_digest(token, CHAPPIE_API_TOKEN):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    try:
-        user_id = valid_user(token)
-    except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
+    user_id = CHAPPIE_OWNER_ID
 
     await websocket.accept()
 
@@ -3404,7 +3400,7 @@ async def websocket_endpoint(
         print("[WEBSOCKET ERROR]", repr(exc))
 
         try:
-            await websocket.close(code=1011)
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         except Exception:
             pass
 

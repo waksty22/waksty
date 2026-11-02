@@ -1,4 +1,3 @@
-
 """Chappie V19.3 — architecture cognitive complète.
 Python 3.11+. Les émotions et les rêves sont des états logiciels simulés,
 pas une conscience démontrée.
@@ -84,7 +83,6 @@ BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-# Utilisation de Gemini Flash 3.6 comme demandé
 GEMINI_MODEL = os.getenv(
     "GEMINI_MODEL", "gemini-3.6-flash"
 ).strip()

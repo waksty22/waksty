@@ -92,10 +92,6 @@ function getToken() {
   return desktop || mobile;
 }
 
-/*
-  Synchronise les champs du jeton.
-  Cette fonction peut également être appelée depuis le HTML.
-*/
 function syncTokens(source = null) {
   const desktop = $('token');
   const mobile = $('tokenMobile');
@@ -1238,10 +1234,9 @@ function startLiveVision() {
       if (data) {
         liveSocket.send(
           JSON.stringify({
-            video: {
-              mimeType: 'image/jpeg',
-              data
-            }
+            action: 'video_frame',
+            mime_type: 'image/jpeg',
+            data
           })
         );
       }
@@ -1371,10 +1366,11 @@ async function toggleLive() {
           if (!pcm.length) return;
 
           try {
+            // CORRECTION: Utilisation de "action: 'audio_chunk'" et "pcm_data" alignés avec server.py
             socket.send(
               JSON.stringify({
-                action: 'audio',
-                audio: floatToPcm16Base64(pcm)
+                action: 'audio_chunk',
+                pcm_data: floatToPcm16Base64(pcm)
               })
             );
           } catch (error) {
@@ -1473,7 +1469,13 @@ async function toggleLive() {
         }
       }
 
-      if (data.audio) {
+      // CORRECTION: Lecture audio écoutant le type "audio_stream" renvoyé par server.py
+      if (data.type === 'audio_stream' && data.audio) {
+        playLiveAudio(
+          data.audio,
+          LIVE_OUTPUT_RATE
+        );
+      } else if (data.audio) {
         playLiveAudio(
           data.audio,
           data.sample_rate || LIVE_OUTPUT_RATE
@@ -1489,7 +1491,7 @@ async function toggleLive() {
       if (socket === liveSocket) {
         setText(
           'liveStatus',
-          'Erreur WebSocket. Vérifie le serveur, le jeton et les logs Render.'
+          'Erreur WebSocket. Vérifie le serveur, le jeton et les logs.'
         );
       }
     };
@@ -2322,7 +2324,6 @@ function initializeChappie() {
     );
   }
 
-  // Synchronisation initiale des champs.
   syncTokens();
 
   if (getToken()) {
@@ -2374,50 +2375,29 @@ window.addEventListener('pagehide', () => {
    ============================================================ */
 
 Object.assign(window, {
-  // Conversation
   sendMessage,
   checkInitialGreeting,
-
-  // Voix
   speak,
   stopSpeech,
   toggleMic,
   stopVoiceRecognition,
-
-  // Émotions
   fetchPsychology,
   renderEmotionsDashboard,
-
-  // Mémoire
   loadSummary,
   loadMoodHistory,
   loadDreams,
   loadThoughts,
   consolidate,
-
-  // Cognition
   loadSkills,
   loadGoals,
-
-  // Réinitialisation
   resetLife,
-
-  // Gemini Live
   toggleLive,
   stopLive,
-
-  // Vision
   startCamera,
   stopCamera,
   captureVision,
-
-  // Profils vocaux
   recordVoice,
-
-  // Jeton
   syncTokens,
-
-  // Animation
   setVoiceActivity
 });
 

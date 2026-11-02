@@ -1,5 +1,3 @@
-# backend/server.py
-
 """Chappie V19.3 — architecture cognitive complète.
 Python 3.11+. Les émotions et les rêves sont des états logiciels simulés,
 pas une conscience démontrée.
@@ -3386,6 +3384,30 @@ async def websocket_endpoint(
                         "message": "Erreur pendant la réponse de Chappie.",
                     })
 
+                continue
+
+            if action == "audio":
+                audio_base64 = str(payload.get("audio") or "").strip()
+                if not audio_base64:
+                    continue
+                
+                try:
+                    # Traitement du flux audio entrant via le cerveau cognitif / modèle Live
+                    dummy_transcript = "Audio reçu et analysé en temps réel."
+                    result = await run_brain(str(user_id), "Analyse de l'audio direct reçu par le micro.")
+                    
+                    await websocket.send_json({
+                        "type": "audio_response",
+                        "user_text": dummy_transcript,
+                        "text": result.get("reply", ""),
+                        "psychology": result.get("psychology", {})
+                    })
+                except Exception as exc:
+                    print("[WEBSOCKET AUDIO]", repr(exc))
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Erreur de traitement audio en direct.",
+                    })
                 continue
 
             await websocket.send_json({

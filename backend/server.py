@@ -3388,31 +3388,22 @@ async def websocket_endpoint(
                 continue
 
             if action == "audio" or action == "audio_stream":
-                # Récupère le texte envoyé par l'action ou s'adapte au flux PCM/audio brut si besoin
                 user_spoken_text = str(payload.get("message") or "").strip()
                 if not user_spoken_text:
                     user_spoken_text = "Coucou Chappie, tu m'entends ?"
                 
                 try:
+                    # Le cerveau de Chappie réfléchit et génère le texte de réponse
                     result = await run_brain(str(user_id), user_spoken_text)
                     reply_text = result.get("reply", "")
 
-                    # Génération de la voix via edge_tts pour la retransmettre au client
-                    import edge_tts
-                    communicate = edge_tts.Communicate(reply_text, voice="fr-FR-HenriNeural")
-                    audio_chunks = []
-                    async for chunk in communicate.stream():
-                        if chunk.get("type") == "audio":
-                            audio_chunks.append(chunk["data"])
-                    
-                    audio_bytes = b"".join(audio_chunks)
-                    reply_audio_base64 = base64.b64encode(audio_bytes).decode("utf-8") if audio_bytes else ""
-
+                    # On renvoie uniquement le texte et la psychologie (sans edge_tts ni audio base64)
+                    # pour éliminer totalement les bruits parasites / grésillements audio côté front
                     await websocket.send_json({
                         "type": "audio_response",
                         "user_text": user_spoken_text,
                         "text": reply_text,
-                        "audio": reply_audio_base64,
+                        "audio": "", 
                         "psychology": result.get("psychology", {})
                     })
                 except Exception as exc:

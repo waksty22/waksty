@@ -17,8 +17,13 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log("Message reçu du serveur :", data);
 
         // Traitement des réponses vocales ou live du serveur
-        if (data.type === "audio_response" && data.audio) {
-            playAudioChunk(data.audio);
+        if (data.type === "audio_response") {
+            if (data.text) {
+                console.log("Chappie :", data.text);
+            }
+            if (data.audio) {
+                playAudioChunk(data.audio);
+            }
         }
     });
 
@@ -27,8 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (micButton) {
         const recognition = initSpeechRecognition((text) => {
             console.log("Texte reconnu :", text);
-            // Envoi du texte ou de l'action audio au serveur via le WebSocket
-            if (socket && socket.readyState === WebSocket.OPEN) {
+            if (text && socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({
                     action: "audio",
                     message: text
@@ -38,7 +42,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         micButton.addEventListener("click", () => {
             if (recognition) {
-                recognition.start();
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.log("La reconnaissance vocale est déjà active.");
+                }
             } else {
                 console.warn("La reconnaissance vocale n'est pas disponible, bascule sur le stream audio live.");
                 initLiveAudioStream(socket);

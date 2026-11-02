@@ -57,6 +57,7 @@ from world.world_model import (
     get_world_entity,
     add_world_relation,
     get_entity_relations,
+    get_world_summary,
 )
 from learning.curriculum import (
     init_learning_tables,
@@ -97,7 +98,6 @@ GEMINI_LIVE_MODEL = os.getenv(
 ).strip()
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
-    """Lit un entier d'environnement sans faire planter le démarrage."""
     try:
         value = int(os.getenv(name, str(default)))
     except (TypeError, ValueError):
@@ -111,7 +111,6 @@ def env_float(
     minimum: float,
     maximum: float,
 ) -> float:
-    """Lit un flottant d'environnement de façon sécurisée."""
     try:
         value = float(os.getenv(name, str(default)))
     except (TypeError, ValueError):
@@ -462,7 +461,6 @@ async def lifespan(app: FastAPI):
             pass
 
 
-# 1. Initialisation de l'application FastAPI en premier
 app = FastAPI(
     title=APP_NAME,
     version="19.3.1",
@@ -473,7 +471,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 2. Montage du dossier static sur /static pour ne pas bloquer la racine
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 
@@ -884,7 +881,7 @@ def update_skill(
         current_xp = float(row["xp"]) if row else 0.0
 
         new_xp = max(0.0, current_xp + xp_delta)
-        new_level = min(10.0, 1.0 + math.floor(new_xp / 100.0))
+        new_level = min(30.0, 1.0 + math.floor(new_xp / 100.0))
 
         db.execute(
             """
@@ -2853,8 +2850,6 @@ async def api_world(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
 
     try:
-        from world.world_model import get_world_summary
-
         world = get_world_summary(user_id)
     except Exception as exc:
         print("[WORLD SUMMARY]", repr(exc))
@@ -2870,8 +2865,6 @@ async def api_world_relations(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
 
     try:
-        from world.world_model import get_entity_relations
-
         relations = get_entity_relations(user_id)
     except Exception as exc:
         print("[WORLD RELATIONS]", repr(exc))
@@ -3345,10 +3338,7 @@ async def websocket_endpoint(
             "message": "Connexion établie.",
         })
 
-        # Connexion au WebSocket natif Gemini Live API
         async with websockets.connect(GEMINI_LIVE_URI) as gemini_ws:
-            
-            # Configuration initiale de la voix Live avec l'identité de Chappie
             setup_message = {
                 "setup": {
                     "model": f"models/{GEMINI_LIVE_MODEL}",
@@ -3398,6 +3388,20 @@ async def websocket_endpoint(
                                         }]
                                     }
                                 }))
+                            continue
+
+                        if action == "video_frame":
+                            img_data = payload.get("data")
+                            if img_data:
+                                await gemini_ws.send(json.dumps({
+                                    "realtime_input": {
+                                        "media_chunks": [{
+                                            "mime_type": "image/jpeg",
+                                            "data": img_data
+                                        }]
+                                    }
+                                }))
+                            continue
                 except Exception:
                     pass
 
@@ -3412,6 +3416,11 @@ async def websocket_endpoint(
                                 await websocket.send_json({
                                     "type": "audio_stream",
                                     "audio": audio_b64
+                                })
+                            if "text" in part:
+                                await websocket.send_json({
+                                    "type": "text",
+                                    "text": part["text"]
                                 })
                 except Exception:
                     pass

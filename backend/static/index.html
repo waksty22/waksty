@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="fr">
 <head>
@@ -993,7 +992,7 @@
 
   <aside>
     <div class="brand">
-      <img src="/hero.png" alt="Portrait de Chappie" onerror="this.style.display='none'">
+      <img src="/static/hero.png" alt="Portrait de Chappie" onerror="this.style.display='none'">
       <div>
         <h2>CHAPPIE</h2>
         <p>Compagnon cognitif · V19.3</p>
@@ -1105,7 +1104,7 @@
 
           <div class="hero-top">
             <div class="hero-avatar">
-              <img src="/hero.png" alt="Chappie" onerror="this.style.display='none'">
+              <img src="/static/hero.png" alt="Chappie" onerror="this.style.display='none'">
             </div>
 
             <div class="hero-info">
@@ -1235,7 +1234,7 @@
             <model-viewer
               id="chappieModelMain"
               src="https://huggingface.co/datasets/wakstyprod/Chappie3D/resolve/main/model.glb"
-              poster="/hero.png"
+              poster="/static/hero.png"
               alt="Modèle 3D de Chappie, robot métallique bleu acier aux yeux cyan"
               camera-controls
               auto-rotate
@@ -1903,12 +1902,6 @@ Sélectionne une catégorie pour consulter les données.
       }
     }
 
-    /*
-      Synchronisation des champs API.
-      Le script.js V19.3 lit token et tokenMobile.
-      On conserve ces deux identifiants et on synchronise les autres champs.
-    */
-
     function syncTokens(value) {
       const ids = [
         "token",
@@ -1927,7 +1920,7 @@ Sélectionne une catégorie pour consulter les données.
 
     /* =========================
        COMMANDES DU MODÈLE 3D
-    ========================= */
+    ========================= -->
 
     function resetRobotView(id) {
       const model = document.getElementById(id);
@@ -2009,13 +2002,6 @@ Sélectionne une catégorie pour consulter les données.
       });
     }
 
-    /*
-      Affichage des résultats du cerveau.
-      Le script.js V19.3 utilise #summary pour ses fonctions cognitives.
-      On déplace visuellement ce même élément vers la page concernée
-      lorsque l'utilisateur consulte les compétences ou la mémoire.
-    */
-
     function moveCognitiveOutput() {
       const summary = document.getElementById("summary");
       const memoryOutput = document.getElementById("memoryOutput");
@@ -2035,11 +2021,6 @@ Sélectionne une catégorie pour consulter les données.
         summary.id = "summary";
       }
     }
-
-    /*
-      Le déplacement du résumé n'est volontairement pas déclenché
-      automatiquement : le script externe conserve son propre élément #summary.
-    */
 
     window.addEventListener("DOMContentLoaded",() => {
       setupRobotModel();
@@ -2067,8 +2048,8 @@ Sélectionne une catégorie pour consulter les données.
     });
   </script>
 
-  <!-- Script externe de Chappie V19.3 -->
-  <script src="/script.js?v=19.3" defer></script>
+  <!-- Script externe de Chappie V19.3 mis à jour sur /static/ -->
+  <script src="/static/script.js?v=19.3" defer></script>
 
 </body>
 </html>

@@ -1361,6 +1361,7 @@ async function toggleLive() {
           try {
             socket.send(
               JSON.stringify({
+                action: 'audio',
                 audio: floatToPcm16Base64(pcm)
               })
             );
@@ -1384,7 +1385,7 @@ async function toggleLive() {
 
         setText(
           'liveStatus',
-          'Micro actif. Chappie se connecte à Gemini Live…'
+          'Micro actif. Chappie est connecté.'
         );
 
       } catch (error) {
@@ -1574,7 +1575,7 @@ function playLiveAudio(encoded, rate = LIVE_OUTPUT_RATE) {
     const now = liveCtx.currentTime;
 
     if (liveNextTime < now) {
-      liveNextTime = now + 0.08;
+      liveNextTime = now + 0.05;
     }
 
     source.start(liveNextTime);

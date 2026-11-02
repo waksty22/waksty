@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#070b14">
-  <meta name="description" content="Interface cognitive et interactive de Chappie V19.3">
-  <title>Chappie V19.3 — Interface cognitive</title>
+  <meta name="description" content="Interface cognitive et interactive de Chappie V19.4">
+  <title>Chappie V19.4 — Interface cognitive</title>
 
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 
@@ -1318,7 +1318,7 @@
           </p>
 
           <div class="voice-visual">
-            <div class="voice-core">◉</div>
+            <div class="voice-core" id="voiceWaveform">◉</div>
 
             <div class="waveform" aria-label="Animation vocale">
               <span></span><span></span><span></span><span></span>
@@ -1342,7 +1342,7 @@
 
           <div class="row-btns">
             <button type="button" id="liveBtn" onclick="toggleLive()" style="flex:1">
-              ▶ Démarrer la conversation
+              ▶ Démarrer la conversation live
             </button>
 
             <button type="button" class="danger" onclick="stopLive()">
@@ -2048,8 +2048,8 @@ Sélectionne une catégorie pour consulter les données.
     });
   </script>
 
-  <!-- Script externe de Chappie V19.3 mis à jour sur /static/ -->
-  <script src="/static/script.js?v=19.3" defer></script>
+  <!-- Script externe de Chappie V19.4 mis à jour sur /static/ -->
+  <script src="/static/script.js?v=19.4" defer></script>
 
 </body>
 </html>

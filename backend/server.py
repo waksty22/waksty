@@ -3388,9 +3388,10 @@ async def websocket_endpoint(
                 continue
 
             if action == "audio" or action == "audio_stream":
-                audio_base64 = str(payload.get("audio") or "").strip()
-                # Récupère le message texte associé s'il est envoyé, sinon utilise une interaction directe
-                user_spoken_text = str(payload.get("message") or "").strip() or "Interaction vocale en direct"
+                # Récupère le véritable texte transcrit par le micro, sans valeur par défaut figée
+                user_spoken_text = str(payload.get("message") or "").strip()
+                if not user_spoken_text:
+                    continue
                 
                 try:
                     result = await run_brain(str(user_id), user_spoken_text)

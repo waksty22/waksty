@@ -654,8 +654,23 @@ function stopSpeech() {
 }
 
 /* ============================================================
-   8. DICTÉE VOCALE
+   8. DICTÉE VOCALE & ARRÊT
    ============================================================ */
+
+function stopVoiceRecognition() {
+  if (!recognition) return;
+
+  try {
+    recognition.abort();
+  } catch (_) {}
+
+  recognition = null;
+
+  const button = $('micBtn');
+  if (button) {
+    button.textContent = '🎙️ Dicter';
+  }
+}
 
 function toggleMic() {
   const button = $('micBtn');
@@ -672,10 +687,7 @@ function toggleMic() {
   }
 
   if (recognition) {
-    try {
-      recognition.stop();
-    } catch (_) {}
-
+    stopVoiceRecognition();
     return;
   }
 
@@ -2358,25 +2370,7 @@ window.addEventListener('pagehide', () => {
 });
 
 /* ============================================================
-   25. ARRÊT DICTÉE VOCALE
-   ============================================================ */
-
-function stopVoiceRecognition() {
-  if (!recognition) return;
-
-  try {
-    recognition.abort();
-  } catch (_) {}
-
-  recognition = null;
-
-  if ($('micBtn')) {
-    $('micBtn').textContent = '🎙️ Dicter';
-  }
-}
-
-/* ============================================================
-   26. EXPORT DES FONCTIONS HTML
+   25. EXPORT DES FONCTIONS HTML
    ============================================================ */
 
 Object.assign(window, {
@@ -2428,7 +2422,7 @@ Object.assign(window, {
 });
 
 /* ============================================================
-   27. DÉMARRAGE
+   26. DÉMARRAGE
    ============================================================ */
 
 if (document.readyState === 'loading') {

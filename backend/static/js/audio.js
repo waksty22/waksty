@@ -1,4 +1,5 @@
 // static/js/audio.js
+'use strict';
 
 export function playTextToSpeech(text) {
     if (!('speechSynthesis' in window)) {
@@ -33,27 +34,45 @@ export function initSpeechRecognition(onResultCallback) {
 
 export async function initLiveAudioStream(socket) {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 }, video: false });
+        
+        // Utilisation d'un AudioContext pour récupérer les données PCM brutes si le socket gère l'objet custom ou webm
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const source = audioCtx.createMediaStreamSource(stream);
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
-        mediaRecorder.ondataavailable = async (event) => {
-            if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
-                const reader = new FileReader();
-                reader.readAsDataURL(event.data);
-                reader.onloadend = () => {
-                    const base64Audio = reader.result.split(',')[1];
-                    socket.send(JSON.stringify({
-                        action: "audio_stream",
-                        model: "gemini-3.6-flash", // Utilisation forcée de Gemini Flash 3.6
-                        audio: base64Audio
-                    }));
-                };
+        processor.onaudioprocess = (e) => {
+            const inputData = e.inputData[0];
+            // Conversion en Int16Array (PCM 16-bit)
+            const pcm16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+                pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+            }
+
+            // Encodage Base64
+            const binary = String.fromCharCode.apply(null, new Uint8Array(pcm16.buffer));
+            const base64Audio = btoa(binary);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    action: "audio_chunk",
+                    pcm_data: base64Audio
+                }));
             }
         };
 
-        mediaRecorder.start(250);
-        console.log("Flux audio Live démarré avec Gemini Flash 3.6.");
-        return mediaRecorder;
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+
+        console.log("Flux audio Live (PCM) démarré.");
+        return {
+            stop() {
+                processor.disconnect();
+                source.disconnect();
+                stream.getTracks().forEach(track => track.stop());
+                if (audioCtx.state !== 'closed') audioCtx.close();
+            }
+        };
     } catch (error) {
         console.error("Erreur d'accès au microphone :", error);
     }
@@ -67,7 +86,7 @@ export function playAudioChunk(base64Data) {
         for (let i = 0; i < len; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
-        const blob = new Blob([bytes], { type: 'audio/webm' });
+        const blob = new Blob([bytes], { type: 'audio/mp3' });
         const audioUrl = URL.createObjectURL(blob);
         const audio = new Audio(audioUrl);
         audio.play().catch(e => console.log("Lecture audio ignorée :", e));

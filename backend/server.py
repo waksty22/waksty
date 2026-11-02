@@ -82,8 +82,9 @@ BASE_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = BASE_DIR / "chappie_v16.sqlite3"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+# Utilisation de Gemini Flash 3.6 comme demandé
 GEMINI_MODEL = os.getenv(
-    "GEMINI_MODEL", "gemini-3.5-flash"
+    "GEMINI_MODEL", "gemini-3.6-flash"
 ).strip()
 
 CHAPPIE_API_TOKEN = os.getenv("CHAPPIE_API_TOKEN", "").strip()
@@ -92,7 +93,7 @@ CHAPPIE_OWNER_ID = (
 )
 
 GEMINI_LIVE_MODEL = os.getenv(
-    "GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"
+    "GEMINI_LIVE_MODEL", "gemini-3.6-flash-live-preview"
 ).strip()
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -3386,14 +3387,12 @@ async def websocket_endpoint(
 
                 continue
 
-            if action == "audio":
+            if action == "audio" or action == "audio_stream":
                 audio_base64 = str(payload.get("audio") or "").strip()
-                if not audio_base64:
-                    continue
+                # Récupère le message texte associé s'il est envoyé, sinon utilise une interaction directe
+                user_spoken_text = str(payload.get("message") or "").strip() or "Interaction vocale en direct"
                 
                 try:
-                    # Traitement du message audio capté en direct
-                    user_spoken_text = "Salut Chappie, je te parle en direct par le micro."
                     result = await run_brain(str(user_id), user_spoken_text)
                     reply_text = result.get("reply", "")
 

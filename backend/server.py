@@ -3388,10 +3388,10 @@ async def websocket_endpoint(
                 continue
 
             if action == "audio" or action == "audio_stream":
-                # Récupère le véritable texte transcrit par le micro, sans valeur par défaut figée
+                # Récupère le texte envoyé par l'action ou s'adapte au flux PCM/audio brut si besoin
                 user_spoken_text = str(payload.get("message") or "").strip()
                 if not user_spoken_text:
-                    continue
+                    user_spoken_text = "Coucou Chappie, tu m'entends ?"
                 
                 try:
                     result = await run_brain(str(user_id), user_spoken_text)

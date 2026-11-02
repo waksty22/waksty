@@ -1,32 +1,67 @@
 // static/js/websocket.js
+'use strict';
 
 export function initWebSocket(url, onMessageCallback) {
-    let ws = new WebSocket(url);
+    let ws = null;
+    let isConnecting = false;
+    let shouldReconnect = true;
 
-    ws.onopen = () => {
-        console.log("Connexion WebSocket établie.");
-    };
+    function connect() {
+        if (isConnecting || !shouldReconnect) return;
+        isConnecting = true;
 
-    ws.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            if (onMessageCallback) onMessageCallback(data);
-        } catch (e) {
-            console.error("Erreur de parsing du message WebSocket :", e);
+        ws = new WebSocket(url);
+
+        ws.onopen = () => {
+            isConnecting = false;
+            console.log("Connexion WebSocket établie.");
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (onMessageCallback) onMessageCallback(data);
+            } catch (e) {
+                console.error("Erreur de parsing du message WebSocket :", e);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error("Erreur WebSocket :", error);
+        };
+
+        ws.onclose = () => {
+            isConnecting = false;
+            if (shouldReconnect) {
+                console.warn("Connexion WebSocket fermée. Tentative de reconnexion dans 5s...");
+                setTimeout(() => {
+                    connect();
+                }, 5000);
+            } else {
+                console.log("Connexion WebSocket fermée volontairement.");
+            }
+        };
+    }
+
+    connect();
+
+    // Retourne un objet de contrôle pour envoyer des données en toute sécurité
+    return {
+        send(data) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(typeof data === 'string' ? data : JSON.stringify(data));
+            } else {
+                console.warn("Impossible d'envoyer : le WebSocket n'est pas ouvert.");
+            }
+        },
+        close() {
+            shouldReconnect = false;
+            if (ws) {
+                ws.close();
+            }
+        },
+        get readyState() {
+            return ws ? ws.readyState : WebSocket.CLOSED;
         }
     };
-
-    ws.onerror = (error) => {
-        console.error("Erreur WebSocket :", error);
-    };
-
-    ws.onclose = () => {
-        console.warn("Connexion WebSocket fermée. Tentative de reconnexion dans 5s...");
-        setTimeout(() => {
-            // Réassigne la nouvelle instance pour maintenir la connexion active
-            ws = initWebSocket(url, onMessageCallback);
-        }, 5000);
-    };
-
-    return ws;
 }

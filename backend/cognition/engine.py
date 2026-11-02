@@ -1050,7 +1050,8 @@ class CognitiveEngine:
         # HUMOUR
         # ----------------------------------------------------
 
-        humor_enabled = humor_level >= 4
+        # CORRECTION : utilisation de humour_level au lieu de humor_level
+        humor_enabled = humour_level >= 4
 
         humor_description = (
             "Comprend progressivement l'ironie, "

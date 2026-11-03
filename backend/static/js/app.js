@@ -8,19 +8,44 @@ import { apiCall } from './api.js';
 document.addEventListener("DOMContentLoaded", () => {
     console.log("Initialisation de l'application modulaire Chappie V19.4...");
 
+    // Fonction centralisée et robuste pour récupérer le token de partout
     function getToken() {
         const desktop = document.getElementById("token");
         const mobile = document.getElementById("tokenMobile");
         const memory = document.getElementById("tokenMemory");
-        return desktop?.value?.trim() || mobile?.value?.trim() || memory?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
+        
+        const val = desktop?.value?.trim() || mobile?.value?.trim() || memory?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
+        
+        // Sauvegarde automatique pour les prochaines requêtes
+        if (val) {
+            localStorage.setItem("chappie_token", val);
+        }
+        return val;
     }
 
-    const token = getToken();
+    // Synchronisation globale des champs de token (appelée par oninput dans le HTML)
+    window.syncTokens = function(source) {
+        const tokenVal = getToken();
+        ["token", "tokenMobile", "tokenMemory"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el.value !== tokenVal) {
+                el.value = tokenVal;
+            }
+        });
+        if (tokenVal) {
+            window.CHAPPIE_TOKEN = tokenVal;
+        }
+    };
 
-    // Initialisation WebSocket pour le mode Gemini Live
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
-    
+    // Pré-remplir les champs si un token est déjà en mémoire
+    const savedToken = getToken();
+    if (savedToken) {
+        ["token", "tokenMobile", "tokenMemory"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = savedToken;
+        });
+    }
+
     let liveSocket = null;
     let liveRecorder = null;
     const liveBtn = document.getElementById("liveBtn");
@@ -32,13 +57,19 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
+        // Récupération dynamique du token au moment du clic
         const currentToken = getToken();
         if (!currentToken) {
             if (liveStatus) liveStatus.textContent = "Saisis ton jeton API avant de démarrer.";
+            alert("Veuillez saisir votre jeton API (CHAPPIE_API_TOKEN) dans la barre latérale ou sur l'accueil.");
             return;
         }
 
         if (liveStatus) liveStatus.textContent = "Connexion au flux Live en cours...";
+
+        // Construction dynamique de l'URL WebSocket avec le vrai token
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws?token=${encodeURIComponent(currentToken)}`;
 
         liveSocket = initWebSocket(wsUrl, (data) => {
             console.log("Message Live reçu :", data);
@@ -131,7 +162,6 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.reply) {
                 if (outDiv) outDiv.textContent = data.reply;
                 msgInput.value = "";
-                // Lecture audio optionnelle de la réponse
                 playTextToSpeech(data.reply);
             }
         } catch (error) {

@@ -1366,7 +1366,6 @@ async function toggleLive() {
           if (!pcm.length) return;
 
           try {
-            // CORRECTION: Utilisation de "action: 'audio_chunk'" et "pcm_data" alignés avec server.py
             socket.send(
               JSON.stringify({
                 action: 'audio_chunk',
@@ -1469,7 +1468,7 @@ async function toggleLive() {
         }
       }
 
-      // CORRECTION: Lecture audio écoutant le type "audio_stream" renvoyé par server.py
+      // CORRECTION : Interception directe du type "audio_stream" émis par server.py
       if (data.type === 'audio_stream' && data.audio) {
         playLiveAudio(
           data.audio,

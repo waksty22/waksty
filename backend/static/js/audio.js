@@ -34,15 +34,20 @@ export function initSpeechRecognition(onResultCallback) {
 
 export async function initLiveAudioStream(socket) {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 }, video: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { 
+                channelCount: 1, 
+                sampleRate: 16000 
+            }, 
+            video: false 
+        });
         
-        // Utilisation d'un AudioContext pour récupérer les données PCM brutes
+        // Utilisation d'un AudioContext fixé à 16 000 Hz pour l'entrée micro
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const source = audioCtx.createMediaStreamSource(stream);
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
-            // CORRECTION : Utilisation de inputBuffer au lieu de inputData
             const inputData = e.inputBuffer.getChannelData(0);
             
             // Conversion en Int16Array (PCM 16-bit)
@@ -66,7 +71,7 @@ export async function initLiveAudioStream(socket) {
         source.connect(processor);
         processor.connect(audioCtx.destination);
 
-        console.log("Flux audio Live (PCM) démarré.");
+        console.log("Flux audio Live (PCM 16kHz) démarré.");
         return {
             stop() {
                 processor.disconnect();
@@ -80,7 +85,7 @@ export async function initLiveAudioStream(socket) {
     }
 }
 
-export function playAudioChunk(base64Data) {
+export function playAudioChunk(base64Data, rate = 24000) {
     try {
         const binaryString = atob(base64Data);
         const len = binaryString.length;
@@ -88,10 +93,23 @@ export function playAudioChunk(base64Data) {
         for (let i = 0; i < len; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
-        const blob = new Blob([bytes], { type: 'audio/mp3' });
-        const audioUrl = URL.createObjectURL(blob);
-        const audio = new Audio(audioUrl);
-        audio.play().catch(e => console.log("Lecture audio ignorée :", e));
+
+        // Conversion du buffer brut en tableau d'échantillons 16-bit signés
+        const buffer = new Int16Array(bytes.buffer);
+        const floatSamples = new Float32Array(buffer.length);
+        for (let i = 0; i < buffer.length; i++) {
+            floatSamples[i] = buffer[i] / 32768.0;
+        }
+
+        // Lecture fluide via AudioContext au taux de sortie standard de 24 000 Hz
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const audioBuffer = audioCtx.createBuffer(1, floatSamples.length, rate);
+        audioBuffer.copyToChannel(floatSamples, 0);
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.destination);
+        source.start();
     } catch (e) {
         console.error("Erreur de lecture du chunk audio :", e);
     }

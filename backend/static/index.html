@@ -1740,7 +1740,7 @@ En attente de synchronisation du cerveau...
             </button>
           </div>
 
-          <pre id="memoryOutput" class="output" style="min-height:120px">
+          <pre id="summary" class="output" style="min-height:120px">
 Sélectionne une catégorie pour consulter les données.
           </pre>
         </div>
@@ -1967,7 +1967,15 @@ Sélectionne une catégorie pour consulter les données.
     });
   </script>
 
-  <!-- Script externe de Chappie V19.4 relié au serveur -->
+  <!-- Si ton code est divisé en modules séparés dans /static/js/, décommente ces lignes : -->
+  <!--
+  <script src="/static/js/api.js" defer></script>
+  <script src="/static/js/audio.js" defer></script>
+  <script src="/static/js/websocket.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+  -->
+
+  <!-- Script global de Chappie V19.4 relié au serveur -->
   <script src="/static/script.js?v=19.4" defer></script>
 
 </body>

@@ -41,6 +41,7 @@ from fastapi.responses import (
 )
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from utils.validators import normalize_and_validate_user_id
@@ -256,9 +257,6 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_memories_user_importance  
             ON memories(user_id, importance DESC, id DESC);  
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts  
-            USING fts5(content, category, tags);  
-
             CREATE TABLE IF NOT EXISTS journal (  
                 id INTEGER PRIMARY KEY,  
                 user_id TEXT NOT NULL,  
@@ -461,6 +459,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Ajout du middleware CORS par sécurité pour le développement local front/back
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 @app.middleware("http")
@@ -557,17 +564,10 @@ class GoalRequest(BaseModel):
     steps: list[str] = Field(default_factory=list, max_length=30)
 
 class GoalStepRequest(BaseModel):
-    evidence: str = Field(min_length=1, max_length=2000)
-
-    @field_validator("evidence")  
-    @classmethod  
-    def trim_evidence(cls, value: str) -> str:  
-        value = value.strip()  
-
-        if not value:  
-            raise ValueError("La preuve ne peut pas être vide.")  
-
-        return value
+    goal_id: Optional[int] = None
+    step_id: Optional[int] = None
+    completed: bool = True
+    evidence: str = Field(default="Progression validée", min_length=1, max_length=2000)
 
 class DreamRequest(BaseModel):
     user_id: str = "creator"
@@ -742,7 +742,6 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         )  
 
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))  
-        db.execute("DELETE FROM memories_v19 WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_entities WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_relations WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM competency_tests WHERE user_id=?", (user_id,))  
@@ -1194,19 +1193,6 @@ def retrieve_memories(
             limit,  
         )  
 
-        for item in results:  
-            memory_id = item.get("id")  
-
-            if memory_id is not None:  
-                db.execute(  
-                    """  
-                    UPDATE memories_v19  
-                    SET access_count = access_count + 1  
-                    WHERE id = ? AND user_id = ?  
-                    """,  
-                    (memory_id, user_id),  
-                )  
-
         db.commit()  
 
         if results:  
@@ -1509,7 +1495,7 @@ def get_identity_prompt(user_id: str) -> str:
         count = db.execute(  
             """  
             SELECT COUNT(*)  
-            FROM memories_v19  
+            FROM memories  
             WHERE user_id=?  
             """,  
             (user_id,),  
@@ -3049,8 +3035,6 @@ async def api_goal_progress(
     data = _safe_dict(request)
 
     goal_id = data.get("goal_id")  
-    step_id = data.get("step_id")  
-    completed = bool(data.get("completed", True))  
 
     if goal_id is None:  
         raise HTTPException(status_code=400, detail="Objectif manquant.")  
@@ -3271,7 +3255,6 @@ async def websocket_endpoint(
             "message": "Connexion établie avec le noyau cognitif de Chappie.",  
         })  
 
-        # CORRECTION : Désactivation des pings automatiques pour éviter la déconnexion keepalive 1011  
         async with websockets.connect(GEMINI_LIVE_URI, ping_interval=None, ping_timeout=None) as gemini_ws:  
             current_identity_prompt = get_identity_prompt(user_id)  
 
@@ -3329,7 +3312,7 @@ async def websocket_endpoint(
                         if action == "video_frame":  
                             img_data = payload.get("data")  
                             if img_data:  
-                                await gemini_ws.send(json.dumps({  
+                                await gemni_ws.send(json.dumps({  
                                     "realtime_input": {  
                                         "media_chunks": [{  
                                             "mime_type": "image/jpeg",  

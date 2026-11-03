@@ -2,8 +2,7 @@
 'use strict';
 
 export async function apiCall(url, options = {}) {
-    // Récupération dynamique du token depuis l'interface utilisateur
-    const tokenInput = document.getElementById("token") || document.getElementById("tokenMobile");
+    const tokenInput = document.getElementById("token") || document.getElementById("tokenMemory") || document.getElementById("tokenMobile");
     const token = tokenInput?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
 
     const headers = {
@@ -11,7 +10,6 @@ export async function apiCall(url, options = {}) {
         ...options.headers
     };
 
-    // Si le corps n'est ni un Blob, ni un FormData, ni un ArrayBuffer, on s'assure qu'il est en JSON
     const isBinary = options.body instanceof Blob || options.body instanceof FormData || options.body instanceof ArrayBuffer;
     
     if (!isBinary && options.body && typeof options.body === 'object' && !headers['Content-Type']) {

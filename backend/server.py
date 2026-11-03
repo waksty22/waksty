@@ -3255,8 +3255,8 @@ async def websocket_endpoint(
             "message": "Connexion établie avec le noyau cognitif de Chappie.",  
         })  
 
-        # CORRECTION ICI : ping_interval et ping_timeout activés pour éviter le timeout
-        async with websockets.connect(GEMINI_LIVE_URI, ping_interval=20, ping_timeout=20) as gemini_ws:  
+        # CORRECTION : ping_interval et ping_timeout remis à None pour éviter le timeout Gemini Live
+        async with websockets.connect(GEMINI_LIVE_URI, ping_interval=None, ping_timeout=None) as gemini_ws:  
             current_identity_prompt = get_identity_prompt(user_id)  
 
             setup_message = {  

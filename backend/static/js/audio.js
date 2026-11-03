@@ -8,6 +8,9 @@ function getAudioContext(rate = 24000) {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         sharedAudioCtx = new AudioContextClass({ sampleRate: rate });
     }
+    if (sharedAudioCtx.state === 'suspended') {
+        sharedAudioCtx.resume();
+    }
     return sharedAudioCtx;
 }
 

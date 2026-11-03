@@ -45,7 +45,6 @@ export function initWebSocket(url, onMessageCallback) {
 
     connect();
 
-    // Retourne un objet de contrôle pour envoyer des données en toute sécurité
     return {
         send(data) {
             if (ws && ws.readyState === WebSocket.OPEN) {

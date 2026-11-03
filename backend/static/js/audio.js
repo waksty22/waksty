@@ -36,13 +36,15 @@ export async function initLiveAudioStream(socket) {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 }, video: false });
         
-        // Utilisation d'un AudioContext pour récupérer les données PCM brutes si le socket gère l'objet custom ou webm
+        // Utilisation d'un AudioContext pour récupérer les données PCM brutes
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const source = audioCtx.createMediaStreamSource(stream);
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
-            const inputData = e.inputData[0];
+            // CORRECTION : Utilisation de inputBuffer au lieu de inputData
+            const inputData = e.inputBuffer.getChannelData(0);
+            
             // Conversion en Int16Array (PCM 16-bit)
             const pcm16 = new Int16Array(inputData.length);
             for (let i = 0; i < inputData.length; i++) {

@@ -1740,7 +1740,6 @@ En attente de synchronisation du cerveau...
             </button>
           </div>
 
-          <!-- CORRECTION : ID renommé en memoryOutput pour éviter le doublon avec "summary" -->
           <pre id="memoryOutput" class="output" style="min-height:120px">
 Sélectionne une catégorie pour consulter les données.
           </pre>
@@ -1968,8 +1967,8 @@ Sélectionne une catégorie pour consulter les données.
     });
   </script>
 
-  <!-- Script global de Chappie V19.4 relié au serveur -->
-  <script src="/static/script.js?v=19.4" defer></script>
+  <!-- Chargement du fichier chef d'orchestre en mode module (architecture modulaire) -->
+  <script type="module" src="/static/js/app.js" defer></script>
 
 </body>
 </html>

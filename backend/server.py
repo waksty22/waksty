@@ -459,7 +459,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Ajout du middleware CORS par sécurité pour le développement local front/back
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -3255,8 +3254,13 @@ async def websocket_endpoint(
             "message": "Connexion établie avec le noyau cognitif de Chappie.",  
         })  
 
-        # CORRECTION : ping_interval et ping_timeout remis à None pour éviter le timeout Gemini Live
-        async with websockets.connect(GEMINI_LIVE_URI, ping_interval=None, ping_timeout=None) as gemini_ws:  
+        # CORRECTION CRITIQUE : Passage de subprotocols et désactivation stricte des pings corrompus
+        async with websockets.connect(
+            GEMINI_LIVE_URI, 
+            subprotocols=["realtime"],
+            ping_interval=None, 
+            ping_timeout=None
+        ) as gemini_ws:  
             current_identity_prompt = get_identity_prompt(user_id)  
 
             setup_message = {  
@@ -3294,7 +3298,7 @@ async def websocket_endpoint(
                             message = str(payload.get("message") or "").strip()  
                             if message:  
                                 result = await run_brain(str(user_id), message)  
-                                await websocket.send_json({"type": "chat", "data": result})  
+                                await websocket.send_json({"type": "chat", "data": data})  
                             continue  
 
                         if action == "audio_chunk":  
@@ -3310,7 +3314,7 @@ async def websocket_endpoint(
                                 }))  
                             continue  
 
-                        if action == "video_frame":  
+                        if action == "video_frame":  *
                             img_data = payload.get("data")  
                             if img_data:  
                                 await gemini_ws.send(json.dumps({  
@@ -3334,7 +3338,7 @@ async def websocket_endpoint(
                             if "inlineData" in part:  
                                 audio_b64 = part["inlineData"]["data"]  
                                 await websocket.send_json({  
-                                    "type": "audio_stream",  
+                                    "type": "audio_session",  
                                     "audio": audio_b64  
                                 })  
                             if "text" in part:  
@@ -3342,8 +3346,8 @@ async def websocket_endpoint(
                                     "type": "text",  
                                     "text": part["text"]  
                                 })  
-                except Exception:  
-                    pass  
+                except Exception as e:  
+                    print("[GEMINI RECV ERR]", repr(e))  
 
             await asyncio.gather(forward_client_to_gemini(), forward_gemini_to_client())  
 

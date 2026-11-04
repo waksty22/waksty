@@ -30,8 +30,14 @@ export function initWebSocket(url, onMessageCallback) {
             console.error("Erreur WebSocket :", error);
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
             isConnecting = false;
+            // Si la fermeture est due à une violation de politique (token invalide, ex: 1008), on stoppe les essais
+            if (event.code === 1008) {
+                console.error("Connexion WebSocket refusée : Jeton invalide ou manquant.");
+                shouldReconnect = false;
+                return;
+            }
             if (shouldReconnect) {
                 console.warn("Connexion WebSocket fermée. Tentative de reconnexion dans 5s...");
                 setTimeout(() => {

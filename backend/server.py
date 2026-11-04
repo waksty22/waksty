@@ -95,7 +95,7 @@ CHAPPIE_OWNER_ID = (
 )
 
 GEMINI_LIVE_MODEL = os.getenv(
-    "GEMINI_LIVE_MODEL", "gemini-2.0-flash-exp"
+    "GEMINI_LIVE_MODEL", "gemini-3.6-flash"
 ).strip()
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:

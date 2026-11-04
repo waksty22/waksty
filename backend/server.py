@@ -3298,7 +3298,7 @@ async def websocket_endpoint(
                             message = str(payload.get("message") or "").strip()  
                             if message:  
                                 result = await run_brain(str(user_id), message)  
-                                await websocket.send_json({"type": "chat", "data": data})  
+                                await websocket.send_json({"type": "chat", "data": result})  
                             continue  
 
                         if action == "audio_chunk":  
@@ -3314,7 +3314,7 @@ async def websocket_endpoint(
                                 }))  
                             continue  
 
-                        if action == "video_frame":  *
+                        if action == "video_frame":  
                             img_data = payload.get("data")  
                             if img_data:  
                                 await gemini_ws.send(json.dumps({  

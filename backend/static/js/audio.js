@@ -91,7 +91,7 @@ export async function initLiveAudioStream(socket) {
         };
 
         source.connect(processor);
-        processor.connect(audioCtx.destination);
+        // Ne pas connecter processor.connect(audioCtx.destination) pour éviter l'effet larsen (récupérer sa propre voix)
 
         console.log("Flux audio Live (PCM 16kHz) démarré.");
         return {
@@ -108,6 +108,7 @@ export async function initLiveAudioStream(socket) {
 
 export async function playAudioChunk(base64Data, rate = 24000) {
     try {
+        // Utilisation du contexte audio avec le sampleRate par défaut ou celui reçu
         const audioCtx = getAudioContext(rate);
         if (audioCtx.state === 'suspended') {
             await audioCtx.resume();
@@ -133,13 +134,14 @@ export async function playAudioChunk(base64Data, rate = 24000) {
         source.buffer = audioBuffer;
         source.connect(audioCtx.destination);
 
-        // Gestion de la lecture enchaînée sans coupure
+        // Gestion de la lecture enchaînée sans coupure (Gapless Playback)
         const currentTime = audioCtx.currentTime;
         if (nextPlayTime < currentTime) {
             nextPlayTime = currentTime;
         }
 
         source.start(nextPlayTime);
+        nextPlayType = nextPlayTime + audioBuffer.duration;
         nextPlayTime += audioBuffer.duration;
 
     } catch (e) {

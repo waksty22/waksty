@@ -82,10 +82,17 @@ export async function initLiveAudioStream(socket) {
             }
             const base64Audio = btoa(binary);
 
+            // Format de payload standard attendu par le protocole Gemini Live BidiGenerateContent
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({
-                    action: "audio_chunk",
-                    pcm_data: base64Audio
+                    realtimeInput: {
+                        mediaChunks: [
+                            {
+                                mimeType: "audio/pcm;rate=16000",
+                                data: base64Audio
+                            }
+                        ]
+                    }
                 }));
             }
         };

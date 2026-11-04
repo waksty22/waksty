@@ -124,23 +124,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Gestion du bouton de dictée vocale simple
     const micBtn = document.getElementById("micBtn");
-    if (micBtn) {
-        const recognition = initSpeechRecognition((text) => {
-            const msgInput = document.getElementById("msg");
-            if (msgInput) {
-                msgInput.value = text;
-            }
-        });
+    const recognition = initSpeechRecognition((text) => {
+        const msgInput = document.getElementById("msg");
+        if (msgInput) {
+            msgInput.value = text;
+        }
+    });
 
-        micBtn.addEventListener("click", () => {
-            if (recognition) {
-                try {
-                    recognition.start();
-                    if (liveStatus) liveStatus.textContent = "Écoute en cours...";
-                } catch (e) {
-                    console.warn("Reconnaissance déjà active ou bloquée", e);
-                }
+    // Fonction globale requise par le onclick="toggleMic()" du HTML
+    window.toggleMic = function() {
+        if (recognition) {
+            try {
+                recognition.start();
+                if (liveStatus) liveStatus.textContent = "Écoute en cours...";
+            } catch (e) {
+                console.warn("Reconnaissance déjà active ou bloquée", e);
             }
+        } else {
+            console.warn("Reconnaissance vocale non initialisée.");
+        }
+    };
+
+    if (micBtn) {
+        micBtn.addEventListener("click", () => {
+            window.toggleMic();
         });
     }
 

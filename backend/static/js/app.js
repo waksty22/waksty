@@ -6,7 +6,7 @@ import { playTextToSpeech, initSpeechRecognition, initLiveAudioStream, playAudio
 import { apiCall } from './api.js';
 
 document.addEventListener("DOMContentLoaded", () => {
-    console.log("Initialisation de l'application modulaire Chappie V19.4...");
+    console.log("Initialisation de l'application modulaire Chappie V19.3...");
 
     // Fonction centralisée et robuste pour récupérer le token de partout
     function getToken() {
@@ -16,7 +16,6 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const val = desktop?.value?.trim() || mobile?.value?.trim() || memory?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
         
-        // Sauvegarde automatique pour les prochaines requêtes
         if (val) {
             localStorage.setItem("chappie_token", val);
         }
@@ -69,10 +68,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     statValues[2].textContent = Math.round(data.emotions.curiosity ?? 0) + '%';
                 }
             }
-            document.getElementById('status').textContent = "États généraux actualisés.";
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = "États généraux actualisés.";
         } catch (error) {
             console.error("Erreur fetchPsychology :", error);
-            document.getElementById('status').textContent = "Erreur de mise à jour des états.";
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = "Erreur de mise à jour des états.";
         }
     };
 
@@ -156,6 +157,9 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (e) { alert("Erreur lors de la réinitialisation."); }
     };
 
+    // ==========================================
+    // GEMINI LIVE (WEBSOCKET /ws)
+    // ==========================================
     let liveSocket = null;
     let liveRecorder = null;
     const liveBtn = document.getElementById("liveBtn");
@@ -177,13 +181,14 @@ document.addEventListener("DOMContentLoaded", () => {
         if (liveStatus) liveStatus.textContent = "Connexion au flux Live en cours...";
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        // Passage du token en paramètre de requête pour correspondre au serveur
         const wsUrl = `${wsProtocol}//${window.location.host}/ws?token=${encodeURIComponent(currentToken)}`;
 
         liveSocket = initWebSocket(wsUrl, (data) => {
             console.log("Message Live reçu :", data);
 
-            if (data.status && liveStatus) {
-                liveStatus.textContent = data.status;
+            if (data.message && liveStatus) {
+                liveStatus.textContent = data.message;
             }
 
             if (data.type === "audio_session" || data.type === "audio_stream" || data.audio) {
@@ -201,10 +206,16 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
 
-        liveRecorder = await initLiveAudioStream(liveSocket);
-        if (liveRecorder && liveBtn) {
-            liveBtn.textContent = "⏹ Arrêter la conversation live";
-            if (liveStatus) liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
+        try {
+            liveRecorder = await initLiveAudioStream(liveSocket);
+            if (liveRecorder && liveBtn) {
+                liveBtn.textContent = "⏹ Arrêter la conversation live";
+                if (liveStatus) liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
+            }
+        } catch (e) {
+            console.error("Erreur initialisation micro live :", e);
+            if (liveStatus) liveStatus.textContent = "Erreur d'accès au microphone.";
+            if (liveSocket) liveSocket.close();
         }
     };
 
@@ -227,6 +238,36 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    // ==========================================
+    // CAMÉRA / ANALYSE VISION (/api/vision/analyze)
+    // ==========================================
+    window.analyzeCameraImage = async function(imageBase64, customQuestion = "Décris ce que tu vois.") {
+        const token = getToken();
+        if (!token) {
+            alert("Veuillez saisir votre jeton API.");
+            return;
+        }
+
+        try {
+            const response = await apiCall('/api/vision/analyze', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: {
+                    image: imageBase64,
+                    question: customQuestion
+                }
+            });
+
+            return response.analysis;
+        } catch (error) {
+            console.error("Erreur analyse vision :", error);
+            throw error;
+        }
+    };
+
+    // ==========================================
+    // RECONNAISSANCE VOCALE & CHAT STANDARD
+    // ==========================================
     const micBtn = document.getElementById("micBtn");
     const recognition = initSpeechRecognition((text) => {
         const msgInput = document.getElementById("msg");

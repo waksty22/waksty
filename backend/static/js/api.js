@@ -2,7 +2,7 @@
 'use strict';
 
 export async function apiCall(url, options = {}) {
-    const tokenInput = document.getElementById("token") || document.getElementById("tokenMemory") || document.getElementById("tokenMobile");
+    const tokenInput = document.getElementById("token") || document.getElementById("tokenMobile") || document.getElementById("tokenMemory");
     const token = tokenInput?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
 
     const headers = {

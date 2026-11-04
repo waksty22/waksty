@@ -2,6 +2,7 @@
 'use strict';
 
 let sharedAudioCtx = null;
+let nextPlayTime = 0;
 
 function getAudioContext(rate = 24000) {
     if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
@@ -71,7 +72,14 @@ export async function initLiveAudioStream(socket) {
                 pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
             }
 
-            const binary = String.fromCharCode.apply(null, new Uint8Array(pcm16.buffer));
+            // Conversion sécurisée par blocs pour éviter les erreurs de pile (Call Stack Size Exceeded)
+            const uint8View = new Uint8Array(pcm16.buffer);
+            let binary = '';
+            const chunkSize = 0x8000;
+            for (let i = 0; i < uint8View.length; i += chunkSize) {
+                const chunk = uint8View.subarray(i, i + chunkSize);
+                binary += String.fromCharCode.apply(null, chunk);
+            }
             const base64Audio = btoa(binary);
 
             if (socket && socket.readyState === WebSocket.OPEN) {
@@ -124,7 +132,16 @@ export async function playAudioChunk(base64Data, rate = 24000) {
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioCtx.destination);
-        source.start();
+
+        // Gestion de la lecture enchaînée sans coupure
+        const currentTime = audioCtx.currentTime;
+        if (nextPlayTime < currentTime) {
+            nextPlayTime = currentTime;
+        }
+
+        source.start(nextPlayTime);
+        nextPlayTime += audioBuffer.duration;
+
     } catch (e) {
         console.error("Erreur de lecture du chunk audio :", e);
     }

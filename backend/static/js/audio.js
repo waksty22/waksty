@@ -72,7 +72,7 @@ export async function initLiveAudioStream(socket) {
                 pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
             }
 
-            // Conversion sécurisée par blocs pour éviter les erreurs de pile (Call Stack Size Exceeded)
+            // Conversion sécurisée par blocs pour éviter les erreurs de pile
             const uint8View = new Uint8Array(pcm16.buffer);
             let binary = '';
             const chunkSize = 0x8000;
@@ -98,7 +98,6 @@ export async function initLiveAudioStream(socket) {
         };
 
         source.connect(processor);
-        // Ne pas connecter processor.connect(audioCtx.destination) pour éviter l'effet larsen (récupérer sa propre voix)
 
         console.log("Flux audio Live (PCM 16kHz) démarré.");
         return {
@@ -140,7 +139,6 @@ export async function playAudioChunk(base64Data, rate = 24000) {
         source.buffer = audioBuffer;
         source.connect(audioCtx.destination);
 
-        // Gestion de la lecture enchaînée sans coupure (Gapless Playback)
         const currentTime = audioCtx.currentTime;
         if (nextPlayTime < currentTime) {
             nextPlayTime = currentTime;

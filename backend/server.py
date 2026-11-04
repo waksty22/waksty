@@ -3287,4 +3287,39 @@ async def websocket_endpoint(
                     while True:  
                         raw_data = await websocket.receive_text()  
                         payload = json.loads(raw_data)  
-...
+                        await gemini_ws.send(json.dumps(payload))  
+                except WebSocketDisconnect:  
+                    pass  
+                except Exception as e:  
+                    print("[CLIENT SEND ERR]", repr(e))  
+
+            async def forward_gemini_to_client():  
+                try:  
+                    async for msg in gemini_ws:  
+                        response = json.loads(msg)  
+                        parts = response.get("serverContent", {}).get("modelTurn", {}).get("parts", [])  
+                        for part in parts:  
+                            if "inlineData" in part:  
+                                audio_b64 = part["inlineData"]["data"]  
+                                await websocket.send_json({  
+                                    "type": "audio_session",  
+                                    "audio": audio_b64  
+                                })  
+                            if "text" in part:  
+                                await websocket.send_json({  
+                                    "type": "text",  
+                                    "text": part["text"]  
+                                })  
+                except Exception as e:  
+                    print("[GEMINI RECV ERR]", repr(e))  
+
+            await asyncio.gather(forward_client_to_gemini(), forward_gemini_to_client())  
+
+    except WebSocketDisconnect:  
+        print("[WEBSOCKET] Client déconnecté.")  
+    except Exception as exc:  
+        print("[WEBSOCKET ERROR]", repr(exc))  
+        try:  
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)  
+        except Exception:  
+            pass

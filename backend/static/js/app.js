@@ -46,6 +46,116 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // ==========================================
+    // EXPOSITION GLOBALE DES FONCTIONS (HTML ONCLICK)
+    // ==========================================
+
+    window.fetchPsychology = async function() {
+        const token = getToken();
+        if (!token) {
+            alert("Veuillez saisir votre jeton API.");
+            return;
+        }
+        try {
+            const data = await apiCall('/api/emotions', {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (data && data.emotions) {
+                const statValues = document.querySelectorAll('.stat-card .stat-value');
+                if (statValues.length >= 3) {
+                    statValues[0].textContent = Math.round(data.emotions.energy ?? 0) + '%';
+                    statValues[1].textContent = Math.round(data.emotions.joy ?? 0) + '%';
+                    statValues[2].textContent = Math.round(data.emotions.curiosity ?? 0) + '%';
+                }
+            }
+            document.getElementById('status').textContent = "États généraux actualisés.";
+        } catch (error) {
+            console.error("Erreur fetchPsychology :", error);
+            document.getElementById('status').textContent = "Erreur de mise à jour des états.";
+        }
+    };
+
+    window.loadSkills = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/skills', { headers: { 'Authorization': `Bearer ${token}` } });
+            const summaryEl = document.getElementById('summary');
+            if (summaryEl) {
+                summaryEl.textContent = JSON.stringify(data, null, 2);
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    window.loadGoals = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/goals', { headers: { 'Authorization': `Bearer ${token}` } });
+            const memoryOutput = document.getElementById('memoryOutput');
+            if (memoryOutput) {
+                memoryOutput.textContent = JSON.stringify(data, null, 2);
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    window.loadSummary = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/memory/summary', { headers: { 'Authorization': `Bearer ${token}` } });
+            const memoryOutput = document.getElementById('memoryOutput');
+            if (memoryOutput) {
+                memoryOutput.textContent = data.summary || "Aucun résumé disponible.";
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    window.loadDreams = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/dreams', { headers: { 'Authorization': `Bearer ${token}` } });
+            const memoryOutput = document.getElementById('memoryOutput');
+            if (memoryOutput) {
+                memoryOutput.textContent = JSON.stringify(data, null, 2);
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    window.loadThoughts = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/thoughts', { headers: { 'Authorization': `Bearer ${token}` } });
+            const memoryOutput = document.getElementById('memoryOutput');
+            if (memoryOutput) {
+                memoryOutput.textContent = JSON.stringify(data, null, 2);
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    window.loadMoodHistory = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/mood/history', { headers: { 'Authorization': `Bearer ${token}` } });
+            const memoryOutput = document.getElementById('memoryOutput');
+            if (memoryOutput) {
+                memoryOutput.textContent = JSON.stringify(data, null, 2);
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    window.consolidate = async function() {
+        alert("Fonction de consolidation déclenchée.");
+    };
+
+    window.resetLife = async function() {
+        if (!confirm("Attention : cela va effacer toute la mémoire de Chappie. Continuer ?")) return;
+        const token = getToken();
+        try {
+            await apiCall('/api/reset', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+            alert("Chappie a été réinitialisé.");
+            window.fetchPsychology();
+        } catch (e) { alert("Erreur lors de la réinitialisation."); }
+    };
+
     let liveSocket = null;
     let liveRecorder = null;
     const liveBtn = document.getElementById("liveBtn");
@@ -57,17 +167,15 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        // Récupération dynamique du token au moment du clic
         const currentToken = getToken();
         if (!currentToken) {
             if (liveStatus) liveStatus.textContent = "Saisis ton jeton API avant de démarrer.";
-            alert("Veuillez saisir votre jeton API (CHAPPIE_API_TOKEN) dans la barre latérale ou sur l'accueil.");
+            alert("Veuillez saisir votre jeton API (CHAPPIE_API_TOKEN).");
             return;
         }
 
         if (liveStatus) liveStatus.textContent = "Connexion au flux Live en cours...";
 
-        // Construction dynamique de l'URL WebSocket avec le vrai token
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${wsProtocol}//${window.location.host}/ws?token=${encodeURIComponent(currentToken)}`;
 
@@ -78,7 +186,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 liveStatus.textContent = data.status;
             }
 
-            // Prise en compte élargie des types de messages audio renvoyés par le serveur
             if (data.type === "audio_session" || data.type === "audio_stream" || data.audio) {
                 if (data.text) {
                     const transcript = document.getElementById("liveTranscript");
@@ -94,7 +201,6 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
 
-        // Démarrage de l'enregistrement micro pour le Live
         liveRecorder = await initLiveAudioStream(liveSocket);
         if (liveRecorder && liveBtn) {
             liveBtn.textContent = "⏹ Arrêter la conversation live";
@@ -119,10 +225,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (liveStatus) {
             liveStatus.textContent = "Session Live terminée.";
         }
-        console.log("Conversation live arrêtée.");
     };
 
-    // Gestion du bouton de dictée vocale simple
     const micBtn = document.getElementById("micBtn");
     const recognition = initSpeechRecognition((text) => {
         const msgInput = document.getElementById("msg");
@@ -131,17 +235,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Fonction globale requise par le onclick="toggleMic()" du HTML
     window.toggleMic = function() {
         if (recognition) {
             try {
                 recognition.start();
                 if (liveStatus) liveStatus.textContent = "Écoute en cours...";
             } catch (e) {
-                console.warn("Reconnaissance déjà active ou bloquée", e);
+                console.warn("Reconnaissance déjà active", e);
             }
-        } else {
-            console.warn("Reconnaissance vocale non initialisée.");
         }
     };
 
@@ -151,7 +252,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Gestion de l'envoi de message texte classique
     window.sendMessage = async function() {
         const msgInput = document.getElementById("msg");
         const outDiv = document.getElementById("out");
@@ -177,4 +277,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (outDiv) outDiv.textContent = "Erreur : " + error.message;
         }
     };
+
+    // Charger automatiquement les états si un token est déjà enregistré au démarrage
+    if (savedToken) {
+        window.fetchPsychology();
+    }
 });

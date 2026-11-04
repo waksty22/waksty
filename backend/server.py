@@ -163,7 +163,6 @@ GEMINI_ENDPOINT = (
     f"{GEMINI_MODEL}:generateContent"
 )
 
-# URI corrigée pour utiliser l'API Multimodal Live de Gemini avec la clé d'API
 GEMINI_LIVE_URI = (
     f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
 )
@@ -3249,11 +3248,7 @@ async def websocket_endpoint(
     await websocket.accept()  
 
     try:  
-        await websocket.send_json({  
-            "type": "connected",  
-            "message": "Connexion établie avec le noyau cognitif de Chappie.",  
-        })  
-
+        log.info("[GEMINI LIVE] Connexion au WebSocket distant de Google...")
         async with websockets.connect(
             GEMINI_LIVE_URI, 
             subprotocols=["realtime"],
@@ -3282,6 +3277,31 @@ async def websocket_endpoint(
             }  
             await gemini_ws.send(json.dumps(setup_message))  
 
+            # Attente de la confirmation officielle de Gemini (setupComplete)
+            setup_confirmed = False
+            try:
+                while not setup_confirmed:
+                    raw_msg = await asyncio.wait_for(gemini_ws.recv(), timeout=12.0)
+                    resp = json.loads(raw_msg)
+                    if "setupComplete" in resp:
+                        setup_confirmed = True
+                        log.info("[GEMINI LIVE] Setup validé et confirmé par l'API Google.")
+                    elif "error" in resp:
+                        log.error(f"[GEMINI LIVE SETUP ERROR] {resp}")
+                        await websocket.send_json({
+                            "type": "error", 
+                            "message": "Erreur de configuration renvoyée par Gemini Live."
+                        })
+                        return
+            except asyncio.TimeoutError:
+                log.warning("[GEMINI LIVE] Timeout en attendant setupComplete, poursuite de la session...")
+
+            # Une fois validé par Google, on prévient enfin le client web
+            await websocket.send_json({  
+                "type": "connected",  
+                "message": "Connexion établie et validée avec le noyau cognitif de Chappie.",  
+            })  
+
             async def forward_client_to_gemini():  
                 try:  
                     while True:  
@@ -3297,7 +3317,14 @@ async def websocket_endpoint(
                 try:  
                     async for msg in gemini_ws:  
                         response = json.loads(msg)  
-                        parts = response.get("serverContent", {}).get("modelTurn", {}).get("parts", [])  
+                        
+                        if "setupComplete" in response:
+                            continue
+
+                        server_content = response.get("serverContent", {})
+                        model_turn = server_content.get("modelTurn", {})
+                        parts = model_turn.get("parts", [])  
+
                         for part in parts:  
                             if "inlineData" in part:  
                                 audio_b64 = part["inlineData"]["data"]  
@@ -3311,6 +3338,12 @@ async def websocket_endpoint(
                                     "type": "text",  
                                     "text": part["text"]  
                                 })  
+                                
+                        if server_content.get("turnComplete"):
+                            await websocket.send_json({
+                                "type": "turn_complete"
+                            })
+
                 except Exception as e:  
                     print("[GEMINI RECV ERR]", repr(e))  
 

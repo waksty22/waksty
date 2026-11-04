@@ -95,7 +95,7 @@ CHAPPIE_OWNER_ID = (
 )
 
 GEMINI_LIVE_MODEL = os.getenv(
-    "GEMINI_LIVE_MODEL", "gemini-3.6-flash-live-preview"
+    "GEMINI_LIVE_MODEL", "gemini-2.0-flash-exp"
 ).strip()
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -3254,7 +3254,6 @@ async def websocket_endpoint(
             "message": "Connexion établie avec le noyau cognitif de Chappie.",  
         })  
 
-        # CORRECTION CRITIQUE : Passage de subprotocols et désactivation stricte des pings corrompus
         async with websockets.connect(
             GEMINI_LIVE_URI, 
             subprotocols=["realtime"],
@@ -3288,85 +3287,4 @@ async def websocket_endpoint(
                     while True:  
                         raw_data = await websocket.receive_text()  
                         payload = json.loads(raw_data)  
-                        action = str(payload.get("action") or "").strip()  
-
-                        if action == "ping":  
-                            await websocket.send_json({"type": "pong", "timestamp": time.time()})  
-                            continue  
-
-                        if action == "chat":  
-                            message = str(payload.get("message") or "").strip()  
-                            if message:  
-                                result = await run_brain(str(user_id), message)  
-                                await websocket.send_json({"type": "chat", "data": result})  
-                            continue  
-
-                        if action == "audio_chunk":  
-                            pcm_data = payload.get("pcm_data")  
-                            if pcm_data:  
-                                await gemini_ws.send(json.dumps({  
-                                    "realtime_input": {  
-                                        "media_chunks": [{  
-                                            "mime_type": "audio/pcm",  
-                                            "data": pcm_data  
-                                        }]  
-                                    }  
-                                }))  
-                            continue  
-
-                        if action == "video_frame":  
-                            img_data = payload.get("data")  
-                            if img_data:  
-                                await gemini_ws.send(json.dumps({  
-                                    "realtime_input": {  
-                                        "media_chunks": [{  
-                                            "mime_type": "image/jpeg",  
-                                            "data": img_data  
-                                        }]  
-                                    }  
-                                }))  
-                            continue  
-                except Exception:  
-                    pass  
-
-            async def forward_gemini_to_client():  
-                try:  
-                    async for msg in gemini_ws:  
-                        response = json.loads(msg)  
-                        parts = response.get("serverContent", {}).get("modelTurn", {}).get("parts", [])  
-                        for part in parts:  
-                            if "inlineData" in part:  
-                                audio_b64 = part["inlineData"]["data"]  
-                                await websocket.send_json({  
-                                    "type": "audio_session",  
-                                    "audio": audio_b64  
-                                })  
-                            if "text" in part:  
-                                await websocket.send_json({  
-                                    "type": "text",  
-                                    "text": part["text"]  
-                                })  
-                except Exception as e:  
-                    print("[GEMINI RECV ERR]", repr(e))  
-
-            await asyncio.gather(forward_client_to_gemini(), forward_gemini_to_client())  
-
-    except WebSocketDisconnect:  
-        print("[WEBSOCKET] Client déconnecté.")  
-    except Exception as exc:  
-        print("[WEBSOCKET ERROR]", repr(exc))  
-        try:  
-            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)  
-        except Exception:  
-            pass
-
-if __name__ == "__main__":
-    import uvicorn
-
-    port = int(os.getenv("PORT", "8000"))  
-
-    uvicorn.run(  
-        app,  
-        host="0.0.0.0",  
-        port=port,  
-    )
+...

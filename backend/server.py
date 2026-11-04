@@ -3303,7 +3303,8 @@ async def websocket_endpoint(
                                 audio_b64 = part["inlineData"]["data"]  
                                 await websocket.send_json({  
                                     "type": "audio_session",  
-                                    "audio": audio_b64  
+                                    "audio": audio_b64,  
+                                    "sample_rate": 24000  
                                 })  
                             if "text" in part:  
                                 await websocket.send_json({  

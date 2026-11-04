@@ -78,7 +78,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 liveStatus.textContent = data.status;
             }
 
-            if (data.type === "audio_stream" || data.audio) {
+            // Prise en compte élargie des types de messages audio renvoyés par le serveur
+            if (data.type === "audio_session" || data.type === "audio_stream" || data.audio) {
                 if (data.text) {
                     const transcript = document.getElementById("liveTranscript");
                     if (transcript) {
@@ -86,8 +87,9 @@ document.addEventListener("DOMContentLoaded", () => {
                         transcript.scrollTop = transcript.scrollHeight;
                     }
                 }
-                if (data.audio) {
-                    playAudioChunk(data.audio, data.sample_rate || 24000);
+                const audioContent = data.audio || data.audio_data;
+                if (audioContent) {
+                    playAudioChunk(audioContent, data.sample_rate || 24000);
                 }
             }
         });

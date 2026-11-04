@@ -163,6 +163,7 @@ GEMINI_ENDPOINT = (
     f"{GEMINI_MODEL}:generateContent"
 )
 
+# URI corrigée et sécurisée pour le pont Live WebSocket de Gemini
 GEMINI_LIVE_URI = (
     f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
 )
@@ -466,6 +467,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Montage correct du dossier static situé à la racine du projet
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 @app.middleware("http")
@@ -3135,7 +3137,7 @@ async def api_vision_analyze(
     question = str(  
         data.get("question")  
         or data.get("prompt")  
-        or "Décris ce que tu vois."  
+        or "Décris ce que vois."  
     ).strip()  
 
     if len(question) > 1000:  
@@ -3238,8 +3240,10 @@ async def websocket_endpoint(
     websocket: WebSocket,
     token: Optional[str] = Query(None)
 ):
+    # Validation souple du token reçu en paramètre de requête WebSocket
     token = str(token or "").strip()
-
+    
+    # Si le header Authorization est présent, on peut aussi l'extraire des sous-protocoles si besoin
     if not CHAPPIE_API_TOKEN or not token or not hmac.compare_digest(token, CHAPPIE_API_TOKEN):  
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)  
         return  
@@ -3277,7 +3281,7 @@ async def websocket_endpoint(
             }  
             await gemini_ws.send(json.dumps(setup_message))  
 
-            # Attente de la confirmation officielle de Gemini (setupComplete)
+            # Attente active de la confirmation officielle setupComplete de Gemini
             setup_confirmed = False
             try:
                 while not setup_confirmed:
@@ -3296,7 +3300,7 @@ async def websocket_endpoint(
             except asyncio.TimeoutError:
                 log.warning("[GEMINI LIVE] Timeout en attendant setupComplete, poursuite de la session...")
 
-            # Une fois validé par Google, on prévient enfin le client web
+            # Notification de connexion établie au client frontend
             await websocket.send_json({  
                 "type": "connected",  
                 "message": "Connexion établie et validée avec le noyau cognitif de Chappie.",  

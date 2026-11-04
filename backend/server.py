@@ -163,9 +163,9 @@ GEMINI_ENDPOINT = (
     f"{GEMINI_MODEL}:generateContent"
 )
 
+# URI corrigée pour utiliser l'API Multimodal Live de Gemini avec la clé d'API
 GEMINI_LIVE_URI = (
-    "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta."
-    f"GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
+    f"wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={GEMINI_API_KEY}"
 )
 
 logging.basicConfig(

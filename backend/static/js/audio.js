@@ -4,10 +4,10 @@
 let sharedAudioCtx = null;
 let nextPlayTime = 0;
 
-function getAudioContext(rate = 24000) {
+function getAudioContext() {
     if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        sharedAudioCtx = new AudioContextClass({ sampleRate: rate });
+        sharedAudioCtx = new AudioContextClass();
     }
     if (sharedAudioCtx.state === 'suspended') {
         sharedAudioCtx.resume();
@@ -56,7 +56,7 @@ export async function initLiveAudioStream(socket) {
             video: false 
         });
         
-        const audioCtx = getAudioContext(16000);
+        const audioCtx = getAudioContext();
         if (audioCtx.state === 'suspended') {
             await audioCtx.resume();
         }
@@ -115,8 +115,7 @@ export async function initLiveAudioStream(socket) {
 
 export async function playAudioChunk(base64Data, rate = 24000) {
     try {
-        // Utilisation du contexte audio avec le sampleRate par défaut ou celui reçu
-        const audioCtx = getAudioContext(rate);
+        const audioCtx = getAudioContext();
         if (audioCtx.state === 'suspended') {
             await audioCtx.resume();
         }

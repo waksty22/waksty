@@ -141,7 +141,6 @@ export async function playAudioChunk(base64Data, rate = 24000) {
         }
 
         source.start(nextPlayTime);
-        nextPlayType = nextPlayTime + audioBuffer.duration;
         nextPlayTime += audioBuffer.duration;
 
     } catch (e) {

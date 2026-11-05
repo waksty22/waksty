@@ -229,7 +229,8 @@ def record_place_observation(
 ) -> dict[str, Any]:
     description = _text(description, "Description visuelle", 4000, True)
     label = _text(label, "Nom du lieu", 120)
-    signature = _text(visual_signature, "Signature visuelle", 1000) or description.casefold()
+    raw_signature = str(visual_signature or description).strip()[:1000]
+    signature = _text(raw_signature, "Signature visuelle", 1000) or description.casefold()[:1000]
     conf = _finite(confidence, "Confiance", 0, 1)
     lat = None if latitude is None else _finite(latitude, "Latitude", -90, 90)
     lon = None if longitude is None else _finite(longitude, "Longitude", -180, 180)

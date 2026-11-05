@@ -68,6 +68,12 @@ def test_visual_place_is_stored_as_unconfirmed_observation(db):
         48.1, -2.8, confidence=0.4, session_id=session["session_id"],
     )
     assert place["identity_status"] == "unconfirmed"
+    revisit = record_place_observation(
+        db, "creator", "Un chemin bordé d'arbres et un banc bleu.",
+        48.10001, -2.80001, confidence=0.4, session_id=session["session_id"],
+    )
+    assert revisit["identity_status"] == "candidate"
+    assert revisit["candidate_place_id"] == place["place_id"]
     state = get_map_state(db, "creator")
-    assert state["places"][0]["place_id"] == place["place_id"]
+    assert state["places"][0]["place_id"] == revisit["place_id"]
     assert state["visual_identity_is_not_automatically_confirmed"] is True

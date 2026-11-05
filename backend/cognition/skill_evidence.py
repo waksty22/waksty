@@ -28,9 +28,10 @@ def build_validated_skill_data(
             if not isinstance(details, dict):
                 continue
             score = float(row["score"])
+            passed = row.get("passed", 1)
         except (KeyError, ValueError, TypeError, json.JSONDecodeError):
             continue
-        if system_key not in source_catalog or not 0 <= score <= 100:
+        if system_key not in source_catalog or passed not in (1, True) or not 70 <= score <= 100:
             continue
         branches = source_catalog[system_key].get("sub_branches", {})
         if branch_key not in branches:

@@ -222,6 +222,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 liveStatus.textContent = data.message;
             }
 
+            if (data.type === "user_text" && typeof data.text === "string") {
+                const transcript = document.getElementById("liveTranscript");
+                if (transcript) {
+                    transcript.textContent += "\\nToi : " + data.text;
+                    transcript.scrollTop = transcript.scrollHeight;
+                }
+            }
+
             if (data.type === "text" && typeof data.text === "string") {
                 const transcript = document.getElementById("liveTranscript");
                 if (transcript) {

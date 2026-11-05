@@ -114,7 +114,13 @@ CHAPPIE_OWNER_ID = (
 
 GEMINI_LIVE_MODEL = os.getenv(
     "GEMINI_LIVE_MODEL", "gemini-3.8-live"
-).strip()
+).strip() or "gemini-3.8-live"
+# A standard text-only Flash model cannot satisfy the native Live audio contract.
+if GEMINI_LIVE_MODEL not in {
+    "gemini-3.8-live",
+    "gemini-3.8-live-extended-thinking",
+}:
+    GEMINI_LIVE_MODEL = "gemini-3.8-live"
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
@@ -3714,7 +3720,7 @@ async def websocket_endpoint(
                         inline = part.get("inlineData") or part.get("inline_data")
                         if isinstance(inline, dict) and inline.get("data"):
                             mime_type = str(inline.get("mimeType") or inline.get("mime_type") or "")
-                            match = re.search(r"rate=(\\d+)", mime_type)
+                            match = re.search(r"rate=(\d+)", mime_type)
                             sample_rate = int(match.group(1)) if match else 24000
                             await websocket.send_json({
                                 "type": "audio_stream",

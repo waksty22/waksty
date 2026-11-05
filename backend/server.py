@@ -3238,6 +3238,25 @@ async def api_associate_visual_word(
                 str(data.get("observation_id", "")),
                 str(data.get("evidence", "Association validée par le créateur")),
             )
+            word = result["word"]
+            observation_id = result["observation_id"]
+            object_id = "object:" + word
+            observation_entity_id = "visual-observation:" + observation_id
+            upsert_world_entity(
+                db, user_id, object_id, "object",
+                {"label": word, "learned_from_visual_observation": observation_id},
+                source_type="taught", confidence=0.65,
+            )
+            upsert_world_entity(
+                db, user_id, observation_entity_id, "visual_observation",
+                {"observation_id": observation_id},
+                source_type="observed", confidence=0.45,
+            )
+            add_world_relation(
+                db, user_id, object_id, observation_entity_id,
+                relation_type="associated_with_visual_observation",
+                source_type="taught", confidence=0.65,
+            )
             db.commit()
         return {"ok": True, "association": result}
     except ValueError as exc:

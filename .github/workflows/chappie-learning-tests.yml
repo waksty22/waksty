@@ -24,5 +24,21 @@ jobs:
         run: python -m pip install --upgrade pytest
       - name: Check Python syntax
         run: python -m compileall -q backend
+      - name: Check browser JavaScript syntax
+        run: |
+          cp backend/static/js/app.js /tmp/chappie-app.mjs
+          cp backend/static/js/audio.js /tmp/chappie-audio.mjs
+          cp backend/static/js/websocket.js /tmp/chappie-websocket.mjs
+          node --check /tmp/chappie-app.mjs
+          node --check /tmp/chappie-audio.mjs
+          node --check /tmp/chappie-websocket.mjs
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("backend/static/index.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+          Path("/tmp/chappie-inline.mjs").write_text("\n".join(scripts), encoding="utf-8")
+          PY
+          node --check /tmp/chappie-inline.mjs
       - name: Test learning and shared cognitive brain
         run: python -m pytest backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py backend/tests/test_spatial_memory.py -q

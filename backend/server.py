@@ -3421,63 +3421,22 @@ async def api_mood_history(limit: int = 10, auth=Depends(require_auth)):
     return {"events": events}
 
 @app.post("/api/voice-profiles/{profile_name}")
-async def api_enroll_voice(
-    profile_name: str,
-    request: Request,
-    auth=Depends(require_auth)
-):
-    user_id = _authenticated_user(auth)
-    profile_name = profile_name.strip()
+async def api_enroll_voice(profile_name: str, auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    raise HTTPException(
+        status_code=501,
+        detail="L'entraînement d'une empreinte vocale n'est pas implémenté. Aucun profil biométrique n'est créé.",
+    )
 
-    if not profile_name:  
-        raise HTTPException(status_code=400, detail="Nom de profil manquant.")  
-
-    body = await request.body()  
-    if not body:  
-        raise HTTPException(status_code=400, detail="Audio manquant.")  
-
-    now = utc_now()  
-    with db_connection() as db:  
-        db.execute(  
-            """  
-            INSERT INTO voice_profiles  
-            (user_id, profile_name, embedding_json, created_at, updated_at)  
-            VALUES (?, ?, ?, ?, ?)  
-            ON CONFLICT(user_id, profile_name) DO UPDATE SET  
-                updated_at=excluded.updated_at  
-            """,  
-            (user_id, profile_name, json.dumps({"size": len(body)}), now, now)  
-        )  
-        db.commit()  
-
-    return {"success": True, "profile_name": profile_name}
 
 @app.post("/api/voice-profiles-identify")
-async def api_identify_voice(
-    request: Request,
-    auth=Depends(require_auth)
-):
-    user_id = _authenticated_user(auth)
-    body = await request.body()
+async def api_identify_voice(auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    raise HTTPException(
+        status_code=501,
+        detail="L'identification biométrique vocale n'est pas implémentée.",
+    )
 
-    if not body:  
-        raise HTTPException(status_code=400, detail="Audio manquant.")  
-
-    with db_connection() as db:  
-        row = db.execute(  
-            """  
-            SELECT profile_name FROM voice_profiles  
-            WHERE user_id = ?  
-            ORDER BY id ASC  
-            LIMIT 1  
-            """,  
-            (user_id,),  
-        ).fetchone()  
-
-    profile_name = row["profile_name"] if row else "Inconnu"  
-    score = 0.85 if row else 0.1  
-
-    return {"profile_name": profile_name, "score": score}
 
 @app.get("/api/goals")
 async def api_goals(auth=Depends(require_auth)):

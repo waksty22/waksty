@@ -38,7 +38,7 @@ def test_only_supervised_passing_branch_evidence_changes_profile():
     ]
     profile, count = build_validated_skill_data(rows)
     assert count == 1
-    assert profile["mots"]["vocabulaire"]["level"] == 24
+    assert profile["mots"]["vocabulaire"]["level"] == 8
     assert "syntaxe" not in profile["mots"]
 
 
@@ -57,6 +57,7 @@ def test_duplicate_evidence_does_not_increase_skill_level():
     assert count == 1
     assert profile["sens"]["reconnaissance_visuelle"]["xp"] == 10
     assert profile["sens"]["reconnaissance_visuelle"]["confidence"] == 1 / 3
+    assert profile["sens"]["reconnaissance_visuelle"]["level"] == 9
 
 
 def test_failed_or_unapproved_assessment_is_ignored():
@@ -85,3 +86,24 @@ def test_failed_or_unapproved_assessment_is_ignored():
     profile, count = build_validated_skill_data(rows)
     assert count == 0
     assert profile == {}
+
+
+
+def test_three_distinct_supervised_proofs_unlock_full_score_level():
+    rows = []
+    for index in range(3):
+        rows.append({
+            "test_name": "mots:vocabulaire",
+            "passed": 1,
+            "score": 80,
+            "tested_at": f"2026-11-0{index + 1}T10:00:00Z",
+            "details": {
+                "source": "supervised_assessment",
+                "supervisor_approved": True,
+                "evidence": f"Preuve indépendante numéro {index + 1}.",
+            },
+        })
+    profile, count = build_validated_skill_data(rows)
+    assert count == 3
+    assert profile["mots"]["vocabulaire"]["confidence"] == 1.0
+    assert profile["mots"]["vocabulaire"]["level"] == 24

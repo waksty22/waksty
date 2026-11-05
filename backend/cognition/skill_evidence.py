@@ -54,10 +54,12 @@ def build_validated_skill_data(
         assessments = list(evidence_map.values())
         scores = [item["score"] for item in assessments]
         average_score = sum(scores) / len(scores)
+        confidence = min(1.0, len(assessments) / 3.0)
+        # One supervised success is an initial signal, not mastery.
         engine_data.setdefault(system_key, {})[branch_key] = {
-            "level": int(round(average_score * 0.30)),
+            "level": int(round(average_score * 0.30 * confidence)),
             "mastery": average_score,
-            "confidence": min(1.0, len(assessments) / 3.0),
+            "confidence": confidence,
             "xp": len(assessments) * 10,
             "evidence": "Évaluations supervisées distinctes : " + str(len(assessments)),
         }

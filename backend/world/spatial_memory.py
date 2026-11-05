@@ -247,7 +247,8 @@ def record_place_observation(
             raise ValueError("Une session de localisation active et autorisée est nécessaire pour géolocaliser un lieu.")
     best_match = None
     for candidate in db.execute(
-        """SELECT place_id,visual_signature,latitude,longitude
+        """SELECT place_id,visual_signature,latitude,longitude,description,
+                  identity_status,observations_count,confidence,label
            FROM place_memories WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 250""",
         (user_id,),
     ).fetchall():
@@ -259,12 +260,60 @@ def record_place_observation(
             if distance > 100:
                 continue
         if similarity >= 0.45 and (best_match is None or similarity > best_match["similarity"]):
-            best_match = {"place_id": candidate["place_id"], "similarity": similarity}
+            best_match = {
+                "place_id": candidate["place_id"],
+                "similarity": similarity,
+                "identity_status": candidate["identity_status"],
+                "description": candidate["description"],
+                "observations_count": candidate["observations_count"],
+                "confidence": candidate["confidence"],
+                "label": candidate["label"],
+                "latitude": candidate["latitude"],
+                "longitude": candidate["longitude"],
+            }
 
+    now = _now()
+    if best_match and best_match["identity_status"] != "confirmed":
+        # Consolidate repeated observations into one unconfirmed candidate.
+        # Similarity never confirms a place identity by itself.
+        existing_description = str(best_match["description"] or "")
+        if description.casefold() not in existing_description.casefold():
+            merged_description = (
+                existing_description + "\nObservation répétée : " + description
+            ).strip()[:4000]
+        else:
+            merged_description = existing_description
+        existing_id = best_match["place_id"]
+        db.execute(
+            """UPDATE place_memories
+               SET description=?,confidence=MAX(confidence,?),
+                   session_id=COALESCE(?,session_id),
+                   latitude=COALESCE(latitude,?),longitude=COALESCE(longitude,?),
+                   identity_status='candidate',candidate_place_id=place_id,
+                   similarity_score=?,observations_count=observations_count+1,
+                   last_seen_at=?,updated_at=?
+               WHERE place_id=? AND user_id=?""",
+            (merged_description, conf, session_id or None, lat, lon,
+             best_match["similarity"], now, now, existing_id, user_id),
+        )
+        db.commit()
+        return {
+            "place_id": existing_id,
+            "label": best_match["label"] or label,
+            "description": merged_description,
+            "latitude": lat if lat is not None else best_match["latitude"],
+            "longitude": lon if lon is not None else best_match["longitude"],
+            "confidence": max(float(best_match["confidence"] or 0), conf),
+            "identity_status": "candidate",
+            "candidate_place_id": existing_id,
+            "similarity_score": round(best_match["similarity"], 3),
+            "observations_count": int(best_match["observations_count"] or 1) + 1,
+        }
+
+    # A match to a confirmed place creates a separate candidate linked to it.
     identity_status = "candidate" if best_match else "unconfirmed"
     candidate_place_id = best_match["place_id"] if best_match else None
     similarity_score = best_match["similarity"] if best_match else 0.0
-    now = _now()
     place_id = "place-" + str(uuid.uuid4())
     # Text similarity proposes a candidate only; a person must confirm identity.
     db.execute(

@@ -75,8 +75,12 @@ def test_visual_place_is_stored_as_unconfirmed_observation(db):
     )
     assert revisit["identity_status"] == "candidate"
     assert revisit["candidate_place_id"] == place["place_id"]
+    assert revisit["place_id"] == place["place_id"]
+    assert revisit["observations_count"] == 2
     state = get_map_state(db, "creator")
+    assert len(state["places"]) == 1
     assert state["places"][0]["place_id"] == revisit["place_id"]
+    assert state["places"][0]["observations_count"] == 2
     assert state["visual_identity_is_not_automatically_confirmed"] is True
     confirmed = confirm_place_identity(
         db, "creator", revisit["place_id"], "Parc du quartier",
@@ -85,3 +89,20 @@ def test_visual_place_is_stored_as_unconfirmed_observation(db):
     assert confirmed["identity_status"] == "confirmed"
     confirmed_state = get_map_state(db, "creator")
     assert "vérifié" in confirmed_state["places"][0]["confirmation_evidence"]
+
+
+
+def test_confirmed_place_is_not_silently_reidentified_on_similarity(db):
+    first = record_place_observation(
+        db, "creator", "Un grand bâtiment en pierre avec une tour.",
+    )
+    confirm_place_identity(
+        db, "creator", first["place_id"], "Mairie",
+        "Nom vérifié par le créateur.",
+    )
+    revisit = record_place_observation(
+        db, "creator", "Un grand bâtiment en pierre avec une tour.",
+    )
+    assert revisit["place_id"] != first["place_id"]
+    assert revisit["identity_status"] == "candidate"
+    assert revisit["candidate_place_id"] == first["place_id"]

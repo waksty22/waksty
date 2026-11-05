@@ -276,6 +276,60 @@ def init_memory_tables(db: sqlite3.Connection) -> None:
         ON memories_v19(user_id, access_count DESC);
         """
     )
+    migrate_legacy_memories(db)
+
+
+def migrate_legacy_memories(db: sqlite3.Connection) -> int:
+    """Copy legacy memories without deleting or falsely upgrading their provenance."""
+    exists = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories'"
+    ).fetchone()
+    if not exists:
+        return 0
+    columns = {
+        row[1] for row in db.execute("PRAGMA table_info(memories)").fetchall()
+    }
+    required = {"user_id", "category", "content", "importance", "tags",
+                "access_count", "created_at", "updated_at"}
+    if not required.issubset(columns):
+        log.warning("Migration mémoire ignorée : schéma legacy incomplet.")
+        return 0
+    cursor = db.execute(
+        """SELECT user_id,category,content,importance,tags,access_count,
+                  created_at,updated_at FROM memories"""
+    )
+    migrated = 0
+    for raw in cursor.fetchall():
+        row = _row_to_dict(raw, cursor)
+        try:
+            user_id = _normalize_user_id(str(row["user_id"] or ""))
+            content = _normalize_content(str(row["content"] or ""))
+            category = _normalize_category(str(row["category"] or "general"))
+            importance = _normalize_importance(row["importance"])
+            access_count = _normalize_limit(row["access_count"], 0, 2_000_000_000)
+        except (ValueError, TypeError):
+            continue
+        try:
+            tags = json.loads(row.get("tags") or "[]")
+        except (ValueError, TypeError):
+            tags = []
+        safe_tags = _normalize_tags(
+            ["legacy_source_unverified"] + (tags if isinstance(tags, list) else [])
+        )
+        now = utc_now()
+        created_at = str(row.get("created_at") or now)
+        updated_at = str(row.get("updated_at") or created_at)
+        result = db.execute(
+            """INSERT OR IGNORE INTO memories_v19
+               (user_id,category,content,importance,source_type,confidence,tags,
+                access_count,created_at,updated_at)
+               VALUES (?,?,?,?, 'inferred',0.5,?,?,?,?)""",
+            (user_id, category, content, importance,
+             json.dumps(safe_tags, ensure_ascii=False), access_count,
+             created_at, updated_at),
+        )
+        migrated += max(0, result.rowcount)
+    return migrated
 
 
 def save_episodic_memory(

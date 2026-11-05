@@ -4,9 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#070b14">
-  <meta name="description" content="Interface cognitive et interactive de Chappie V22.0">
-  <title>Chappie V22.0 — Interface cognitive</title>
+  <meta name="description" content="Chappie V33 — compagnon cognitif, mémoire et carte du monde">
+  <title>Chappie V33 — Compagnon cognitif</title>
 
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 
   <style>
@@ -740,6 +742,28 @@
        MONDE
     ========================= */
 
+    .chappie-world-map {
+      width:100%;
+      height: min(48vh, 430px);
+      min-height: 260px;
+      border:1px solid var(--card-border);
+      border-radius:14px;
+      overflow:hidden;
+      background:#0b1322;
+      margin:12px 0;
+      z-index:1;
+    }
+    .spatial-panel .panel-heading {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .spatial-panel .small { font-size:.78rem; line-height:1.45; }
+    .spatial-panel .world-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
+    .leaflet-container { font-family:inherit; }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:#101826; color:#f8fafc; }
     .world-placeholder {
       min-height:190px;
       padding:25px;
@@ -964,25 +988,13 @@
       <img src="/static/chappie-hero.png" alt="Portrait de Chappie" onerror="this.style.display='none'">
       <div>
         <h2>CHAPPIE</h2>
-        <p>Compagnon cognitif · V23.0</p>
+        <p>Compagnon cognitif · V33.0</p>
       </div>
     </div>
 
     <nav class="nav-menu" aria-label="Navigation principale">
       <button class="nav-item active" onclick="switchTab('accueil',this)">
         <span class="nav-icon">🏠</span> Accueil
-      </button>
-
-      <button class="nav-item" onclick="switchTab('chappie-3d',this)">
-        <span class="nav-icon">🤖</span> Visuel &amp; 3D
-      </button>
-
-      <button class="nav-item" onclick="switchTab('media',this)">
-        <span class="nav-icon">🎙️</span> Voix &amp; Vision
-      </button>
-
-      <button class="nav-item" onclick="switchTab('chat',this)">
-        <span class="nav-icon">💬</span> Chat &amp; Direct
       </button>
 
       <button class="nav-item" onclick="switchTab('skills',this)">
@@ -1022,9 +1034,9 @@
       Accueil
     </button>
 
-    <button class="mobile-nav-btn" onclick="switchTab('chappie-3d',this)">
-      <span class="icon">🤖</span>
-      Visuel
+    <button class="mobile-nav-btn" onclick="switchTab('skills',this)">
+      <span class="icon">🧠</span>
+      Cerveau
     </button>
 
     <button class="mobile-mic-btn" onclick="switchTab('media',this)"
@@ -1032,9 +1044,9 @@
       🎙️
     </button>
 
-    <button class="mobile-nav-btn" onclick="switchTab('skills',this)">
-      <span class="icon">🎓</span>
-      Cerveau
+    <button class="mobile-nav-btn" onclick="switchTab('world',this)">
+      <span class="icon">🌍</span>
+      Monde
     </button>
 
     <button class="mobile-nav-btn" onclick="switchTab('memory',this)">
@@ -1684,6 +1696,26 @@ En attente de synchronisation du cerveau...
       ========================= -->
 
       <section id="section-world" class="tab-section">
+        <div class="panel spatial-panel">
+          <div class="panel-heading">
+            <div>
+              <h3>🌍 Le monde de Chappie</h3>
+              <p class="muted">Ses déplacements et les lieux observés, uniquement pendant une session que tu actives.</p>
+            </div>
+            <span class="badge">V33 · Carte spatiale</span>
+          </div>
+          <div id="chappieWorldMap" class="chappie-world-map" role="application" aria-label="Carte des positions et lieux mémorisés"></div>
+          <div id="worldMapStats" class="muted">Chargement des souvenirs géographiques…</div>
+          <div class="row-btns">
+            <button type="button" onclick="startLocationTracking()">▶ Activer la localisation</button>
+            <button type="button" class="secondary" onclick="stopLocationTracking()">■ Arrêter le suivi</button>
+            <button type="button" class="secondary" onclick="loadWorldMap()">Actualiser la carte</button>
+          </div>
+          <div id="locationStatus" class="status">Localisation inactive. Aucune position n'est collectée avant ton activation.</div>
+          <p class="muted small">La géolocalisation nécessite l'autorisation du navigateur et une connexion HTTPS. Le suivi s'arrête lorsque tu le demandes ou lorsque la page perd sa session. Les lieux visuels restent des observations non confirmées.</p>
+          <h4>Souvenirs visuels des lieux</h4>
+          <div id="worldPlacesList" class="world-grid">Aucun lieu observé pour le moment.</div>
+        </div>
         <div class="panel">
           <h3>🧠 Ce que Chappie apprend sur les objets</h3>
           <p class="muted">Les propriétés ci-dessous sont des informations enseignées ou validées. Une propriété inconnue reste inconnue : Chappie ne doit pas la deviner.</p>
@@ -1805,38 +1837,9 @@ En attente de synchronisation du cerveau...
         </div>
 
         <div class="panel">
-          <h3>🌍 Modèle du monde de Chappie</h3>
-
-          <p class="muted">
-            Cette page est destinée à représenter l'environnement connu
-            de Chappie : lieux, objets, personnes et relations.
-          </p>
-
-          <div class="world-placeholder" style="margin-top:15px">
-            <div class="world-icon">🌐</div>
-            <h4>Carte de l'environnement</h4>
-            <p class="muted">
-              Le système de localisation et l'historique des lieux
-              restent à connecter au backend.
-            </p>
-            <span class="badge">Module en développement</span>
-          </div>
-        </div>
-
-        <div class="panel">
-          <h3>📍 Lieux connus</h3>
-
-          <div class="world-grid">
-            <div class="info-card">
-              <h4>🏠 Lieux personnels</h4>
-              <p class="muted">À renseigner avec autorisation.</p>
-            </div>
-
-            <div class="info-card">
-              <h4>🌳 Lieux explorés</h4>
-              <p class="muted">Historique à connecter.</p>
-            </div>
-          </div>
+          <h3>🧭 Modèle du monde</h3>
+          <p class="muted">Les objets, relations et observations restent accessibles dans les outils d'apprentissage ci-dessous. Une scène visuelle n'est jamais automatiquement déclarée comme un lieu reconnu.</p>
+          <button type="button" class="secondary" onclick="loadWorldMap()">Actualiser les souvenirs géographiques</button>
         </div>
 
         <div class="panel">

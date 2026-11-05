@@ -776,7 +776,7 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
             (user_id,),
         ).fetchall()
         test_rows = db.execute(
-            """SELECT test_name, score, details, tested_at
+            """SELECT test_name, passed, score, details, tested_at
                FROM competency_tests
                WHERE user_id=? AND passed=1
                ORDER BY tested_at ASC, id ASC""",

@@ -163,6 +163,14 @@ def get_repeatable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
     return {str(row["word"]) for row in rows}
 
 
+def text_uses_only_allowed_words(text: str, allowed_words: set[str]) -> bool:
+    """Return True only when a non-empty transcript uses known lexical items."""
+    tokens = re.findall(
+        r"[\\wÀ-ÖØ-öø-ÿ'-]+", str(text or "").casefold(), flags=re.UNICODE
+    )
+    return bool(tokens) and all(token in allowed_words for token in tokens)
+
+
 def gate_spoken_text(
     text: str,
     usable_words: set[str],

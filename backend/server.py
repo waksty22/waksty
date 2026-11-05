@@ -83,6 +83,11 @@ from learning.causal_learning import (
     propose_hypothesis, plan_experiment, evaluate_experiment,
     list_causal_learning,
 )
+from learning.perception_fusion import (
+    init_perception_fusion_tables,
+    link_temporally_cooccurring_observation,
+    list_perception_fusions,
+)
 from cognition.reasoning import (
     init_cognition_tables,
     log_cognitive_trace,
@@ -93,7 +98,7 @@ from cognition.engine import cognitive_engine
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V23.0 — expérimentation et causalité"
+APP_NAME = "Chappie V24.0 — perception multimodale"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -385,6 +390,7 @@ def init_db() -> None:
         init_sensory_tables(db)
         init_object_learning_tables(db)
         init_causal_learning_tables(db)
+        init_perception_fusion_tables(db)
         init_cognition_tables(db)
 
 def valid_user(user_id: str) -> str:
@@ -3218,6 +3224,9 @@ async def api_vision_analyze(
                 confidence=0.45,
                 metadata={"mime_type": image_mime, "question": question},
             )
+            link_temporally_cooccurring_observation(
+                db, user_id, observation["observation_id"]
+            )
             db.commit()
 
         return {
@@ -3243,6 +3252,17 @@ async def api_list_sensory_observations(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     with db_connection() as db:
         return {"observations": list_observations(db, user_id)}
+
+
+@app.get("/api/perception/fusions")
+async def api_list_perception_fusions(auth=Depends(require_auth)):
+    """Expose cross-modal temporal candidates without promoting them to facts."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {
+            "fusions": list_perception_fusions(db, user_id),
+            "semantic_validation_required": True,
+        }
 
 
 @app.post("/api/vision/associate")
@@ -3397,7 +3417,7 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "23.0.0",
+        "version": "24.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,  
@@ -3710,11 +3730,14 @@ async def websocket_endpoint(
                                         sensory_db, user_id, heard_text,
                                         evidence="Transcription confirmée par Gemini Live",
                                     )
-                                    record_observation(
+                                    audio_observation = record_observation(
                                         sensory_db, user_id, "audio", heard_text,
                                         "gemini_live_transcription",
                                         confidence=0.8,
                                         metadata={"language": "fr"},
+                                    )
+                                    link_temporally_cooccurring_observation(
+                                        sensory_db, user_id, audio_observation["observation_id"]
                                     )
                                     sensory_db.commit()
                             except Exception:

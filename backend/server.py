@@ -1628,7 +1628,7 @@ def get_identity_prompt(user_id: str) -> str:
             autobio_db, user_id, limit=8
         )
 
-    autobiographical_context = "\\n".join(
+    autobiographical_context = "\n".join(
         f"- [{episode['happened_at']}] {episode['actor']} "
         f"(source conversation #{episode['source_conversation_id']}) : "
         f"{episode['content'][:350]}"

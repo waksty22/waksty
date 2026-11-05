@@ -1661,10 +1661,23 @@ def get_identity_prompt(user_id: str) -> str:
             (user_id,),  
         ).fetchall()  
 
-    skills_text = "\n".join(  
-        f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})"  
-        for s in skills  
-    ) or "Aucune compétence enregistrée."  
+    validated_skill_lines = []
+    for system_key, system_data in cognitive_profile.get("systems", {}).items():
+        validated_branches = [
+            branch_data.get("name", branch_key)
+            + " (niveau " + str(branch_data.get("level", 0)) + "/30)"
+            for branch_key, branch_data in system_data.get("sub_branches", {}).items()
+            if float(branch_data.get("level", 0) or 0) > 0
+        ]
+        if validated_branches:
+            validated_skill_lines.append(
+                "- " + system_data.get("name", system_key) + " : "
+                + ", ".join(validated_branches[:12])
+            )
+    skills_text = "\n".join(validated_skill_lines) or (
+        "Aucune sous-compétence validée par un test supervisé. "
+        "Les anciens XP agrégés ne prouvent aucune maîtrise."
+    )
 
     if avg_level < 3.0:  
         stage_instruction = (  

@@ -51,12 +51,12 @@ def test_duplicate_evidence_does_not_increase_skill_level():
     }
     rows = [
         {"test_name": "sens:reconnaissance_visuelle", "passed": 1, "score": 90, "details": details},
-        {"test_name": "sens:reconnaissance_visuelle", "score": 90, "details": details},
+        {"test_name": "sens:reconnaissance_visuelle", "passed": 1, "score": 90, "details": details},
     ]
     profile, count = build_validated_skill_data(rows)
     assert count == 1
     assert profile["sens"]["reconnaissance_visuelle"]["xp"] == 10
-    assert profile["sens"]["vision"]["confidence"] == 1 / 3
+    assert profile["sens"]["reconnaissance_visuelle"]["confidence"] == 1 / 3
 
 
 def test_failed_or_unapproved_assessment_is_ignored():

@@ -175,5 +175,5 @@ def merge_live_transcript(existing: str, incoming: str) -> str:
     max_overlap = min(len(old), len(new), 500)
     for size in range(max_overlap, 0, -1):
         if old[-size:].casefold() == new[:size].casefold():
-            return (old + " " + new[size:]).strip()
+            return " ".join((old + " " + new[size:]).split())
     return (old + " " + new).strip()

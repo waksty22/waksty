@@ -3151,11 +3151,11 @@ async def api_vision_analyze(
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=503, detail="Clé Gemini non configurée.")
 
-    if image_bytes.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
         image_mime = "image/png"
     elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
         image_mime = "image/webp"
-    elif image_bytes.startswith(b"\\xff\\xd8\\xff"):
+    elif image_bytes.startswith(b"\xff\xd8\xff"):
         image_mime = "image/jpeg"
     else:
         raise HTTPException(status_code=415, detail="Image JPEG, PNG ou WEBP invalide.")

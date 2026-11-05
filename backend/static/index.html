@@ -742,6 +742,13 @@
        MONDE
     ========================= */
 
+    .skills-tree { display:grid; gap:10px; }
+    .skills-tree details { background:rgba(15,23,42,.62); border:1px solid var(--card-border); border-radius:12px; padding:12px; }
+    .skills-tree summary { cursor:pointer; font-weight:600; display:flex; justify-content:space-between; gap:10px; }
+    .skill-progress { height:7px; border-radius:999px; background:#1e293b; overflow:hidden; margin:8px 0; }
+    .skill-progress > span { display:block; height:100%; background:linear-gradient(90deg,var(--accent),var(--cyan)); }
+    .skill-branch-row { display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-top:1px solid rgba(148,163,184,.12); font-size:.88rem; }
+    .skill-branch-row small { color:var(--muted); white-space:nowrap; }
     .chappie-world-map {
       width:100%;
       height: min(48vh, 430px);
@@ -1531,149 +1538,25 @@
         </div>
 
         <div class="panel">
-          <h3>🌳 Les douze systèmes cognitifs</h3>
+          <h3>🌳 Arbre des compétences réelles</h3>
+          <p class="muted">Les branches s'ouvrent au fur et à mesure des évaluations. Une compétence n'augmente qu'avec une preuve distincte et ta validation.</p>
+          <div id="skillsTree" class="skills-tree">Chargement du cerveau…</div>
+        </div>
 
-          <div class="skills-grid">
-
-            <div class="skill-node">
-              <h4>🧠 1. La Tête — Raisonnement</h4>
-              <p class="muted">Comprendre, réfléchir et résoudre des problèmes.</p>
-              <div class="skill-children">
-                <span class="skill-child">Logique</span>
-                <span class="skill-child">Déduction</span>
-                <span class="skill-child">Analyse</span>
-                <span class="skill-child">Planification</span>
-                <span class="skill-child">Abstraction</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🗣️ 2. Les Mots — Langage</h4>
-              <p class="muted">Comprendre et produire une communication.</p>
-              <div class="skill-children">
-                <span class="skill-child">Vocabulaire</span>
-                <span class="skill-child">Grammaire</span>
-                <span class="skill-child">Expression</span>
-                <span class="skill-child">Compréhension</span>
-                <span class="skill-child">Conversation</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🤝 3. Le Lien — Relations</h4>
-              <p class="muted">Comprendre les interactions et les relations sociales.</p>
-              <div class="skill-children">
-                <span class="skill-child">Écoute</span>
-                <span class="skill-child">Coopération</span>
-                <span class="skill-child">Confiance</span>
-                <span class="skill-child">Empathie simulée</span>
-                <span class="skill-child">Contexte social</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🖐️ 4. Les Mains — Action</h4>
-              <p class="muted">Organiser et contrôler des actions.</p>
-              <div class="skill-children">
-                <span class="skill-child">Coordination</span>
-                <span class="skill-child">Manipulation</span>
-                <span class="skill-child">Précision</span>
-                <span class="skill-child">Séquençage</span>
-                <span class="skill-child">Exécution</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>✨ 5. L'Âme — Identité</h4>
-              <p class="muted">Construire une identité et un profil comportemental.</p>
-              <div class="skill-children">
-                <span class="skill-child">Préférences</span>
-                <span class="skill-child">Valeurs</span>
-                <span class="skill-child">Personnalité</span>
-                <span class="skill-child">Créativité</span>
-                <span class="skill-child">Expression</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>👁️ 6. Les Sens — Perception</h4>
-              <p class="muted">Interpréter les informations provenant du monde.</p>
-              <div class="skill-children">
-                <span class="skill-child">Vision</span>
-                <span class="skill-child">Audition</span>
-                <span class="skill-child">Reconnaissance</span>
-                <span class="skill-child">Classification</span>
-                <span class="skill-child">Orientation</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🎯 7. Attention — Concentration</h4>
-              <p class="muted">Sélectionner les informations importantes.</p>
-              <div class="skill-children">
-                <span class="skill-child">Attention sélective</span>
-                <span class="skill-child">Concentration</span>
-                <span class="skill-child">Priorisation</span>
-                <span class="skill-child">Vigilance</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>📚 8. Apprentissage — Évolution</h4>
-              <p class="muted">Apprendre à partir des expériences et des corrections.</p>
-              <div class="skill-children">
-                <span class="skill-child">Imitation</span>
-                <span class="skill-child">Enseignement</span>
-                <span class="skill-child">Expérimentation</span>
-                <span class="skill-child">Généralisation</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🗂️ 9. Mémoire — Souvenirs</h4>
-              <p class="muted">Enregistrer, organiser et retrouver les informations.</p>
-              <div class="skill-children">
-                <span class="skill-child">Autobiographique</span>
-                <span class="skill-child">Sémantique</span>
-                <span class="skill-child">Procédurale</span>
-                <span class="skill-child">Épisodique</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>⚖️ 10. Décision — Choix</h4>
-              <p class="muted">Comparer les possibilités et choisir une action.</p>
-              <div class="skill-children">
-                <span class="skill-child">Évaluation</span>
-                <span class="skill-child">Conséquences</span>
-                <span class="skill-child">Incertitude</span>
-                <span class="skill-child">Arbitrage</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🔥 11. Motivation — Objectifs</h4>
-              <p class="muted">Maintenir des objectifs et organiser les efforts.</p>
-              <div class="skill-children">
-                <span class="skill-child">Curiosité</span>
-                <span class="skill-child">Persévérance</span>
-                <span class="skill-child">Initiative</span>
-                <span class="skill-child">Priorités</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🔍 12. Métacognition — Réflexion</h4>
-              <p class="muted">Évaluer ses propres résultats et ses limites.</p>
-              <div class="skill-children">
-                <span class="skill-child">Auto-évaluation</span>
-                <span class="skill-child">Doute</span>
-                <span class="skill-child">Confiance</span>
-                <span class="skill-child">Correction</span>
-              </div>
-            </div>
-
-          </div>
+        <div class="panel">
+          <h3>🧪 Valider une sous-compétence</h3>
+          <p class="muted">Décris un exercice réellement effectué par Chappie. Un score de 70/100 ou plus valide l'évaluation, après ton approbation explicite.</p>
+          <label for="assessmentSystem">Système cognitif</label>
+          <select id="assessmentSystem"></select>
+          <label for="assessmentBranch">Sous-compétence</label>
+          <select id="assessmentBranch"></select>
+          <label for="assessmentScore">Score obtenu (0–100)</label>
+          <input id="assessmentScore" type="number" min="0" max="100" value="75">
+          <label for="assessmentEvidence">Preuve concrète de l'exercice</label>
+          <textarea id="assessmentEvidence" rows="3" maxlength="2000" placeholder="Décris la tâche, la réponse produite et comment tu as vérifié le résultat."></textarea>
+          <label class="inline-check"><input id="assessmentApproval" type="checkbox"> Je confirme avoir supervisé et vérifié cette évaluation.</label>
+          <button type="button" onclick="recordSkillAssessment()">Valider cette évaluation</button>
+          <div id="assessmentStatus" class="status">Aucune évaluation en attente.</div>
         </div>
 
         <div class="panel">

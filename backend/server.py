@@ -80,7 +80,8 @@ from learning.curriculum import (
 from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
     get_usable_words, get_repeatable_words, gate_spoken_text,
-    record_heard_word, record_heard_text, text_uses_only_allowed_words,
+    record_heard_word, record_heard_text, record_explicit_word_teaching,
+    text_uses_only_allowed_words,
 )
 from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,
@@ -2095,6 +2096,19 @@ async def run_brain(
             affect_db.commit()
     except Exception:
         log.exception("[V26] Impossible d'enregistrer l'état affectif")
+
+    # Explicit teaching is shared across chat and Live; only the "heard" stage is granted.
+    try:
+        with db_connection() as teaching_db:
+            taught = record_explicit_word_teaching(
+                teaching_db, user_id, message,
+                evidence="Enseignement explicite via le chat classique",
+            )
+            if taught:
+                teaching_db.commit()
+                log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis le chat", len(taught))
+    except Exception:
+        log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement du chat")
 
     # Une conversation n'est pas une preuve d'apprentissage.
     # Les compétences progressent uniquement après validation explicite.
@@ -4389,6 +4403,17 @@ async def websocket_endpoint(
                             })
 
                         if live_turn_state["user"] or assistant_text:
+                            try:
+                                with db_connection() as teaching_db:
+                                    taught = record_explicit_word_teaching(
+                                        teaching_db, user_id, live_turn_state["user"],
+                                        evidence="Enseignement explicite via Gemini Live",
+                                    )
+                                    if taught:
+                                        teaching_db.commit()
+                                        log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live", len(taught))
+                            except Exception:
+                                log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")
                             try:
                                 save_conversation_turn(
                                     user_id,

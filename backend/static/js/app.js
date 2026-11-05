@@ -385,7 +385,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (visionOut) {
                 visionOut.textContent = response.analysis
-                    + "\\n\\nObservation sensorielle enregistrée. "
+                    + "\n\nObservation sensorielle enregistrée. "
                     + "Cette description n'est pas encore un savoir acquis.";
             }
             const observationField = document.getElementById("visionObservationId");

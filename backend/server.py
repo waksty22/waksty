@@ -4035,6 +4035,8 @@ async def websocket_endpoint(
                 "model": GEMINI_LIVE_MODEL,
             })
 
+            live_turn_state = {"user": "", "assistant": ""}
+
             async def client_to_gemini():
                 while True:
                     payload = await websocket.receive_json()
@@ -4067,6 +4069,9 @@ async def websocket_endpoint(
                         text_value = str(payload.get("text", "")).strip()
                         if not text_value:
                             continue
+                        live_turn_state["user"] = merge_live_transcript(
+                            live_turn_state["user"], text_value
+                        )
                         message = {
                             "clientContent": {
                                 "turns": [{"role": "user", "parts": [{"text": text_value}]}],
@@ -4079,8 +4084,6 @@ async def websocket_endpoint(
                     await gemini_ws.send(json.dumps(message, ensure_ascii=False))
 
             async def gemini_to_client():
-                live_user_turn = ""
-                live_assistant_turn = ""
                 async for raw_message in gemini_ws:
                     response = json.loads(raw_message)
                     if "error" in response:
@@ -4129,8 +4132,8 @@ async def websocket_endpoint(
                     if isinstance(input_transcription, dict) and input_transcription.get("text"):
                         heard_text = str(input_transcription["text"]).strip()
                         if heard_text:
-                            live_user_turn = merge_live_transcript(
-                                live_user_turn, heard_text
+                            live_turn_state["user"] = merge_live_transcript(
+                                live_turn_state["user"], heard_text
                             )
                             try:
                                 with db_connection() as sensory_db:
@@ -4161,8 +4164,8 @@ async def websocket_endpoint(
                     if isinstance(output_transcription, dict) and output_transcription.get("text"):
                         spoken_text = str(output_transcription["text"]).strip()
                         if spoken_text:
-                            live_assistant_turn = merge_live_transcript(
-                                live_assistant_turn, spoken_text
+                            live_turn_state["assistant"] = merge_live_transcript(
+                                live_turn_state["assistant"], spoken_text
                             )
                             await websocket.send_json({"type": "text", "text": spoken_text})
 
@@ -4181,8 +4184,8 @@ async def websocket_endpoint(
                         elif isinstance(part.get("text"), str) and part["text"].strip():
                             part_text = part["text"].strip()
                             if not output_transcription.get("text"):
-                                live_assistant_turn = merge_live_transcript(
-                                    live_assistant_turn, part_text
+                                live_turn_state["assistant"] = merge_live_transcript(
+                                    live_turn_state["assistant"], part_text
                                 )
                             await websocket.send_json({
                                 "type": "text",
@@ -4190,23 +4193,24 @@ async def websocket_endpoint(
                             })
 
                     if server_content.get("turnComplete"):
-                        if live_user_turn or live_assistant_turn:
+                        if live_turn_state["user"] or live_turn_state["assistant"]:
                             try:
                                 save_conversation_turn(
                                     user_id,
-                                    live_user_turn,
-                                    live_assistant_turn,
+                                    live_turn_state["user"],
+                                    live_turn_state["assistant"],
                                     source="gemini_live",
                                 )
                                 log.info(
                                     "[V28] Tour Live enregistré dans le cerveau commun "
                                     "(utilisateur=%s, user_chars=%s, assistant_chars=%s)",
-                                    user_id, len(live_user_turn), len(live_assistant_turn),
+                                    user_id, len(live_turn_state["user"]),
+                                    len(live_turn_state["assistant"]),
                                 )
                             except Exception:
                                 log.exception("[V28] Échec d'enregistrement du tour Live")
-                            live_user_turn = ""
-                            live_assistant_turn = ""
+                            live_turn_state["user"] = ""
+                            live_turn_state["assistant"] = ""
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

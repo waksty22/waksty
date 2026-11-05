@@ -131,7 +131,20 @@ def associate_word_with_observation(
     ).fetchone()
     if vocabulary is None:
         raise ValueError("Enseigne d'abord ce mot à Chappie.")
+    if vocabulary["state"] == "heard":
+        raise ValueError(
+            "Chappie doit d'abord avoir tenté d'imiter ce mot avant de l'associer à une image."
+        )
     now = utc_now()
+    if vocabulary["state"] == "imitated":
+        db.execute(
+            """UPDATE personal_vocabulary
+               SET state='recognized',
+                   evidence='Mot associé à une observation visuelle validée',
+                   updated_at=?
+               WHERE user_id=? AND word=? AND state='imitated'""",
+            (now, user_id, word),
+        )
     db.execute(
         """INSERT INTO word_visual_associations
            (user_id, word, observation_id, evidence, created_at)
@@ -143,6 +156,6 @@ def associate_word_with_observation(
     return {
         "word": word,
         "observation_id": observation_id,
-        "vocabulary_state": vocabulary["state"],
+        "vocabulary_state": "recognized" if vocabulary["state"] == "imitated" else vocabulary["state"],
         "association_saved": True,
     }

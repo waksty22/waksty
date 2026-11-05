@@ -81,7 +81,7 @@ def record_heard_text(
     max_tokens: int = 30,
 ) -> list[dict[str, Any]]:
     """Record only lexical exposure, never comprehension or mastery."""
-    tokens = re.findall(r"[\\wÀ-ÖØ-öø-ÿ'-]+", str(text), flags=re.UNICODE)
+    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", str(text), flags=re.UNICODE)
     recorded: list[dict[str, Any]] = []
     seen: set[str] = set()
     for token in tokens[:max_tokens]:

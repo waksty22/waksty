@@ -3313,15 +3313,8 @@ async def websocket_endpoint(
             setup_message = {  
                 "setup": {  
                     "model": f"models/{GEMINI_LIVE_MODEL}",  
-                    "generation_config": {  
-                        "response_modalities": ["TEXT"],  
-                        "speech_config": {  
-                            "voice_config": {  
-                                "prebuilt_voice_config": {  
-                                    "voice_name": "Puck"  
-                                }  
-                            }  
-                        }  
+                    "generation_config": {
+                        "response_modalities": ["TEXT"]
                     },  
                     "system_instruction": {
                         "parts": [{"text": current_identity_prompt}]

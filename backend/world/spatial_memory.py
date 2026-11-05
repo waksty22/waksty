@@ -238,37 +238,57 @@ def record_place_observation(
         ).fetchone()
         if active is None:
             raise ValueError("Une session de localisation active et autorisée est nécessaire pour géolocaliser un lieu.")
+    best_match = None
+    for candidate in db.execute(
+        """SELECT place_id,visual_signature,latitude,longitude
+           FROM place_memories WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 250""",
+        (user_id,),
+    ).fetchall():
+        similarity = _signature_similarity(signature, str(candidate["visual_signature"] or ""))
+        if lat is not None and candidate["latitude"] is not None and candidate["longitude"] is not None:
+            distance = _distance_meters(
+                lat, lon, float(candidate["latitude"]), float(candidate["longitude"])
+            )
+            if distance > 100:
+                continue
+        if similarity >= 0.45 and (best_match is None or similarity > best_match["similarity"]):
+            best_match = {"place_id": candidate["place_id"], "similarity": similarity}
+
+    identity_status = "candidate" if best_match else "unconfirmed"
+    candidate_place_id = best_match["place_id"] if best_match else None
+    similarity_score = best_match["similarity"] if best_match else 0.0
     now = _now()
     place_id = "place-" + str(uuid.uuid4())
-    # A visual description is stored as an observation. It never auto-confirms
-    # a named landmark or a familiar location.
+    # Text similarity proposes a candidate only; a person must confirm identity.
     db.execute(
         """INSERT INTO place_memories
            (place_id,user_id,label,description,visual_signature,session_id,latitude,longitude,
-            confidence,identity_status,first_seen_at,last_seen_at,observations_count,
-            created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,'unconfirmed',?,?,1,?,?)""",
-        (place_id, user_id, label, description, signature, session_id or None, lat, lon, conf,
+            confidence,identity_status,candidate_place_id,similarity_score,
+            first_seen_at,last_seen_at,observations_count,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)""",
+        (place_id, user_id, label, description, signature, session_id or None,
+         lat, lon, conf, identity_status, candidate_place_id, similarity_score,
          now, now, now, now),
     )
     db.commit()
     return {"place_id": place_id, "label": label, "description": description,
             "latitude": lat, "longitude": lon, "confidence": conf,
-            "identity_status": "unconfirmed", "observations_count": 1}
+            "identity_status": identity_status, "candidate_place_id": candidate_place_id,
+            "similarity_score": round(similarity_score, 3), "observations_count": 1}
 
 
 def get_map_state(
     db: sqlite3.Connection, user_id: str, limit: int = 2000
 ) -> dict[str, Any]:
     limit = max(1, min(int(limit), 5000))
-    visits = db.execute(
+    visits = list(reversed(db.execute(
         """SELECT v.id,v.session_id,v.latitude,v.longitude,v.accuracy_m,
                   v.recorded_at,v.source,s.device_label
            FROM spatial_visits v
            JOIN spatial_sessions s ON s.session_id=v.session_id
-           WHERE v.user_id=? ORDER BY v.recorded_at ASC LIMIT ?""",
+           WHERE v.user_id=? ORDER BY v.recorded_at DESC LIMIT ?""",
         (user_id, limit),
-    ).fetchall()
+    ).fetchall()))
     sessions = db.execute(
         """SELECT session_id,device_label,started_at,ended_at
            FROM spatial_sessions WHERE user_id=? ORDER BY started_at DESC LIMIT 100""",
@@ -276,7 +296,7 @@ def get_map_state(
     ).fetchall()
     places = db.execute(
         """SELECT place_id,label,description,session_id,latitude,longitude,confidence,
-                  identity_status,first_seen_at,last_seen_at,observations_count
+                  identity_status,candidate_place_id,similarity_score,first_seen_at,last_seen_at,observations_count
            FROM place_memories WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 200""",
         (user_id,),
     ).fetchall()

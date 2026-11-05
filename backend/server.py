@@ -78,6 +78,11 @@ from learning.object_learning import (
     init_object_learning_tables, teach_object_property,
     list_known_objects, compare_known_objects, record_object_experience,
 )
+from learning.causal_learning import (
+    init_causal_learning_tables, record_observation as record_causal_observation,
+    propose_hypothesis, plan_experiment, evaluate_experiment,
+    list_causal_learning,
+)
 from cognition.reasoning import (
     init_cognition_tables,
     log_cognitive_trace,
@@ -88,7 +93,7 @@ from cognition.engine import cognitive_engine
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V22.0 — compréhension des objets"
+APP_NAME = "Chappie V23.0 — expérimentation et causalité"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -108,7 +113,7 @@ CHAPPIE_OWNER_ID = (
 )
 
 GEMINI_LIVE_MODEL = os.getenv(
-    "GEMINI_LIVE_MODEL", "gemini-3.6-flash"
+    "GEMINI_LIVE_MODEL", "gemini-3.8-live"
 ).strip()
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -378,6 +383,7 @@ def init_db() -> None:
         init_language_tables(db)
         init_sensory_tables(db)
         init_object_learning_tables(db)
+        init_causal_learning_tables(db)
         init_cognition_tables(db)
 
 def valid_user(user_id: str) -> str:
@@ -467,7 +473,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="20.0.0",
+    version="23.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -3438,97 +3444,239 @@ async def api_teach_vocabulary(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+
+@app.get("/api/learning/causal")
+async def api_list_causal_learning(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return list_causal_learning(db, user_id)
+
+
+@app.post("/api/learning/causal/observations")
+async def api_record_causal_observation(
+    request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_causal_observation(
+                db, user_id, data.get("event"), data.get("outcome"),
+                data.get("context", ""), data.get("source_type", "observed"),
+                data.get("evidence", ""), data.get("confidence", 0.7),
+            )
+        return {"ok": True, "observation": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/causal/hypotheses")
+async def api_propose_causal_hypothesis(
+    request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = propose_hypothesis(
+                db, user_id, int(data.get("observation_id")),
+                data.get("statement"), data.get("predicted_effect"),
+                data.get("confidence", 0.3),
+            )
+        return {"ok": True, "hypothesis": result}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/causal/experiments")
+async def api_plan_causal_experiment(
+    request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = plan_experiment(
+                db, user_id, int(data.get("hypothesis_id")),
+                data.get("environment"), data.get("procedure"),
+                data.get("prediction"), data.get("supervisor_approved") is True,
+            )
+        return {"ok": True, "experiment": result}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/causal/experiments/{experiment_id}/result")
+async def api_evaluate_causal_experiment(
+    experiment_id: int, request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = evaluate_experiment(
+                db, user_id, experiment_id,
+                data.get("observed_result"), data.get("evaluation"),
+            )
+        return {"ok": True, "evaluation": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @app.websocket("/ws")
 @app.websocket("/ws/live")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None)
+    token: Optional[str] = Query(None),
 ):
-    # Validation souple du token reçu en paramètre de requête WebSocket
+    """Authenticated bridge: browser PCM -> Gemini Live -> browser PCM."""
     token = str(token or "").strip()
-    
-    # Si le header Authorization est présent, on peut aussi l'extraire des sous-protocoles si besoin
-    if not CHAPPIE_API_TOKEN or not token or not hmac.compare_digest(token, CHAPPIE_API_TOKEN):  
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)  
-        return  
+    if not CHAPPIE_API_TOKEN or not token or not hmac.compare_digest(token, CHAPPIE_API_TOKEN):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
-    user_id = CHAPPIE_OWNER_ID  
-    await websocket.accept()  
+    if not GEMINI_API_KEY:
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "error",
+            "message": "GEMINI_API_KEY n'est pas configurée sur le serveur.",
+        })
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        return
 
-    try:  
-        log.info("[GEMINI LIVE] Connexion au WebSocket distant de Google...")
+    await websocket.accept()
+    user_id = CHAPPIE_OWNER_ID
+
+    try:
+        log.info("[GEMINI LIVE] Ouverture session modèle=%s", GEMINI_LIVE_MODEL)
         async with websockets.connect(
-            GEMINI_LIVE_URI, 
-            subprotocols=["realtime"],
-            ping_interval=None, 
-            ping_timeout=None
-        ) as gemini_ws:  
-            current_identity_prompt = get_identity_prompt(user_id)  
-
-            setup_message = {  
-                "setup": {  
-                    "model": f"models/{GEMINI_LIVE_MODEL}",  
-                    "generation_config": {
-                        "response_modalities": ["TEXT"]
-                    },  
-                    "system_instruction": {
-                        "parts": [{"text": current_identity_prompt}]
+            GEMINI_LIVE_URI,
+            open_timeout=20,
+            close_timeout=5,
+            ping_interval=20,
+            ping_timeout=20,
+            max_size=20_000_000,
+        ) as gemini_ws:
+            identity_prompt = get_identity_prompt(user_id)
+            with db_connection() as language_db:
+                repeatable_words = sorted(get_repeatable_words(language_db, user_id))
+            vocabulary_instruction = (
+                " Règle de développement linguistique : Chappie est un apprenant débutant. "
+                "N'emploie que les mots explicitement présents dans ce vocabulaire autorisé : "
+                + (", ".join(repeatable_words) if repeatable_words else "(aucun mot validé)")
+                + ". Ne révèle pas de connaissances lexicales non acquises. "
+                "Si aucun mot ne convient, utilise un son non verbal très court ou demande à apprendre."
+            )
+            setup_message = {
+                "setup": {
+                    "model": f"models/{GEMINI_LIVE_MODEL}",
+                    "generationConfig": {
+                        "responseModalities": ["AUDIO"],
+                        "speechConfig": {
+                            "languageCode": "fr-FR",
+                        },
                     },
-                    "input_audio_transcription": {}
-                }  
-            }  
-            await gemini_ws.send(json.dumps(setup_message))  
+                    "systemInstruction": {
+                        "parts": [{"text": identity_prompt + vocabulary_instruction}]
+                    },
+                    "inputAudioTranscription": {},
+                    "outputAudioTranscription": {},
+                }
+            }
+            await gemini_ws.send(json.dumps(setup_message, ensure_ascii=False))
 
-            # Attente active de la confirmation officielle setupComplete de Gemini
-            setup_confirmed = False
             try:
-                while not setup_confirmed:
-                    raw_msg = await asyncio.wait_for(gemini_ws.recv(), timeout=12.0)
-                    resp = json.loads(raw_msg)
-                    if "setupComplete" in resp:
-                        setup_confirmed = True
-                        log.info("[GEMINI LIVE] Setup validé et confirmé par l'API Google.")
-                    elif "error" in resp:
-                        log.error(f"[GEMINI LIVE SETUP ERROR] {resp}")
+                while True:
+                    raw_setup = await asyncio.wait_for(gemini_ws.recv(), timeout=20)
+                    setup_response = json.loads(raw_setup)
+                    if "setupComplete" in setup_response:
+                        break
+                    if "error" in setup_response:
+                        log.error("[GEMINI LIVE SETUP] %s", setup_response["error"])
                         await websocket.send_json({
-                            "type": "error", 
-                            "message": "Erreur de configuration renvoyée par Gemini Live."
+                            "type": "error",
+                            "message": str(setup_response["error"].get("message", "Configuration Gemini Live refusée.")),
                         })
+                        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
                         return
+                log.info("[GEMINI LIVE] setupComplete reçu du serveur Google.")
             except asyncio.TimeoutError:
-                log.warning("[GEMINI LIVE] Timeout en attendant setupComplete, poursuite de la session...")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Gemini Live n'a pas confirmé setupComplete dans les 20 secondes.",
+                })
+                await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                return
 
-            # Notification de connexion établie au client frontend
-            await websocket.send_json({  
-                "type": "connected",  
-                "message": "Connexion établie et validée avec le noyau cognitif de Chappie.",  
-            })  
+            await websocket.send_json({
+                "type": "connected",
+                "message": "Gemini Live prêt : microphone et audio de réponse activés.",
+                "model": GEMINI_LIVE_MODEL,
+            })
 
-            async def forward_client_to_gemini():  
-                try:  
-                    while True:  
-                        raw_data = await websocket.receive_text()  
-                        payload = json.loads(raw_data)  
-                        await gemini_ws.send(json.dumps(payload))  
-                except WebSocketDisconnect:  
-                    pass  
-                except Exception as e:  
-                    print("[CLIENT SEND ERR]", repr(e))  
-
-            async def forward_gemini_to_client():  
-                try:  
-                    async for msg in gemini_ws:  
-                        response = json.loads(msg)  
-                        
-                        if "setupComplete" in response:
+            async def client_to_gemini():
+                while True:
+                    payload = await websocket.receive_json()
+                    action = payload.get("action")
+                    if action == "audio_chunk":
+                        pcm = payload.get("pcm_data")
+                        if not isinstance(pcm, str) or not pcm:
                             continue
+                        message = {
+                            "realtimeInput": {
+                                "audio": {
+                                    "data": pcm,
+                                    "mimeType": "audio/pcm;rate=16000",
+                                }
+                            }
+                        }
+                    elif action == "video_frame":
+                        image_data = payload.get("data")
+                        if not isinstance(image_data, str) or not image_data:
+                            continue
+                        message = {
+                            "realtimeInput": {
+                                "video": {
+                                    "data": image_data,
+                                    "mimeType": payload.get("mime_type", "image/jpeg"),
+                                }
+                            }
+                        }
+                    elif action == "text":
+                        text_value = str(payload.get("text", "")).strip()
+                        if not text_value:
+                            continue
+                        message = {
+                            "clientContent": {
+                                "turns": [{"role": "user", "parts": [{"text": text_value}]}],
+                                "turnComplete": True,
+                            }
+                        }
+                    else:
+                        # Never relay arbitrary client JSON into the provider protocol.
+                        continue
+                    await gemini_ws.send(json.dumps(message, ensure_ascii=False))
 
-                        server_content = response.get("serverContent", {})
+            async def gemini_to_client():
+                async for raw_message in gemini_ws:
+                    response = json.loads(raw_message)
+                    if "error" in response:
+                        error = response["error"]
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(error.get("message", "Erreur Gemini Live.")),
+                        })
+                        continue
 
-                        input_transcription = server_content.get("inputTranscription", {})
-                        if isinstance(input_transcription, dict) and input_transcription.get("text"):
-                            heard_text = str(input_transcription["text"]).strip()
-                            if heard_text:
+                    if response.get("serverContent", {}).get("interrupted"):
+                        await websocket.send_json({"type": "interrupt"})
+
+                    server_content = response.get("serverContent") or {}
+                    input_transcription = server_content.get("inputTranscription") or {}
+                    if isinstance(input_transcription, dict) and input_transcription.get("text"):
+                        heard_text = str(input_transcription["text"]).strip()
+                        if heard_text:
+                            try:
                                 with db_connection() as sensory_db:
                                     record_heard_text(
                                         sensory_db, user_id, heard_text,
@@ -3537,54 +3685,64 @@ async def websocket_endpoint(
                                     record_observation(
                                         sensory_db, user_id, "audio", heard_text,
                                         "gemini_live_transcription",
-                                        confidence=0.7,
+                                        confidence=0.8,
                                         metadata={"language": "fr"},
                                     )
                                     sensory_db.commit()
-                                await websocket.send_json({
-                                    "type": "user_text",
-                                    "text": heard_text
-                                })
+                            except Exception:
+                                log.exception("[GEMINI LIVE] Échec mémorisation transcription")
+                            await websocket.send_json({"type": "user_text", "text": heard_text})
 
-                        model_turn = server_content.get("modelTurn", {})
-                        parts = model_turn.get("parts", [])
+                    output_transcription = server_content.get("outputTranscription") or {}
+                    if isinstance(output_transcription, dict) and output_transcription.get("text"):
+                        spoken_text = str(output_transcription["text"]).strip()
+                        if spoken_text:
+                            await websocket.send_json({"type": "text", "text": spoken_text})
 
-                        # Gemini Live ne décide pas du vocabulaire acquis.
-                        with db_connection() as language_db:
-                            repeatable_words = get_repeatable_words(language_db, user_id)
-
-                        for part in parts:
-                            if "text" in part and isinstance(part["text"], str):
-                                maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
-                                safe_text = gate_spoken_text(
-                                    part["text"], repeatable_words,
-                                    max_words=1 if maturity < 3.0 else None,
-                                )
-                                if safe_text:
-                                    await websocket.send_json({
-                                        "type": "text",
-                                        "text": safe_text
-                                    })
-                            elif "inlineData" in part:
-                                log.warning(
-                                    "[GEMINI LIVE] Audio brut supprimé : sortie non vérifiable par le lexique."
-                                )
-
-                        if server_content.get("turnComplete"):
+                    model_turn = server_content.get("modelTurn") or {}
+                    for part in model_turn.get("parts", []):
+                        inline = part.get("inlineData") or part.get("inline_data")
+                        if isinstance(inline, dict) and inline.get("data"):
+                            mime_type = str(inline.get("mimeType") or inline.get("mime_type") or "")
+                            match = re.search(r"rate=(\\d+)", mime_type)
+                            sample_rate = int(match.group(1)) if match else 24000
                             await websocket.send_json({
-                                "type": "turn_complete"
+                                "type": "audio_stream",
+                                "audio": inline["data"],
+                                "sample_rate": sample_rate,
+                            })
+                        elif isinstance(part.get("text"), str) and part["text"].strip():
+                            await websocket.send_json({
+                                "type": "text",
+                                "text": part["text"].strip(),
                             })
 
-                except Exception as e:  
-                    print("[GEMINI RECV ERR]", repr(e))  
+                    if server_content.get("turnComplete"):
+                        await websocket.send_json({"type": "turn_complete"})
 
-            await asyncio.gather(forward_client_to_gemini(), forward_gemini_to_client())  
+            client_task = asyncio.create_task(client_to_gemini())
+            gemini_task = asyncio.create_task(gemini_to_client())
+            done, pending = await asyncio.wait(
+                {client_task, gemini_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                error = task.exception()
+                if error and not isinstance(error, (WebSocketDisconnect, asyncio.CancelledError)):
+                    raise error
 
-    except WebSocketDisconnect:  
-        print("[WEBSOCKET] Client déconnecté.")  
-    except Exception as exc:  
-        print("[WEBSOCKET ERROR]", repr(exc))  
-        try:  
-            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)  
-        except Exception:  
+    except WebSocketDisconnect:
+        log.info("[GEMINI LIVE] Client déconnecté.")
+    except Exception as exc:
+        log.exception("[GEMINI LIVE] Session interrompue : %s", exc)
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "La session Gemini Live a échoué. Consulte les logs Render pour le détail.",
+            })
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        except Exception:
             pass

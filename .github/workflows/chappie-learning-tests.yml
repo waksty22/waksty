@@ -22,5 +22,5 @@ jobs:
         run: python -m pip install --upgrade pytest
       - name: Check Python syntax
         run: python -m compileall -q backend
-      - name: Test language, sensory, object, causal and supervised learning
-        run: python -m pytest backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py -q
+      - name: Test learning and shared cognitive brain
+        run: python -m pytest backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py -q

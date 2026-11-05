@@ -121,10 +121,15 @@ from cognition.development import (
     development_statistics,
 )
 from cognition.engine import cognitive_engine
+from cognition.shared_brain import (
+    get_shared_brain_snapshot,
+    format_shared_brain_context,
+    merge_live_transcript,
+)
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V27.0 — apprentissage supervisé et imitation"
+APP_NAME = "Chappie V28.0 — cerveau cognitif unifié"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -509,7 +514,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="27.0.0",
+    version="28.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -1688,6 +1693,10 @@ def get_identity_prompt(user_id: str) -> str:
         recent_decisions = list_decisions(development_db, user_id, limit=5)
         documented_preferences = list_preferences(development_db, user_id, limit=12)
 
+    with db_connection() as shared_db:
+        shared_snapshot = get_shared_brain_snapshot(shared_db, user_id, limit=8)
+    shared_brain_context = format_shared_brain_context(shared_snapshot)
+
     with db_connection() as learning_db:
         imitation_state = list_imitation_learning(learning_db, user_id, limit=6)
         causal_state = list_causal_learning(learning_db, user_id)
@@ -1773,6 +1782,10 @@ Décisions documentées :
 
 Préférences documentées :
 {preference_context}
+
+=== V28 — CONTEXTE COGNITIF UNIFIÉ ===
+Tous les systèmes persistés ci-dessous appartiennent au même historique cognitif. Utilise ces données avec leur provenance et leur statut. Une donnée présente dans le contexte n'est pas automatiquement comprise ni maîtrisée.
+{shared_brain_context}
 
 === V27 — APPRENTISSAGE PAR IMITATION ET EXPÉRIENCE SUPERVISÉE ===
 Tu distingues strictement : comportement observé, comportement tenté, pratique documentée et imitation validée.
@@ -1866,6 +1879,14 @@ TOOLS = [{
             },
         },
         {
+            "name": "get_shared_brain_state",
+            "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {},
+            },
+        },
+        {
             "name": "get_local_time",
             "description": "Obtenir la date et l'heure locale actuelles.",
             "parameters": {
@@ -1912,6 +1933,10 @@ def execute_tool(
                 float(args.get("xp_delta", 10.0)),  
                 str(args.get("evidence", "Progression")),  
             )  
+
+        if name == "get_shared_brain_state":
+            with db_connection() as brain_db:
+                return get_shared_brain_snapshot(brain_db, user_id, limit=8)
 
         if name == "get_local_time":  
             return {  
@@ -2730,7 +2755,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "27.0.0",
+        "version": "28.0.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -3677,6 +3702,9 @@ async def api_config(auth=Depends(require_auth)):
         "supports_evidence_based_preferences": True,
         "supports_supervised_imitation": True,
         "supports_experiment_approval": True,
+        "supports_shared_cognitive_brain": True,
+        "supports_live_function_tools": True,
+        "persists_live_conversations": True,
         "cognitive_systems": 12,  
         "supports_vision": True,  
         "supports_voice": True,  
@@ -3685,6 +3713,19 @@ async def api_config(auth=Depends(require_auth)):
         "supports_goals": True,  
         "supports_dreams": True,  
     }
+
+@app.get("/api/cognition/shared-brain")
+async def api_shared_brain_snapshot(auth=Depends(require_auth)):
+    """Expose the same bounded cognitive snapshot used by chat and Gemini Live."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        snapshot = get_shared_brain_snapshot(db, user_id, limit=20)
+    return {
+        "version": "28.0.0",
+        "brain": snapshot,
+        "context": format_shared_brain_context(snapshot),
+    }
+
 
 @app.get("/api/language/vocabulary")
 async def api_get_vocabulary(auth=Depends(require_auth)):
@@ -3954,6 +3995,7 @@ async def websocket_endpoint(
                     "systemInstruction": {
                         "parts": [{"text": identity_prompt + vocabulary_instruction + voice_style_instruction}]
                     },
+                    "tools": TOOLS,
                     "inputAudioTranscription": {},
                     "outputAudioTranscription": {},
                 }
@@ -3993,6 +4035,8 @@ async def websocket_endpoint(
                 "model": GEMINI_LIVE_MODEL,
             })
 
+            live_turn_state = {"user": "", "assistant": ""}
+
             async def client_to_gemini():
                 while True:
                     payload = await websocket.receive_json()
@@ -4025,6 +4069,9 @@ async def websocket_endpoint(
                         text_value = str(payload.get("text", "")).strip()
                         if not text_value:
                             continue
+                        live_turn_state["user"] = merge_live_transcript(
+                            live_turn_state["user"], text_value
+                        )
                         message = {
                             "clientContent": {
                                 "turns": [{"role": "user", "parts": [{"text": text_value}]}],
@@ -4047,6 +4094,36 @@ async def websocket_endpoint(
                         })
                         continue
 
+                    # V28 : Gemini Live utilise exactement les mêmes outils serveur
+                    # que le chat classique. Les outils sont exécutés côté backend.
+                    tool_call = response.get("toolCall") or {}
+                    function_calls = tool_call.get("functionCalls") or []
+                    if isinstance(function_calls, list) and function_calls:
+                        function_responses = []
+                        for function_call in function_calls[:8]:
+                            if not isinstance(function_call, dict):
+                                continue
+                            function_name = str(function_call.get("name") or "")
+                            function_args = function_call.get("args") or {}
+                            if not isinstance(function_args, dict):
+                                function_args = {}
+                            function_result = execute_tool(
+                                function_name, function_args, user_id
+                            )
+                            function_response = {
+                                "name": function_name,
+                                "response": function_result,
+                            }
+                            if function_call.get("id"):
+                                function_response["id"] = function_call["id"]
+                            function_responses.append(function_response)
+                        if function_responses:
+                            await gemini_ws.send(json.dumps({
+                                "toolResponse": {
+                                    "functionResponses": function_responses
+                                }
+                            }, ensure_ascii=False))
+
                     if response.get("serverContent", {}).get("interrupted"):
                         await websocket.send_json({"type": "interrupt"})
 
@@ -4055,6 +4132,9 @@ async def websocket_endpoint(
                     if isinstance(input_transcription, dict) and input_transcription.get("text"):
                         heard_text = str(input_transcription["text"]).strip()
                         if heard_text:
+                            live_turn_state["user"] = merge_live_transcript(
+                                live_turn_state["user"], heard_text
+                            )
                             try:
                                 with db_connection() as sensory_db:
                                     live_emotions = update_emotions_once(user_id, heard_text)
@@ -4084,6 +4164,9 @@ async def websocket_endpoint(
                     if isinstance(output_transcription, dict) and output_transcription.get("text"):
                         spoken_text = str(output_transcription["text"]).strip()
                         if spoken_text:
+                            live_turn_state["assistant"] = merge_live_transcript(
+                                live_turn_state["assistant"], spoken_text
+                            )
                             await websocket.send_json({"type": "text", "text": spoken_text})
 
                     model_turn = server_content.get("modelTurn") or {}
@@ -4099,12 +4182,35 @@ async def websocket_endpoint(
                                 "sample_rate": sample_rate,
                             })
                         elif isinstance(part.get("text"), str) and part["text"].strip():
+                            part_text = part["text"].strip()
+                            if not output_transcription.get("text"):
+                                live_turn_state["assistant"] = merge_live_transcript(
+                                    live_turn_state["assistant"], part_text
+                                )
                             await websocket.send_json({
                                 "type": "text",
-                                "text": part["text"].strip(),
+                                "text": part_text,
                             })
 
                     if server_content.get("turnComplete"):
+                        if live_turn_state["user"] or live_turn_state["assistant"]:
+                            try:
+                                save_conversation_turn(
+                                    user_id,
+                                    live_turn_state["user"],
+                                    live_turn_state["assistant"],
+                                    source="gemini_live",
+                                )
+                                log.info(
+                                    "[V28] Tour Live enregistré dans le cerveau commun "
+                                    "(utilisateur=%s, user_chars=%s, assistant_chars=%s)",
+                                    user_id, len(live_turn_state["user"]),
+                                    len(live_turn_state["assistant"]),
+                                )
+                            except Exception:
+                                log.exception("[V28] Échec d'enregistrement du tour Live")
+                            live_turn_state["user"] = ""
+                            live_turn_state["assistant"] = ""
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

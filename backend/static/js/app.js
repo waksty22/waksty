@@ -617,6 +617,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const observationLabel = document.getElementById("visionObservationStatus");
             if (observationLabel) observationLabel.textContent =
                 response.observation_id ? "Observation enregistrée — associe maintenant un mot enseigné." : "Observation non enregistrée.";
+            if (response.place_observation && visionOut) {
+                visionOut.textContent += "\nSouvenir de lieu enregistré : " +
+                    (response.place_observation.identity_status === "candidate"
+                        ? "ressemblance possible à vérifier."
+                        : "nouvelle observation non confirmée.");
+            }
+            if (window.loadWorldMap) await window.loadWorldMap();
         } catch (error) {
             console.error("Erreur analyse vision :", error);
             if (visionOut) visionOut.textContent = "Erreur lors de l'analyse visuelle : " + error.message;

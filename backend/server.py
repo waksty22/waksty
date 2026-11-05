@@ -67,7 +67,7 @@ from learning.curriculum import (
 )
 from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
-    get_usable_words, gate_spoken_text, record_heard_word,
+    get_usable_words, get_repeatable_words, gate_spoken_text, record_heard_word,
 )
 from cognition.reasoning import (
     init_cognition_tables,
@@ -2051,8 +2051,8 @@ async def run_brain(
         )  
 
     with db_connection() as language_db:
-        usable_words = get_usable_words(language_db, user_id)
-    reply = gate_spoken_text(reply, usable_words)
+        repeatable_words = get_repeatable_words(language_db, user_id)
+    reply = gate_spoken_text(reply, repeatable_words)
 
     save_conversation_turn(
         user_id,
@@ -3389,11 +3389,11 @@ async def websocket_endpoint(
 
                         # Gemini Live ne décide pas du vocabulaire acquis.
                         with db_connection() as language_db:
-                            usable_words = get_usable_words(language_db, user_id)
+                            repeatable_words = get_repeatable_words(language_db, user_id)
 
                         for part in parts:
                             if "text" in part and isinstance(part["text"], str):
-                                safe_text = gate_spoken_text(part["text"], usable_words)
+                                safe_text = gate_spoken_text(part["text"], repeatable_words)
                                 if safe_text:
                                     await websocket.send_json({
                                         "type": "text",

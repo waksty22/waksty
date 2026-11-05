@@ -3375,6 +3375,14 @@ async def websocket_endpoint(
                             continue
 
                         server_content = response.get("serverContent", {})
+
+                        input_transcription = server_content.get("inputTranscription", {})
+                        if isinstance(input_transcription, dict) and input_transcription.get("text"):
+                            await websocket.send_json({
+                                "type": "user_text",
+                                "text": str(input_transcription["text"])
+                            })
+
                         model_turn = server_content.get("modelTurn", {})
                         parts = model_turn.get("parts", [])
 

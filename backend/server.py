@@ -59,6 +59,10 @@ from memory.autobiographical import (
     search_autobiographical_events,
     autobiographical_statistics,
 )
+from world.spatial_memory import (
+    init_spatial_tables, start_location_session, stop_location_session,
+    record_location, record_place_observation, get_map_state,
+)
 from world.world_model import (
     init_world_tables,
     upsert_world_entity,
@@ -415,7 +419,8 @@ def init_db() -> None:
 
     with db_connection() as db:  
         init_memory_tables(db)  
-        init_world_tables(db)  
+        init_world_tables(db)
+        init_spatial_tables(db)
         init_learning_tables(db)
         init_language_tables(db)
         init_sensory_tables(db)
@@ -845,7 +850,14 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM mood_events WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM affective_history WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM decision_journal WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))\n        # A true new-life reset must also clear V25/V28/V31 spatial and autobiographical traces.\n        db.execute("DELETE FROM autobiographical_links WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM autobiographical_events WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM perception_fusion_candidates WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM spatial_visits WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM spatial_sessions WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM place_memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))
+        # Clear all autobiographical, cross-modal and spatial traces on a true new-life reset.
+        db.execute("DELETE FROM autobiographical_links WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM autobiographical_events WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM perception_fusion_candidates WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM spatial_visits WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM spatial_sessions WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM place_memories WHERE user_id=?", (user_id,))
 
         db.execute(  
             """  
@@ -3800,7 +3812,7 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "27.0.0",
+        "version": "33.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,
@@ -3809,7 +3821,11 @@ async def api_config(auth=Depends(require_auth)):
         "supports_evidence_based_preferences": True,
         "supports_supervised_imitation": True,
         "supports_experiment_approval": True,
-        "supports_shared_cognitive_brain": True,\n        "supports_spatial_memory": True,\n        "supports_consent_based_location_sessions": True,\n        "supports_visual_place_observations": True,\n        "supports_unified_dashboard_v33": True,
+        "supports_shared_cognitive_brain": True,
+        "supports_spatial_memory": True,
+        "supports_consent_based_location_sessions": True,
+        "supports_visual_place_observations": True,
+        "supports_unified_dashboard_v33": True,
         "supports_live_function_tools": True,
         "persists_live_conversations": True,
         "cognitive_systems": 12,  
@@ -3828,7 +3844,7 @@ async def api_shared_brain_snapshot(auth=Depends(require_auth)):
     with db_connection() as db:
         snapshot = get_shared_brain_snapshot(db, user_id, limit=20)
     return {
-        "version": "28.0.0",
+        "version": "33.0.0",
         "brain": snapshot,
         "context": format_shared_brain_context(snapshot),
     }

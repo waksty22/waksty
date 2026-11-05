@@ -134,7 +134,7 @@ def get_repeatable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
     """Words Chappie has explicitly learned to imitate or beyond."""
     rows = db.execute(
         """SELECT word FROM personal_vocabulary
-           WHERE user_id=? AND state IN ('imitated', 'recognized', 'understood', 'usable')""",
+           WHERE user_id=? AND state IN ('heard', 'imitated', 'recognized', 'understood', 'usable')""",
         (user_id,),
     ).fetchall()
     return {str(row["word"]) for row in rows}

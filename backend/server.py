@@ -3574,6 +3574,18 @@ async def websocket_endpoint(
                 + ". Ne révèle pas de connaissances lexicales non acquises. "
                 "Si aucun mot ne convient, utilise un son non verbal très court ou demande à apprendre."
             )
+            # Identité vocale stable pour Gemini Live : voix masculine grave et légèrement
+            # rocailleuse, avec une interprétation jeune et expressive. La consigne demande
+            # un français de France standard, sans accent régional ni coloration étrangère.
+            voice_style_instruction = (
+                " Identité vocale de Chappie : parle uniquement en français de France standard "
+                "(fr-FR), avec une prononciation claire et naturelle, sans accent régional "
+                "marqué ni accent étranger. Garde une voix masculine jeune, légèrement grave, "
+                "un peu rauque et subtilement robotique, mais chaleureuse et expressive. "
+                "Évite une voix d'assistant commercial ou de narrateur. Fais évoluer "
+                "l'assurance, le rythme et l'expressivité avec la maturité de Chappie, "
+                "sans changer de langue ni imiter exactement la voix d'un acteur."
+            )
             setup_message = {
                 "setup": {
                     "model": f"models/{GEMINI_LIVE_MODEL}",
@@ -3581,10 +3593,15 @@ async def websocket_endpoint(
                         "responseModalities": ["AUDIO"],
                         "speechConfig": {
                             "languageCode": "fr-FR",
+                            "voiceConfig": {
+                                "prebuiltVoiceConfig": {
+                                    "voiceName": "Algenib",
+                                },
+                            },
                         },
                     },
                     "systemInstruction": {
-                        "parts": [{"text": identity_prompt + vocabulary_instruction}]
+                        "parts": [{"text": identity_prompt + vocabulary_instruction + voice_style_instruction}]
                     },
                     "inputAudioTranscription": {},
                     "outputAudioTranscription": {},

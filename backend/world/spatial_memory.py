@@ -277,6 +277,36 @@ def record_place_observation(
             "similarity_score": round(similarity_score, 3), "observations_count": 1}
 
 
+def confirm_place_identity(
+    db: sqlite3.Connection, user_id: str, place_id: str,
+    label: str, evidence: str
+) -> dict[str, Any]:
+    place_id = _text(place_id, "Identifiant du lieu", 100, True)
+    label = _text(label, "Nom confirmé", 120, True)
+    evidence = _text(evidence, "Preuve de confirmation", 1000, True)
+    row = db.execute(
+        "SELECT place_id FROM place_memories WHERE place_id=? AND user_id=?",
+        (place_id, user_id),
+    ).fetchone()
+    if row is None:
+        raise ValueError("Observation de lieu introuvable.")
+    now = _now()
+    db.execute(
+        """UPDATE place_memories
+           SET label=?,identity_status='confirmed',confidence=1.0,
+               updated_at=?,last_seen_at=?
+           WHERE place_id=? AND user_id=?""",
+        (label, now, now, place_id, user_id),
+    )
+    db.commit()
+    return {
+        "place_id": place_id, "label": label,
+        "identity_status": "confirmed",
+        "confirmation_evidence": evidence,
+        "confirmed_at": now,
+    }
+
+
 def get_map_state(
     db: sqlite3.Connection, user_id: str, limit: int = 2000
 ) -> dict[str, Any]:

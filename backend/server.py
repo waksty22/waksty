@@ -638,7 +638,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
                 """  
                 INSERT OR IGNORE INTO skills  
                 (user_id, skill_name, level, xp, evidence, updated_at)  
-                VALUES (?, ?, 1.0, 0.0, ?, ?)  
+                VALUES (?, ?, 0.0, 0.0, ?, ?)  
                 """,  
                 (user_id, skill_id, label, now),  
             )  

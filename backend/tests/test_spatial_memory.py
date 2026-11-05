@@ -62,9 +62,10 @@ def test_bad_coordinates_and_low_accuracy_are_rejected(db):
 
 
 def test_visual_place_is_stored_as_unconfirmed_observation(db):
+    session = start_location_session(db, "creator", True)
     place = record_place_observation(
         db, "creator", "Un chemin bordé d'arbres et un banc bleu.",
-        48.1, -2.8, confidence=0.4,
+        48.1, -2.8, confidence=0.4, session_id=session["session_id"],
     )
     assert place["identity_status"] == "unconfirmed"
     state = get_map_state(db, "creator")

@@ -3265,13 +3265,13 @@ async def api_teach_vocabulary(
                 (user_id, payload.word.strip().casefold()),
             ).fetchone()
             if existing is None:
+                if payload.state != "heard":
+                    raise ValueError(
+                        "Commence par valider l'étape « entendu » pour ce nouveau mot."
+                    )
                 response = record_heard_word(
                     db, user_id, payload.word, payload.evidence
                 )
-                if payload.state != "heard":
-                    raise ValueError(
-                        "Le mot vient d'être enregistré comme entendu. Valide chaque étape successivement."
-                    )
             else:
                 response = advance_word(
                     db, user_id, payload.word, payload.state,

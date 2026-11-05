@@ -773,6 +773,9 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         )  
 
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM causal_experiments WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM causal_hypotheses WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM causal_observations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM object_experiences WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM object_properties WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM word_visual_associations WHERE user_id=?", (user_id,))
@@ -3393,7 +3396,10 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "19.3",  
+        "version": "23.0.0",
+        "live_model": GEMINI_LIVE_MODEL,
+        "supports_native_live_audio": True,
+        "supports_causal_learning": True,  
         "cognitive_systems": 12,  
         "supports_vision": True,  
         "supports_voice": True,  
@@ -3595,7 +3601,11 @@ async def websocket_endpoint(
                         log.error("[GEMINI LIVE SETUP] %s", setup_response["error"])
                         await websocket.send_json({
                             "type": "error",
-                            "message": str(setup_response["error"].get("message", "Configuration Gemini Live refusée.")),
+                            "message": str(
+                                setup_response["error"].get("message", "Configuration Gemini Live refusée.")
+                                if isinstance(setup_response["error"], dict)
+                                else setup_response["error"]
+                            ),
                         })
                         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
                         return

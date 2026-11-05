@@ -163,17 +163,28 @@ def get_repeatable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
     return {str(row["word"]) for row in rows}
 
 
-def gate_spoken_text(text: str, usable_words: set[str]) -> str:
-    """Keep only explicitly usable lexical tokens; never trust model fluency."""
+def gate_spoken_text(
+    text: str,
+    usable_words: set[str],
+    max_words: int | None = None,
+) -> str:
+    """Filter lexical output; newborn mode can be restricted to isolated words."""
     if not usable_words:
         return ""
     tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+|[^\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
     output: list[str] = []
+    emitted_words = 0
     for token in tokens:
         if re.fullmatch(r"[\wÀ-ÖØ-öø-ÿ'-]+", token, flags=re.UNICODE):
-            output.append(token if token.casefold() in usable_words else "")
+            if token.casefold() in usable_words and (
+                max_words is None or emitted_words < max_words
+            ):
+                output.append(token)
+                emitted_words += 1
+            else:
+                output.append("")
         else:
-            output.append(token)
+            output.append(token if max_words is None or emitted_words < max_words else "")
     result = "".join(output)
     result = re.sub(r"\s+", " ", result)
     result = re.sub(r"\s+([,.!?;:])", r"\1", result)

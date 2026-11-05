@@ -1420,10 +1420,17 @@ async function toggleLive() {
         setText('liveStatus', data.status);
       }
 
-      if (data.error) {
+      if (data.type === 'connected') {
         setText(
           'liveStatus',
-          'Erreur : ' + data.error
+          'Gemini Live prêt. Micro actif : parle à Chappie.'
+        );
+      }
+
+      if (data.error || data.type === 'error') {
+        setText(
+          'liveStatus',
+          'Erreur Gemini Live : ' + (data.message || data.error)
         );
       }
 
@@ -1958,6 +1965,122 @@ async function captureVision() {
 }
 
 /* ============================================================
+   20B. V23 — APPRENTISSAGE CAUSAL
+   ============================================================ */
+
+function causalStatus(message) {
+  const node = $('causalLearningStatus');
+  if (node) node.textContent = message;
+}
+
+async function loadCausalLearning() {
+  if (!getToken()) return;
+  try {
+    const data = await apiRequest('/api/learning/causal');
+    const output = $('causalLearningOutput');
+    if (output) output.textContent = JSON.stringify(data, null, 2);
+    causalStatus('Journal causal synchronisé avec le serveur.');
+  } catch (error) {
+    causalStatus('Chargement causal impossible : ' + error.message);
+  }
+}
+
+async function createCausalObservation() {
+  if (!requireToken()) return;
+  try {
+    const data = await apiRequest('/api/learning/causal/observations', {
+      method: 'POST',
+      body: jsonBody({
+        event: $('causalEvent')?.value || '',
+        context: $('causalContext')?.value || '',
+        outcome: $('causalOutcome')?.value || '',
+        source_type: 'observed',
+        evidence: 'Observation saisie et validée par le superviseur',
+        confidence: 0.7
+      })
+    });
+    const id = data.observation?.id;
+    if (id && $('causalObservationId')) $('causalObservationId').value = id;
+    causalStatus('Observation enregistrée (ID ' + id + '). Elle reste un fait isolé, pas une règle générale.');
+    await loadCausalLearning();
+  } catch (error) {
+    causalStatus('Observation refusée : ' + error.message);
+  }
+}
+
+async function createCausalHypothesis() {
+  if (!requireToken()) return;
+  try {
+    const data = await apiRequest('/api/learning/causal/hypotheses', {
+      method: 'POST',
+      body: jsonBody({
+        observation_id: Number($('causalObservationId')?.value),
+        statement: $('causalHypothesis')?.value || '',
+        predicted_effect: $('causalPrediction')?.value || '',
+        confidence: 0.3
+      })
+    });
+    const id = data.hypothesis?.id;
+    if (id && $('causalHypothesisId')) $('causalHypothesisId').value = id;
+    causalStatus('Hypothèse enregistrée (ID ' + id + '). Elle reste provisoire tant qu'elle n'a pas été testée.');
+    await loadCausalLearning();
+  } catch (error) {
+    causalStatus('Hypothèse refusée : ' + error.message);
+  }
+}
+
+async function createCausalExperiment() {
+  if (!requireToken()) return;
+  if (!$('causalSupervisorApproval')?.checked) {
+    causalStatus('Coche la confirmation du superviseur après avoir vérifié que le test est sûr.');
+    return;
+  }
+  try {
+    const data = await apiRequest('/api/learning/causal/experiments', {
+      method: 'POST',
+      body: jsonBody({
+        hypothesis_id: Number($('causalHypothesisId')?.value),
+        environment: $('causalEnvironment')?.value || 'simulation',
+        procedure: $('causalProcedure')?.value || '',
+        prediction: $('causalExperimentPrediction')?.value || '',
+        supervisor_approved: true
+      })
+    });
+    const id = data.experiment?.id;
+    if (id && $('causalExperimentId')) $('causalExperimentId').value = id;
+    causalStatus('Protocole validé (ID ' + id + '). Chappie ne réalise pas le test : il attend le résultat du superviseur.');
+    await loadCausalLearning();
+  } catch (error) {
+    causalStatus('Expérience refusée : ' + error.message);
+  }
+}
+
+async function evaluateCausalExperiment() {
+  if (!requireToken()) return;
+  try {
+    const id = Number($('causalExperimentId')?.value);
+    const data = await apiRequest(
+      '/api/learning/causal/experiments/' + id + '/result',
+      {
+        method: 'POST',
+        body: jsonBody({
+          observed_result: $('causalObservedResult')?.value || '',
+          evaluation: $('causalEvaluation')?.value || 'inconclusive'
+        })
+      }
+    );
+    const result = data.evaluation || {};
+    causalStatus(
+      'Évaluation enregistrée : ' + result.status +
+      ' · confiance ' + Math.round((result.confidence || 0) * 100) + ' %'
+    );
+    await loadCausalLearning();
+  } catch (error) {
+    causalStatus('Évaluation refusée : ' + error.message);
+  }
+}
+
+/* ============================================================
    21. PROFILS VOCAUX
    ============================================================ */
 
@@ -2274,6 +2397,7 @@ function handleTokenChange(source) {
     fetchPsychology();
     checkInitialGreeting();
     loadSkills();
+    loadCausalLearning();
 
   }, 700);
 }
@@ -2333,6 +2457,7 @@ function initializeChappie() {
     }, 1000);
 
     loadSkills();
+    loadCausalLearning();
   }
 
   startPsychologyPolling();
@@ -2396,6 +2521,11 @@ Object.assign(window, {
   stopCamera,
   captureVision,
   recordVoice,
+  loadCausalLearning,
+  createCausalObservation,
+  createCausalHypothesis,
+  createCausalExperiment,
+  evaluateCausalExperiment,
   syncTokens,
   setVoiceActivity
 });

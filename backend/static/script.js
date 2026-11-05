@@ -1479,7 +1479,7 @@ async function toggleLive() {
       if (data.type === 'audio_stream' && data.audio) {
         playLiveAudio(
           data.audio,
-          LIVE_OUTPUT_RATE
+          data.sample_rate || LIVE_OUTPUT_RATE
         );
       } else if (data.audio) {
         playLiveAudio(
@@ -1547,9 +1547,17 @@ function playLiveAudio(encoded, rate = LIVE_OUTPUT_RATE) {
   if (!liveCtx || !encoded) return;
 
   try {
+    // Mobile browsers may suspend WebAudio after backgrounding the page.
+    if (liveCtx.state !== 'running') {
+      liveCtx.resume().catch(error => {
+        console.warn('Réactivation audio Live impossible :', error);
+      });
+    }
+
     const bytes = base64ToBytes(encoded);
 
-    if (bytes.length < 2) return;
+    // Ignore empty/near-empty PCM frames (e.g. 1-sample silent chunks).
+    if (bytes.length < 8) return;
 
     const count = Math.floor(bytes.length / 2);
 

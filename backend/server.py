@@ -112,15 +112,10 @@ CHAPPIE_OWNER_ID = (
     os.getenv("CHAPPIE_OWNER_ID", "creator").strip() or "creator"
 )
 
-GEMINI_LIVE_MODEL = os.getenv(
-    "GEMINI_LIVE_MODEL", "gemini-3.8-live"
-).strip() or "gemini-3.8-live"
-# A standard text-only Flash model cannot satisfy the native Live audio contract.
-if GEMINI_LIVE_MODEL not in {
-    "gemini-3.8-live",
-    "gemini-3.8-live-extended-thinking",
-}:
-    GEMINI_LIVE_MODEL = "gemini-3.8-live"
+# Use the stable 3.1 Live audio model by default. Gemini 3.8 Live has
+# recently exhibited intermittent empty/silent audio chunks in production.
+# An old Render environment variable must not silently re-enable that model.
+GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview"
 
 def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     try:

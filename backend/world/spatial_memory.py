@@ -89,6 +89,8 @@ def init_spatial_tables(db: sqlite3.Connection) -> None:
                 CHECK(identity_status IN ('unconfirmed','candidate','confirmed')),
             candidate_place_id TEXT,
             similarity_score REAL NOT NULL DEFAULT 0.0,
+            confirmation_evidence TEXT NOT NULL DEFAULT '',
+            confirmed_at TEXT,
             first_seen_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL,
             observations_count INTEGER NOT NULL DEFAULT 1,
@@ -103,6 +105,10 @@ def init_spatial_tables(db: sqlite3.Connection) -> None:
         db.execute("ALTER TABLE place_memories ADD COLUMN candidate_place_id TEXT")
     if "similarity_score" not in columns:
         db.execute("ALTER TABLE place_memories ADD COLUMN similarity_score REAL NOT NULL DEFAULT 0.0")
+    if "confirmation_evidence" not in columns:
+        db.execute("ALTER TABLE place_memories ADD COLUMN confirmation_evidence TEXT NOT NULL DEFAULT ''")
+    if "confirmed_at" not in columns:
+        db.execute("ALTER TABLE place_memories ADD COLUMN confirmed_at TEXT")
     db.commit()
 
 
@@ -294,9 +300,9 @@ def confirm_place_identity(
     db.execute(
         """UPDATE place_memories
            SET label=?,identity_status='confirmed',confidence=1.0,
-               updated_at=?,last_seen_at=?
+               confirmation_evidence=?,confirmed_at=?,updated_at=?,last_seen_at=?
            WHERE place_id=? AND user_id=?""",
-        (label, now, now, place_id, user_id),
+        (label, evidence, now, now, now, place_id, user_id),
     )
     db.commit()
     return {
@@ -326,7 +332,8 @@ def get_map_state(
     ).fetchall()
     places = db.execute(
         """SELECT place_id,label,description,session_id,latitude,longitude,confidence,
-                  identity_status,candidate_place_id,similarity_score,first_seen_at,last_seen_at,observations_count
+                  identity_status,candidate_place_id,similarity_score,confirmation_evidence,
+                  confirmed_at,first_seen_at,last_seen_at,observations_count
            FROM place_memories WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 200""",
         (user_id,),
     ).fetchall()

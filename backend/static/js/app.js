@@ -792,8 +792,35 @@ document.addEventListener("DOMContentLoaded", () => {
                     description.textContent = place.description || "Aucune description.";
                     const meta = document.createElement("small");
                     meta.textContent = (place.identity_status || "unconfirmed") + " · " +
-                        (place.observations_count || 1) + " observation(s)";
+                        (place.observations_count || 1) + " observation(s)" +
+                        (place.similarity_score ? " · ressemblance " + Math.round(place.similarity_score * 100) + "% (candidat)" : "");
                     item.append(title, description, meta);
+                    if (place.identity_status !== "confirmed") {
+                        const labelInput = document.createElement("input");
+                        labelInput.maxLength = 120;
+                        labelInput.placeholder = "Nom du lieu après vérification";
+                        const confirmButton = document.createElement("button");
+                        confirmButton.type = "button";
+                        confirmButton.textContent = "Confirmer ce lieu";
+                        confirmButton.addEventListener("click", async () => {
+                            const label = labelInput.value.trim();
+                            if (!label) {
+                                setLocationStatus("Donne un nom au lieu avant de le confirmer.");
+                                return;
+                            }
+                            try {
+                                await apiCall("/api/world/places/" + encodeURIComponent(place.place_id) + "/confirm", {
+                                    method: "POST",
+                                    body: { label, evidence: "Lieu vérifié et confirmé manuellement par le superviseur." }
+                                });
+                                setLocationStatus("Lieu confirmé : " + label);
+                                await window.loadWorldMap();
+                            } catch (error) {
+                                setLocationStatus("Confirmation impossible : " + error.message);
+                            }
+                        });
+                        item.append(labelInput, confirmButton);
+                    }
                     placesList.appendChild(item);
                 });
             }

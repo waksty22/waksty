@@ -53,3 +53,6 @@ def test_unknown_words_are_never_added_to_output(language_db):
 
     assert gate_spoken_text("Je vois une pomme rouge", allowed) == "pomme"
     assert gate_spoken_text("Bonjour, comment vas-tu ?", set()) == ""
+    assert gate_spoken_text(
+        "je vois une montre", {"je", "vois", "une", "montre"}, max_words=1
+    ) == "je"

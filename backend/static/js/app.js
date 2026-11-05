@@ -1,7 +1,7 @@
 'use strict';
 
 import { initWebSocket } from './websocket.js';
-import { playTextToSpeech, initSpeechRecognition, initLiveAudioStream, playAudioChunk } from './audio.js';
+import { playTextToSpeech, initSpeechRecognition, initLiveAudioStream, playAudioChunk, interruptAudioPlayback } from './audio.js';
 import { apiCall } from './api.js';
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -398,7 +398,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             if (data.type === "interrupt") {
-                // The audio queue is reset on the next incoming chunk after an interruption.
+                interruptAudioPlayback();
                 console.info("Gemini Live a interrompu sa réponse audio.");
             }
 
@@ -505,7 +505,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: { 'Authorization': `Bearer ${token}` },
                 body: {
                     image: imageBase64,
-                    question: "Décris ce que tu vois."
+                    question: "Décris ce que tu vois.",
+                    ...(locationSessionId && latestLocation ? {
+                        session_id: locationSessionId,
+                        latitude: latestLocation.latitude,
+                        longitude: latestLocation.longitude
+                    } : {})
                 }
             });
             if (visionOut) {
@@ -813,6 +818,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.stopSpeech = function() {
         if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        interruptAudioPlayback();
     };
 
     window.recordVoice = function() {

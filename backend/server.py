@@ -129,7 +129,7 @@ from cognition.shared_brain import (
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V28.0 — cerveau cognitif unifié"
+APP_NAME = "Chappie V33.0 — évolution cognitive unifiée"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -514,7 +514,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="28.0.0",
+    version="33.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -845,7 +845,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM mood_events WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM affective_history WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM decision_journal WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))  
+        db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))\n        # A true new-life reset must also clear V25/V28/V31 spatial and autobiographical traces.\n        db.execute("DELETE FROM autobiographical_links WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM autobiographical_events WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM perception_fusion_candidates WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM spatial_visits WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM spatial_sessions WHERE user_id=?", (user_id,))\n        db.execute("DELETE FROM place_memories WHERE user_id=?", (user_id,))
 
         db.execute(  
             """  
@@ -2755,7 +2755,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "28.0.0",
+        "version": "33.0.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -2792,7 +2792,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "27.0.0",  
+        "version": "33.0.0",  
     }
 
 @app.post("/api/chat")
@@ -3123,6 +3123,113 @@ async def api_world_relations(auth=Depends(require_auth)):
     return {  
         "relations": relations,  
     }
+
+@app.get("/api/world/map")
+async def api_world_map(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {"version": "33.0.0", "map": get_map_state(db, user_id)}
+
+
+@app.post("/api/world/location/session")
+async def api_start_location_session(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            session = start_location_session(
+                db, user_id, data.get("consented") is True,
+                str(data.get("device_label", ""))
+            )
+        return {"ok": True, "session": session}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/location/session/stop")
+async def api_stop_location_session(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = stop_location_session(
+                db, user_id, str(data.get("session_id", ""))
+            )
+        return {"ok": True, "session": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/location")
+async def api_record_world_location(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_location(
+                db, user_id, str(data.get("session_id", "")),
+                data.get("latitude"), data.get("longitude"),
+                data.get("accuracy_m"), data.get("altitude_m"),
+                data.get("heading_deg"), data.get("speed_mps"),
+                str(data.get("recorded_at", "")),
+            )
+        return {"ok": True, "location": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/places/observe")
+async def api_record_place_observation(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            place = record_place_observation(
+                db, user_id, str(data.get("description", "")),
+                data.get("latitude"), data.get("longitude"),
+                str(data.get("label", "")),
+                str(data.get("visual_signature", "")),
+                data.get("confidence", 0.35),
+            )
+        return {"ok": True, "place": place}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/diagnostics")
+async def api_diagnostics(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    required_tables = (
+        "conversations", "memories", "personal_vocabulary",
+        "sensory_observations", "world_entities", "world_relations",
+        "autobiographical_events", "autobiographical_links",
+        "affective_history", "decision_journal", "preference_evidence",
+        "imitation_examples", "imitation_attempts",
+        "spatial_sessions", "spatial_visits", "place_memories",
+    )
+    with db_connection() as db:
+        existing = {
+            row["name"] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        tables = {name: name in existing for name in required_tables}
+        snapshot = get_shared_brain_snapshot(db, user_id, limit=10)
+    return {
+        "version": "33.0.0",
+        "database": {"path_configured": bool(DB_PATH), "required_tables": tables,
+                     "all_required_tables_present": all(tables.values())},
+        "modules": {
+            "shared_brain": True, "classic_chat": True, "gemini_live_bridge": True,
+            "vocabulary_gate_classic_chat": True,
+            "live_audio_lexical_gate": False,
+            "spatial_memory": True, "visual_place_identity": "observations_only",
+        },
+        "snapshot_totals": snapshot.get("statistics", {}).get("totals", {}),
+        "provider": {"gemini_api_key_configured": bool(GEMINI_API_KEY)},
+        "note": "Diagnostic de configuration et de schéma; ne remplace pas un test audio/vidéo réel.",
+    }
+
 
 @app.get("/api/dreams")
 async def api_dreams(auth=Depends(require_auth)):
@@ -3702,7 +3809,7 @@ async def api_config(auth=Depends(require_auth)):
         "supports_evidence_based_preferences": True,
         "supports_supervised_imitation": True,
         "supports_experiment_approval": True,
-        "supports_shared_cognitive_brain": True,
+        "supports_shared_cognitive_brain": True,\n        "supports_spatial_memory": True,\n        "supports_consent_based_location_sessions": True,\n        "supports_visual_place_observations": True,\n        "supports_unified_dashboard_v33": True,
         "supports_live_function_tools": True,
         "persists_live_conversations": True,
         "cognitive_systems": 12,  

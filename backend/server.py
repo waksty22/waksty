@@ -1082,12 +1082,35 @@ def update_emotions_once(
 
         return False  
 
-    joy = float(em["joy"])  
-    fear = float(em["fear"])  
-    curiosity = float(em["curiosity"])  
-    frustration = float(em["frustration"])  
-    sadness = float(em["sadness"])  
-    energy = float(em["energy"])  
+    joy = float(em["joy"])
+    fear = float(em["fear"])
+    curiosity = float(em["curiosity"])
+    frustration = float(em["frustration"])
+    sadness = float(em["sadness"])
+    energy = float(em["energy"])
+
+    # V26 : les états affectifs perdent progressivement leur intensité
+    # au fil du temps (demi-vie de 3 heures), sans effacer l'historique.
+    # L'énergie récupère lentement entre les interactions.
+    elapsed_minutes = 0.0
+    try:
+        previous = datetime.fromisoformat(str(em.get("updated_at", "")))
+        if previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+        elapsed_minutes = max(
+            0.0,
+            min(7 * 24 * 60, (datetime.now(timezone.utc) - previous).total_seconds() / 60.0),
+        )
+    except (TypeError, ValueError, OverflowError):
+        elapsed_minutes = 0.0
+
+    decay = math.pow(0.5, elapsed_minutes / 180.0)
+    joy *= decay
+    fear *= decay
+    curiosity *= decay
+    frustration *= decay
+    sadness *= decay
+    energy = min(100.0, energy + elapsed_minutes * 0.25)
 
     valence = 0.0  
     arousal = 0.0  
@@ -3609,7 +3632,10 @@ async def api_config(auth=Depends(require_auth)):
         "version": "26.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
-        "supports_causal_learning": True,  
+        "supports_causal_learning": True,
+        "supports_affective_history": True,
+        "supports_decision_journal": True,
+        "supports_evidence_based_preferences": True,
         "cognitive_systems": 12,  
         "supports_vision": True,  
         "supports_voice": True,  

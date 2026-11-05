@@ -65,6 +65,10 @@ from learning.curriculum import (
     evaluate_competency_test,
     update_cognitive_milestones,
 )
+from learning.language import (
+    init_language_tables, advance_word, list_vocabulary,
+    get_usable_words, gate_spoken_text, record_heard_word,
+)
 from cognition.reasoning import (
     init_cognition_tables,
     log_cognitive_trace,
@@ -361,7 +365,8 @@ def init_db() -> None:
     with db_connection() as db:  
         init_memory_tables(db)  
         init_world_tables(db)  
-        init_learning_tables(db)  
+        init_learning_tables(db)
+        init_language_tables(db)  
         init_cognition_tables(db)
 
 def valid_user(user_id: str) -> str:
@@ -451,7 +456,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="19.3.1",
+    version="20.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -571,6 +576,15 @@ class GoalStepRequest(BaseModel):
 
 class DreamRequest(BaseModel):
     user_id: str = "creator"
+
+
+class VocabularyTeachRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_id: str = "creator"
+    word: str = Field(min_length=1, max_length=80)
+    state: Literal["heard", "imitated", "recognized", "understood", "usable"]
+    meaning: str = Field(default="", max_length=1000)
+    evidence: str = Field(default="Enseignement explicite par le créateur", max_length=500)
 
 def get_emotions(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
@@ -1867,19 +1881,8 @@ async def run_brain(
 
     update_emotions_once(user_id, message)  
 
-    update_skill(  
-        user_id,  
-        "mots",  
-        5.0,  
-        "Progression conversationnelle",  
-    )  
-
-    update_skill(  
-        user_id,  
-        "lien",  
-        5.0,  
-        "Échange avec le créateur",  
-    )  
+    # Une conversation n'est pas une preuve d'apprentissage.
+    # Les compétences progressent uniquement après validation explicite.
 
     relevant = retrieve_memories(  
         user_id,  
@@ -2546,7 +2549,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "19.3",
+        "version": "20.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -3234,6 +3237,47 @@ async def api_config(auth=Depends(require_auth)):
         "supports_dreams": True,  
     }
 
+@app.get("/api/language/vocabulary")
+async def api_get_vocabulary(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {
+            "vocabulary": list_vocabulary(db, user_id),
+            "usable_words": sorted(get_usable_words(db, user_id)),
+        }
+
+
+@app.post("/api/language/teach")
+async def api_teach_vocabulary(
+    payload: VocabularyTeachRequest,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    try:
+        with db_connection() as db:
+            existing = db.execute(
+                "SELECT state FROM personal_vocabulary WHERE user_id=? AND word=?",
+                (user_id, payload.word.strip().casefold()),
+            ).fetchone()
+            if existing is None:
+                response = record_heard_word(
+                    db, user_id, payload.word, payload.evidence
+                )
+                if payload.state != "heard":
+                    raise ValueError(
+                        "Le mot vient d'être enregistré comme entendu. Valide chaque étape successivement."
+                    )
+            else:
+                response = advance_word(
+                    db, user_id, payload.word, payload.state,
+                    payload.meaning, payload.evidence,
+                )
+            db.commit()
+        return {"ok": True, "word": response}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @app.websocket("/ws")
 @app.websocket("/ws/live")
 async def websocket_endpoint(
@@ -3265,7 +3309,7 @@ async def websocket_endpoint(
                 "setup": {  
                     "model": f"models/{GEMINI_LIVE_MODEL}",  
                     "generation_config": {  
-                        "response_modalities": ["AUDIO"],  
+                        "response_modalities": ["TEXT"],  
                         "speech_config": {  
                             "voice_config": {  
                                 "prebuilt_voice_config": {  
@@ -3327,22 +3371,25 @@ async def websocket_endpoint(
 
                         server_content = response.get("serverContent", {})
                         model_turn = server_content.get("modelTurn", {})
-                        parts = model_turn.get("parts", [])  
+                        parts = model_turn.get("parts", [])
 
-                        for part in parts:  
-                            if "inlineData" in part:  
-                                audio_b64 = part["inlineData"]["data"]  
-                                await websocket.send_json({  
-                                    "type": "audio_session",  
-                                    "audio": audio_b64,  
-                                    "sample_rate": 24000  
-                                })  
-                            if "text" in part:  
-                                await websocket.send_json({  
-                                    "type": "text",  
-                                    "text": part["text"]  
-                                })  
-                                
+                        # Gemini Live ne décide pas du vocabulaire acquis.
+                        with db_connection() as language_db:
+                            usable_words = get_usable_words(language_db, user_id)
+
+                        for part in parts:
+                            if "text" in part and isinstance(part["text"], str):
+                                safe_text = gate_spoken_text(part["text"], usable_words)
+                                if safe_text:
+                                    await websocket.send_json({
+                                        "type": "text",
+                                        "text": safe_text
+                                    })
+                            elif "inlineData" in part:
+                                log.warning(
+                                    "[GEMINI LIVE] Audio brut supprimé : sortie non vérifiable par le lexique."
+                                )
+
                         if server_content.get("turnComplete"):
                             await websocket.send_json({
                                 "type": "turn_complete"

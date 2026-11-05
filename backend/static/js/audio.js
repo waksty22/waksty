@@ -2,6 +2,7 @@
 
 let sharedAudioCtx = null;
 let nextPlayTime = 0;
+const activeAudioSources = new Set();
 
 function getAudioContext() {
     if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
@@ -166,9 +167,19 @@ export async function playAudioChunk(base64Data, rate = 24000) {
 
         const now = audioCtx.currentTime;
         if (nextPlayTime < now) nextPlayTime = now + 0.03;
+        activeAudioSources.add(source);
+        source.onended = () => activeAudioSources.delete(source);
         source.start(nextPlayTime);
         nextPlayTime += audioBuffer.duration;
     } catch (error) {
         console.error("Erreur de lecture du chunk audio Live :", error);
     }
+}
+
+export function interruptAudioPlayback() {
+    for (const source of activeAudioSources) {
+        try { source.stop(); } catch (_) { /* already stopped */ }
+    }
+    activeAudioSources.clear();
+    nextPlayTime = 0;
 }

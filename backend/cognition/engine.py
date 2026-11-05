@@ -56,7 +56,7 @@ from cognition.catalog import COGNITIVE_CATALOG
 # CONFIGURATION
 # ============================================================
 
-ENGINE_VERSION = "19.3"
+ENGINE_VERSION = "21.0"
 
 DEFAULT_LEVEL = 0
 DEFAULT_MASTERY = 0.0

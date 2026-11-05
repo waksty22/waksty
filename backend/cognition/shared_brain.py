@@ -1,4 +1,4 @@
-"""V28 — shared cognitive workspace for classic chat and Gemini Live.
+"""V33 — shared cognitive workspace for classic chat and Gemini Live.
 
 This module reads existing persisted learning systems into one bounded,
 provenance-aware snapshot. It does not invent facts or promote observations

@@ -5,7 +5,7 @@ import { playTextToSpeech, initSpeechRecognition, initLiveAudioStream, playAudio
 import { apiCall } from './api.js';
 
 document.addEventListener("DOMContentLoaded", () => {
-    console.log("Initialisation de l'application modulaire Chappie V19.3...");
+    console.log("Initialisation de l'application modulaire Chappie V33...");
 
     // Fonction centralisée et robuste pour récupérer le token de partout
     function getToken() {

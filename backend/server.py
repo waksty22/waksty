@@ -326,7 +326,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY,  
                 user_id TEXT NOT NULL,  
                 skill_name TEXT NOT NULL,  
-                level REAL NOT NULL DEFAULT 1.0,  
+                level REAL NOT NULL DEFAULT 0.0,  
                 xp REAL NOT NULL DEFAULT 0.0,  
                 evidence TEXT NOT NULL DEFAULT '',  
                 updated_at TEXT NOT NULL,  
@@ -606,7 +606,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
             (user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at)  
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)  
             """,  
-            (user_id, 40.0, 20.0, 75.0, 5.0, 5.0, 100.0, now),  
+            (user_id, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, now),  
         )  
 
         db.execute(  
@@ -615,7 +615,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
             (user_id, trust, affection, dependence, updated_at)  
             VALUES (?, ?, ?, ?, ?)  
             """,  
-            (user_id, 50.0, 20.0, 0.0, now),  
+            (user_id, 0.0, 0.0, 0.0, now),  
         )  
 
         db.execute(  
@@ -626,9 +626,9 @@ def get_emotions(user_id: str) -> dict[str, Any]:
             """,  
             (  
                 user_id,  
-                "discussion libre",  
-                0.5,  
-                "Premiers échanges",  
+                "éveil sensoriel",  
+                0.1,  
+                "Aucune connaissance personnelle validée.",  
                 now,  
             ),  
         )  
@@ -780,8 +780,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE emotional_state  
-            SET joy=40.0, fear=20.0, curiosity=75.0,  
-                frustration=5.0, sadness=5.0, energy=100.0,  
+            SET joy=0.0, fear=0.0, curiosity=0.0,  
+                frustration=0.0, sadness=0.0, energy=100.0,  
                 updated_at=?  
             WHERE user_id=?  
             """,  
@@ -791,7 +791,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE relationships  
-            SET trust=50.0, affection=20.0, dependence=0.0,  
+            SET trust=0.0, affection=0.0, dependence=0.0,  
                 updated_at=?  
             WHERE user_id=?  
             """,  

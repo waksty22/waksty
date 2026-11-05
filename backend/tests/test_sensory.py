@@ -28,7 +28,12 @@ def db():
 def test_audio_observation_is_persisted_without_claiming_understanding(db):
     from learning.language import record_heard_text
 
-    record_heard_text(db, "creator", "Regarde la montre")
+    heard_text = "Regarde la montre"
+    record_heard_text(db, "creator", heard_text)
+    record_observation(
+        db, "creator", "audio", heard_text,
+        "gemini_live_transcription", confidence=0.7,
+    )
     observations = list_observations(db, "creator")
     assert {item["modality"] for item in observations} == {"audio"}
     rows = db.execute(

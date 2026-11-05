@@ -90,6 +90,14 @@ from learning.causal_learning import (
     propose_hypothesis, plan_experiment, evaluate_experiment,
     list_causal_learning,
 )
+from learning.supervised_learning import (
+    init_supervised_learning_tables,
+    record_demonstration,
+    record_practice,
+    validate_imitation,
+    reject_imitation,
+    list_imitation_learning,
+)
 from learning.perception_fusion import (
     init_perception_fusion_tables,
     link_temporally_cooccurring_observation,
@@ -116,7 +124,7 @@ from cognition.engine import cognitive_engine
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V26.0 — raisonnement et personnalité évolutive"
+APP_NAME = "Chappie V27.0 — apprentissage supervisé et imitation"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -408,6 +416,7 @@ def init_db() -> None:
         init_sensory_tables(db)
         init_object_learning_tables(db)
         init_causal_learning_tables(db)
+        init_supervised_learning_tables(db)
         init_perception_fusion_tables(db)
         init_autobiographical_tables(db)
         init_cognition_tables(db)
@@ -500,7 +509,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="25.0.0",
+    version="27.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -801,6 +810,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
 
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM causal_experiments WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM imitation_attempts WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM imitation_examples WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM causal_hypotheses WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM causal_observations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM object_experiences WHERE user_id=?", (user_id,))
@@ -1677,6 +1688,22 @@ def get_identity_prompt(user_id: str) -> str:
         recent_decisions = list_decisions(development_db, user_id, limit=5)
         documented_preferences = list_preferences(development_db, user_id, limit=12)
 
+    with db_connection() as learning_db:
+        imitation_state = list_imitation_learning(learning_db, user_id, limit=6)
+        causal_state = list_causal_learning(learning_db, user_id)
+
+    imitation_context = "\\n".join(
+        f"- {item['behavior']} | statut : {item['status']} "
+        f"| source : {item['source_type']} | preuve : {item['evidence'][:180]}"
+        for item in reversed(imitation_state["examples"])
+    ) or "Aucune démonstration enregistrée."
+
+    experiment_context = "\\n".join(
+        f"- Hypothèse #{item['id']} : {item['statement']} "
+        f"(statut : {item['status']}, confiance : {item['confidence']:.2f})"
+        for item in reversed(causal_state["hypotheses"][-5:])
+    ) or "Aucune hypothèse causale enregistrée."
+
     decision_context = "\n".join(
         f"- Question : {item['question']} | options : {', '.join(item['options'])} "
         f"| choix : {item['chosen_option'] or 'non décidé'} "
@@ -1746,6 +1773,18 @@ Décisions documentées :
 
 Préférences documentées :
 {preference_context}
+
+=== V27 — APPRENTISSAGE PAR IMITATION ET EXPÉRIENCE SUPERVISÉE ===
+Tu distingues strictement : comportement observé, comportement tenté, pratique documentée et imitation validée.
+Une démonstration ne prouve pas que tu sais refaire le geste. Une tentative ne prouve pas sa réussite. N'affirme jamais maîtriser un comportement dont le statut n'est pas « validated ».
+Quand tu veux apprendre un comportement, décris ce que tu as observé, demande une démonstration ou une consigne explicite, puis propose une pratique simple et vérifiable. Ne prétends jamais avoir exécuté une action physique ou numérique.
+Tu peux formuler une hypothèse, annoncer une prédiction et proposer un protocole de simulation. Pour tout essai dans le monde réel, attends une autorisation explicite du créateur avant même de le planifier. N'active aucun appareil, outil, compte, fichier ou service de ta propre initiative. Aucun mouvement, manipulation, achat, publication ou contact externe ne doit être déclenché par une simple hypothèse.
+Après une expérience, compare la prédiction au résultat effectivement rapporté. Classe le résultat comme étayé, contredit ou non concluant. Une erreur réduit la confiance dans l'hypothèse concernée ; elle ne doit pas être effacée ni transformée en fait. Garde les preuves et les incertitudes.
+Démonstrations et imitations documentées :
+{imitation_context}
+
+Hypothèses causales récentes :
+{experiment_context}
 
 === CONTEXTE ET HISTORIQUE ===
 Heure locale : {local_now()}
@@ -2691,7 +2730,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "26.0.0",
+        "version": "27.0.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -2728,7 +2767,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "26.0.0",  
+        "version": "27.0.0",  
     }
 
 @app.post("/api/chat")
@@ -3629,13 +3668,15 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "26.0.0",
+        "version": "27.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,
         "supports_affective_history": True,
         "supports_decision_journal": True,
         "supports_evidence_based_preferences": True,
+        "supports_supervised_imitation": True,
+        "supports_experiment_approval": True,
         "cognitive_systems": 12,  
         "supports_vision": True,  
         "supports_voice": True,  
@@ -3761,6 +3802,81 @@ async def api_evaluate_causal_experiment(
                 data.get("observed_result"), data.get("evaluation"),
             )
         return {"ok": True, "evaluation": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/learning/imitation")
+async def api_list_imitation_learning(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return list_imitation_learning(db, user_id)
+
+
+@app.post("/api/learning/imitation")
+async def api_record_imitation_demonstration(
+    request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_demonstration(
+                db, user_id, data.get("behavior"), data.get("evidence"),
+                data.get("source_type", "demonstrated"), data.get("context", ""),
+            )
+        return {"ok": True, "demonstration": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/imitation/{example_id}/practice")
+async def api_record_imitation_practice(
+    example_id: int, request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_practice(
+                db, user_id, example_id, data.get("result"),
+                data.get("evidence"), data.get("successful"),
+            )
+        return {"ok": True, "practice": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/imitation/{example_id}/validate")
+async def api_validate_imitation(
+    example_id: int, request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = validate_imitation(
+                db, user_id, example_id,
+                data.get("supervisor_approved") is True,
+                data.get("validation_evidence"),
+            )
+        return {"ok": True, "validation": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/imitation/{example_id}/reject")
+async def api_reject_imitation(
+    example_id: int, request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = reject_imitation(
+                db, user_id, example_id, data.get("reason"),
+            )
+        return {"ok": True, "rejection": result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

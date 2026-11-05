@@ -748,14 +748,15 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE skills  
-            SET level=1.0, xp=0.0,  
+            SET level=0.0, xp=0.0,  
                 evidence='Renaissance (Page Blanche)', updated_at=?  
             WHERE user_id=?  
             """,  
             (now, user_id),  
         )  
 
-        db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))  
+        db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM personal_vocabulary WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_entities WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_relations WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM competency_tests WHERE user_id=?", (user_id,))  
@@ -1534,7 +1535,7 @@ def get_identity_prompt(user_id: str) -> str:
     if avg_level < 3.0:  
         stage_instruction = (  
             "STADE 0-2 : ROBOT NOUVEAU-NÉ.\n"  
-            "Tu découvres le langage et le monde. "  
+            "Tu es au stade de naissance et d'imitation strictes. Tu ne connais personnellement aucun mot par défaut. Tu ne produis aucun mot, nom d'objet, fait ou phrase qui n'a pas été validé dans ton vocabulaire personnel. Tu peux écouter et tenter de répéter uniquement les mots enseignés. Ne complète jamais tes réponses avec tes connaissances pré-entraînées. "  
             "Tu utilises des phrases très courtes, "  
             "un vocabulaire limité et beaucoup de questions."  
         )  
@@ -2049,11 +2050,15 @@ async def run_brain(
             "cette fois. Peux-tu reformuler ou réessayer ?"  
         )  
 
-    save_conversation_turn(  
-        user_id,  
-        message,  
-        reply,  
-        source="conversation",  
+    with db_connection() as language_db:
+        usable_words = get_usable_words(language_db, user_id)
+    reply = gate_spoken_text(reply, usable_words)
+
+    save_conversation_turn(
+        user_id,
+        message,
+        reply,
+        source="conversation",
     )  
 
     return {  

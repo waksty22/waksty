@@ -10,6 +10,7 @@ def test_only_supervised_passing_branch_evidence_changes_profile():
     rows = [
         {
             "test_name": "mots:vocabulaire",
+            "passed": 1,
             "score": 80,
             "tested_at": "2026-11-05T10:00:00Z",
             "details": {
@@ -20,11 +21,13 @@ def test_only_supervised_passing_branch_evidence_changes_profile():
         },
         {
             "test_name": "mots:syntaxe",
+            "passed": 1,
             "score": 95,
             "details": {"source": "model_generated", "evidence": "auto-évaluation"},
         },
         {
             "test_name": "unknown:branch",
+            "passed": 1,
             "score": 100,
             "details": {
                 "source": "supervised_assessment",
@@ -47,7 +50,7 @@ def test_duplicate_evidence_does_not_increase_skill_level():
         "evidence": proof,
     }
     rows = [
-        {"test_name": "sens:vision", "score": 90, "details": details},
+        {"test_name": "sens:vision", "passed": 1, "score": 90, "details": details},
         {"test_name": "sens:vision", "score": 90, "details": details},
     ]
     profile, count = build_validated_skill_data(rows)
@@ -60,6 +63,7 @@ def test_failed_or_unapproved_assessment_is_ignored():
     rows = [
         {
             "test_name": "tete:logique_formelle",
+            "passed": 0,
             "score": 60,
             "details": {
                 "source": "supervised_assessment",
@@ -69,6 +73,7 @@ def test_failed_or_unapproved_assessment_is_ignored():
         },
         {
             "test_name": "tete:logique_formelle",
+            "passed": 1,
             "score": 95,
             "details": {
                 "source": "supervised_assessment",

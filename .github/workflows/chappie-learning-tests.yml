@@ -3,7 +3,9 @@ name: Chappie learning tests
 on:
   push:
     branches:
+      - main
       - v23-causalite-gemini-live
+      - feat/chappie-v29-v33-unified-evolution
   pull_request:
     branches:
       - main
@@ -23,4 +25,4 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q backend
       - name: Test learning and shared cognitive brain
-        run: python -m pytest backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py -q
+        run: python -m pytest backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py backend/tests/test_spatial_memory.py -q

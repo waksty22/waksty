@@ -96,6 +96,47 @@ def record_heard_text(
     return recorded
 
 
+
+def record_explicit_word_teaching(
+    db: sqlite3.Connection, user_id: str, text: str,
+    evidence: str = "Enseignement explicite de l'utilisateur",
+) -> list[dict[str, Any]]:
+    """Store explicit word definitions as heard, never as understood."""
+    pattern = re.compile(
+        r"(?:(?:le\s+)?mot\s+)?"
+        r"(?P<word>[A-Za-zÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ'-]{0,79})"
+        r"\s+(?:signifie|veut\s+dire|désigne|correspond\s+à)\s+"
+        r"(?P<meaning>[^.!?;\n]{2,500})",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    recorded: list[dict[str, Any]] = []
+    now = utc_now()
+    for match in pattern.finditer(str(text or "")):
+        try:
+            word = normalize_word(match.group("word"))
+        except ValueError:
+            continue
+        meaning = match.group("meaning").strip(" \t:—-")[:MAX_MEANING_LENGTH]
+        if not meaning:
+            continue
+        db.execute(
+            """INSERT INTO personal_vocabulary
+               (user_id, word, meaning, state, exposure_count, evidence, created_at, updated_at)
+               VALUES (?, ?, ?, 'heard', 1, ?, ?, ?)
+               ON CONFLICT(user_id, word) DO UPDATE SET
+                 meaning=excluded.meaning,
+                 exposure_count=personal_vocabulary.exposure_count+1,
+                 evidence=excluded.evidence, updated_at=excluded.updated_at""",
+            (user_id, word, meaning, str(evidence)[:500], now, now),
+        )
+        row = db.execute(
+            "SELECT * FROM personal_vocabulary WHERE user_id=? AND word=?",
+            (user_id, word),
+        ).fetchone()
+        if row is not None:
+            recorded.append(dict(row))
+    return recorded
+
 def advance_word(
     db: sqlite3.Connection,
     user_id: str,

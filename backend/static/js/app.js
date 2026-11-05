@@ -189,18 +189,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 liveStatus.textContent = data.message;
             }
 
+            if (data.type === "text" && typeof data.text === "string") {
+                const transcript = document.getElementById("liveTranscript");
+                if (transcript) {
+                    transcript.textContent += "\nChappie : " + data.text;
+                    transcript.scrollTop = transcript.scrollHeight;
+                }
+                if ("speechSynthesis" in window) playTextToSpeech(data.text);
+            }
+            // Raw Gemini audio is discarded because it cannot be lexically validated.
             if (data.type === "audio_session" || data.type === "audio_stream" || data.audio) {
-                if (data.text) {
-                    const transcript = document.getElementById("liveTranscript");
-                    if (transcript) {
-                        transcript.textContent += "\nChappie : " + data.text;
-                        transcript.scrollTop = transcript.scrollHeight;
-                    }
-                }
-                const audioContent = data.audio || data.audio_data;
-                if (audioContent) {
-                    playAudioChunk(audioContent, data.sample_rate || 24000);
-                }
+                console.warn("Audio Live brut ignoré : validation lexicale obligatoire.");
             }
         });
 

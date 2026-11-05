@@ -145,7 +145,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const output = document.getElementById("sensoryHistory");
             if (output) output.textContent = (data.observations || []).map(item =>
                 "[" + item.modality + "] " + item.content
-            ).join("\\n\\n") || "Aucune expérience sensorielle enregistrée.";
+            ).join("\n\n") || "Aucune expérience sensorielle enregistrée.";
         } catch (error) {
             const output = document.getElementById("sensoryHistory");
             if (output) output.textContent = "Erreur : " + error.message;
@@ -268,7 +268,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.type === "user_text" && typeof data.text === "string") {
                 const transcript = document.getElementById("liveTranscript");
                 if (transcript) {
-                    transcript.textContent += "\\nToi : " + data.text;
+                    transcript.textContent += "\nToi : " + data.text;
                     transcript.scrollTop = transcript.scrollHeight;
                 }
             }

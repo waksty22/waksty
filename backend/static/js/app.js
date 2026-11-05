@@ -109,6 +109,49 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) { alert(error.message); }
     };
 
+    window.associateVisionWord = async function() {
+        const word = document.getElementById("visionWord")?.value?.trim();
+        const observationId = document.getElementById("visionObservationId")?.value?.trim();
+        const token = getToken();
+        if (!word || !observationId) {
+            alert("Analyse d'abord une image et enseigne le mot à associer.");
+            return;
+        }
+        try {
+            const result = await apiCall("/api/vision/associate", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + token },
+                body: {
+                    word: word,
+                    observation_id: observationId,
+                    evidence: "Association image-mot validée manuellement par le créateur"
+                }
+            });
+            const status = document.getElementById("visionObservationStatus");
+            if (status) status.textContent =
+                "Association enregistrée : " + result.association.word
+                + " ↔ observation visuelle. Le mot n'est pas automatiquement compris.";
+        } catch (error) {
+            alert(error.message);
+        }
+    };
+
+    window.loadSensoryObservations = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall("/api/senses/observations", {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const output = document.getElementById("sensoryHistory");
+            if (output) output.textContent = (data.observations || []).map(item =>
+                "[" + item.modality + "] " + item.content
+            ).join("\\n\\n") || "Aucune expérience sensorielle enregistrée.";
+        } catch (error) {
+            const output = document.getElementById("sensoryHistory");
+            if (output) output.textContent = "Erreur : " + error.message;
+        }
+    };
+
     window.loadSkills = async function() {
         const token = getToken();
         try {
@@ -340,7 +383,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     question: "Décris ce que tu vois."
                 }
             });
-            if (visionOut) visionOut.textContent = response.analysis;
+            if (visionOut) {
+                visionOut.textContent = response.analysis
+                    + "\\n\\nObservation sensorielle enregistrée. "
+                    + "Cette description n'est pas encore un savoir acquis.";
+            }
+            const observationField = document.getElementById("visionObservationId");
+            if (observationField) observationField.value = response.observation_id || "";
+            const observationLabel = document.getElementById("visionObservationStatus");
+            if (observationLabel) observationLabel.textContent =
+                response.observation_id ? "Observation enregistrée — associe maintenant un mot enseigné." : "Observation non enregistrée.";
         } catch (error) {
             console.error("Erreur analyse vision :", error);
             if (visionOut) visionOut.textContent = "Erreur lors de l'analyse visuelle : " + error.message;

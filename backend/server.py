@@ -65,6 +65,19 @@ from learning.curriculum import (
     evaluate_competency_test,
     update_cognitive_milestones,
 )
+from learning.language import (
+    init_language_tables, advance_word, list_vocabulary,
+    get_usable_words, get_repeatable_words, gate_spoken_text,
+    record_heard_word, record_heard_text,
+)
+from learning.sensory import (
+    init_sensory_tables, record_observation, list_observations,
+    associate_word_with_observation,
+)
+from learning.object_learning import (
+    init_object_learning_tables, teach_object_property,
+    list_known_objects, compare_known_objects, record_object_experience,
+)
 from cognition.reasoning import (
     init_cognition_tables,
     log_cognitive_trace,
@@ -75,7 +88,7 @@ from cognition.engine import cognitive_engine
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V19.3 — architecture cognitive unifiée"
+APP_NAME = "Chappie V22.0 — compréhension des objets"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -322,7 +335,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY,  
                 user_id TEXT NOT NULL,  
                 skill_name TEXT NOT NULL,  
-                level REAL NOT NULL DEFAULT 1.0,  
+                level REAL NOT NULL DEFAULT 0.0,  
                 xp REAL NOT NULL DEFAULT 0.0,  
                 evidence TEXT NOT NULL DEFAULT '',  
                 updated_at TEXT NOT NULL,  
@@ -361,7 +374,10 @@ def init_db() -> None:
     with db_connection() as db:  
         init_memory_tables(db)  
         init_world_tables(db)  
-        init_learning_tables(db)  
+        init_learning_tables(db)
+        init_language_tables(db)
+        init_sensory_tables(db)
+        init_object_learning_tables(db)
         init_cognition_tables(db)
 
 def valid_user(user_id: str) -> str:
@@ -451,7 +467,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="19.3.1",
+    version="20.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -572,6 +588,15 @@ class GoalStepRequest(BaseModel):
 class DreamRequest(BaseModel):
     user_id: str = "creator"
 
+
+class VocabularyTeachRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_id: str = "creator"
+    word: str = Field(min_length=1, max_length=80)
+    state: Literal["heard", "imitated", "recognized", "understood", "usable"]
+    meaning: str = Field(default="", max_length=1000)
+    evidence: str = Field(default="Enseignement explicite par le créateur", max_length=500)
+
 def get_emotions(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
     now = utc_now()
@@ -592,7 +617,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
             (user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at)  
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)  
             """,  
-            (user_id, 40.0, 20.0, 75.0, 5.0, 5.0, 100.0, now),  
+            (user_id, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, now),  
         )  
 
         db.execute(  
@@ -601,7 +626,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
             (user_id, trust, affection, dependence, updated_at)  
             VALUES (?, ?, ?, ?, ?)  
             """,  
-            (user_id, 50.0, 20.0, 0.0, now),  
+            (user_id, 0.0, 0.0, 0.0, now),  
         )  
 
         db.execute(  
@@ -612,9 +637,9 @@ def get_emotions(user_id: str) -> dict[str, Any]:
             """,  
             (  
                 user_id,  
-                "discussion libre",  
-                0.5,  
-                "Premiers échanges",  
+                "éveil sensoriel",  
+                0.1,  
+                "Aucune connaissance personnelle validée.",  
                 now,  
             ),  
         )  
@@ -624,7 +649,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
                 """  
                 INSERT OR IGNORE INTO skills  
                 (user_id, skill_name, level, xp, evidence, updated_at)  
-                VALUES (?, ?, 1.0, 0.0, ?, ?)  
+                VALUES (?, ?, 0.0, 0.0, ?, ?)  
                 """,  
                 (user_id, skill_id, label, now),  
             )  
@@ -734,14 +759,19 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE skills  
-            SET level=1.0, xp=0.0,  
+            SET level=0.0, xp=0.0,  
                 evidence='Renaissance (Page Blanche)', updated_at=?  
             WHERE user_id=?  
             """,  
             (now, user_id),  
         )  
 
-        db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))  
+        db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM object_experiences WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM object_properties WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM word_visual_associations WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM sensory_observations WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM personal_vocabulary WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_entities WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_relations WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM competency_tests WHERE user_id=?", (user_id,))  
@@ -765,8 +795,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE emotional_state  
-            SET joy=40.0, fear=20.0, curiosity=75.0,  
-                frustration=5.0, sadness=5.0, energy=100.0,  
+            SET joy=0.0, fear=0.0, curiosity=0.0,  
+                frustration=0.0, sadness=0.0, energy=100.0,  
                 updated_at=?  
             WHERE user_id=?  
             """,  
@@ -776,7 +806,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE relationships  
-            SET trust=50.0, affection=20.0, dependence=0.0,  
+            SET trust=0.0, affection=0.0, dependence=0.0,  
                 updated_at=?  
             WHERE user_id=?  
             """,  
@@ -786,8 +816,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE user_intentions  
-            SET current_intent='éveil', confidence=0.9,  
-                details='Première prise de conscience', updated_at=?  
+            SET current_intent='éveil sensoriel', confidence=0.0,  
+                details='Aucune intention acquise : naissance', updated_at=?  
             WHERE user_id=?  
             """,  
             (now, user_id),  
@@ -856,7 +886,7 @@ def update_skill(
         current_xp = float(row["xp"]) if row else 0.0  
 
         new_xp = max(0.0, current_xp + xp_delta)  
-        new_level = min(30.0, 1.0 + math.floor(new_xp / 100.0))  
+        new_level = min(30.0, math.floor(new_xp / 100.0))  
 
         db.execute(  
             """  
@@ -1520,9 +1550,9 @@ def get_identity_prompt(user_id: str) -> str:
     if avg_level < 3.0:  
         stage_instruction = (  
             "STADE 0-2 : ROBOT NOUVEAU-NÉ.\n"  
-            "Tu découvres le langage et le monde. "  
-            "Tu utilises des phrases très courtes, "  
-            "un vocabulaire limité et beaucoup de questions."  
+            "Tu es au stade de naissance et d'imitation strictes. Tu ne connais personnellement aucun mot par défaut. Tu ne produis aucun mot, nom d'objet, fait ou phrase qui n'a pas été validé dans ton vocabulaire personnel. Tu peux écouter et tenter de répéter uniquement les mots enseignés. Ne complète jamais tes réponses avec tes connaissances pré-entraînées. "  
+            "Au stade de naissance, reste silencieux si aucun mot n'a été entendu. "  
+            "Après exposition, tu peux répéter le mot isolé sans prétendre le comprendre."  
         )  
 
     elif avg_level < 8.0:  
@@ -1867,19 +1897,8 @@ async def run_brain(
 
     update_emotions_once(user_id, message)  
 
-    update_skill(  
-        user_id,  
-        "mots",  
-        5.0,  
-        "Progression conversationnelle",  
-    )  
-
-    update_skill(  
-        user_id,  
-        "lien",  
-        5.0,  
-        "Échange avec le créateur",  
-    )  
+    # Une conversation n'est pas une preuve d'apprentissage.
+    # Les compétences progressent uniquement après validation explicite.
 
     relevant = retrieve_memories(  
         user_id,  
@@ -2046,11 +2065,18 @@ async def run_brain(
             "cette fois. Peux-tu reformuler ou réessayer ?"  
         )  
 
-    save_conversation_turn(  
-        user_id,  
-        message,  
-        reply,  
-        source="conversation",  
+    with db_connection() as language_db:
+        repeatable_words = get_repeatable_words(language_db, user_id)
+    maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+    reply = gate_spoken_text(
+        reply, repeatable_words, max_words=1 if maturity < 3.0 else None
+    )
+
+    save_conversation_turn(
+        user_id,
+        message,
+        reply,
+        source="conversation",
     )  
 
     return {  
@@ -2546,7 +2572,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "19.3",
+        "version": "20.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -2583,7 +2609,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "19.3",  
+        "version": "21.0",  
     }
 
 @app.post("/api/chat")
@@ -3122,82 +3148,219 @@ async def api_vision_analyze(
 ):
     user_id = _authenticated_user(auth)
     data = await request.json()
+    image_value = (
+        data.get("image")
+        or data.get("image_data")
+        or data.get("image_base64")
+    )
+    image_bytes = _decode_data_url(image_value, MAX_CAMERA_IMAGE_BYTES)
+    question = str(
+        data.get("question") or data.get("prompt")
+        or "Observe cette image et relève uniquement les éléments visuellement perceptibles."
+    ).strip()
+    if len(question) > 1000:
+        raise HTTPException(status_code=400, detail="Question trop longue.")
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="Clé Gemini non configurée.")
 
-    image_value = (  
-        data.get("image")  
-        or data.get("image_data")  
-        or data.get("image_base64")  
-    )  
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        image_mime = "image/png"
+    elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        image_mime = "image/webp"
+    elif image_bytes.startswith(b"\xff\xd8\xff"):
+        image_mime = "image/jpeg"
+    else:
+        raise HTTPException(status_code=415, detail="Image JPEG, PNG ou WEBP invalide.")
 
-    image_bytes = _decode_data_url(  
-        image_value,  
-        MAX_CAMERA_IMAGE_BYTES,  
-    )  
+    try:
+        from google import genai
+        from google.genai import types
 
-    question = str(  
-        data.get("question")  
-        or data.get("prompt")  
-        or "Décris ce que vois."  
-    ).strip()  
-
-    if len(question) > 1000:  
-        raise HTTPException(status_code=400, detail="Question trop longue.")  
-
-    try:  
-        import google.generativeai as genai  
-        from PIL import Image  
-        import io  
-
-        if not GEMINI_API_KEY:  
-            raise HTTPException(  
-                status_code=503,  
-                detail="Clé Gemini non configurée."  
-            )  
-
-        genai.configure(api_key=GEMINI_API_KEY)  
-
-        model = genai.GenerativeModel(  
-            model_name=GEMINI_MODEL,  
-        )  
-
-        image = Image.open(io.BytesIO(image_bytes))  
-        image.verify()  
-
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")  
-
-        response = model.generate_content(  
-            [  
-                get_identity_prompt(user_id),  
-                question,  
-                image,  
-            ],  
-            generation_config={  
-                "temperature": 0.4,  
-                "max_output_tokens": 1200,  
-            },  
-        )  
-
-        answer = str(  
-            getattr(response, "text", "") or ""  
-        ).strip()  
-
-        if not answer:  
-            answer = "Je n'ai pas réussi à analyser cette image."  
-
-        return {  
-            "success": True,  
-            "analysis": answer,  
-            "question": question,  
-        }  
-
-    except HTTPException:  
-        raise  
-    except Exception as exc:  
-        print("[VISION ERROR]", repr(exc))  
-        raise HTTPException(  
-            status_code=500,  
-            detail="L'analyse visuelle a échoué."  
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        perception_prompt = (
+            "Tu es le module de perception visuelle interne de Chappie, un robot "
+            "au stade nouveau-né. Décris sobrement les formes, couleurs, objets "
+            "et positions que tu peux réellement observer. Signale l'incertitude. "
+            "N'invente pas d'histoire, de fonction ou de relation non visible. "
+            "Cette analyse est une donnée sensorielle interne, pas une réponse "
+            "que Chappie est autorisé à prononcer ni une preuve qu'il comprend "
+            "les mots employés."
         )
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                perception_prompt,
+                question,
+                types.Part.from_bytes(data=image_bytes, mime_type=image_mime),
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=700,
+            ),
+        )
+        answer = str(response.text or "").strip()
+        if not answer:
+            answer = "Aucun élément visuel exploitable n'a été identifié."
+
+        with db_connection() as db:
+            observation = record_observation(
+                db, user_id, "vision", answer, "camera_snapshot",
+                confidence=0.45,
+                metadata={"mime_type": image_mime, "question": question},
+            )
+            db.commit()
+
+        return {
+            "success": True,
+            "analysis": answer,
+            "question": question,
+            "observation_id": observation["observation_id"],
+            "stored_as": "sensory_observation",
+            "is_learned_fact": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("Erreur du module de perception visuelle")
+        raise HTTPException(
+            status_code=502,
+            detail="Le module de vision n'a pas pu analyser cette image.",
+        ) from exc
+
+
+@app.get("/api/senses/observations")
+async def api_list_sensory_observations(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {"observations": list_observations(db, user_id)}
+
+
+@app.post("/api/vision/associate")
+async def api_associate_visual_word(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = associate_word_with_observation(
+                db, user_id,
+                str(data.get("word", "")),
+                str(data.get("observation_id", "")),
+                str(data.get("evidence", "Association validée par le créateur")),
+            )
+            word = result["word"]
+            observation_id = result["observation_id"]
+            object_id = "object:" + word
+            observation_entity_id = "visual-observation:" + observation_id
+            upsert_world_entity(
+                db, user_id, object_id, "object",
+                {"label": word, "learned_from_visual_observation": observation_id},
+                source_type="taught", confidence=0.65,
+            )
+            upsert_world_entity(
+                db, user_id, observation_entity_id, "visual_observation",
+                {"observation_id": observation_id},
+                source_type="observed", confidence=0.45,
+            )
+            add_world_relation(
+                db, user_id, object_id, observation_entity_id,
+                relation_type="associated_with_visual_observation",
+                source_type="taught", confidence=0.65,
+            )
+            db.commit()
+        return {"ok": True, "association": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+
+@app.get("/api/learning/objects")
+async def api_list_known_objects(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {"objects": list_known_objects(db, user_id)}
+
+
+@app.post("/api/learning/object-property")
+async def api_teach_object_property(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = teach_object_property(
+                db, user_id,
+                str(data.get("word", "")),
+                str(data.get("property", "")),
+                str(data.get("value", "")),
+                evidence=str(data.get("evidence", "Enseignement du créateur")),
+                confidence=data.get("confidence", 0.9),
+                source_type="taught",
+            )
+            object_id = "object:" + result["word"]
+            entity = get_world_entity(db, user_id, object_id) or {}
+            properties = dict(entity.get("properties") or {})
+            learned = dict(properties.get("learned_properties") or {})
+            learned.setdefault(result["property_key"], [])
+            if result["property_value"] not in learned[result["property_key"]]:
+                learned[result["property_key"]].append(result["property_value"])
+            properties["learned_properties"] = learned
+            upsert_world_entity(
+                db, user_id, object_id, "object", properties,
+                source_type="taught", confidence=result["confidence"],
+            )
+            db.commit()
+        return {"ok": True, "property": result}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/object-experience")
+async def api_record_object_experience(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_object_experience(
+                db, user_id,
+                str(data.get("word", "")),
+                str(data.get("action", "")),
+                str(data.get("outcome", "")),
+                evidence=str(data.get("evidence", "Expérience supervisée")),
+                confidence=data.get("confidence", 0.6),
+                source_type="observed",
+            )
+            db.commit()
+        return {"ok": True, "experience": result}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/object-compare")
+async def api_compare_known_objects(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            comparison = compare_known_objects(
+                db, user_id,
+                str(data.get("first", "")),
+                str(data.get("second", "")),
+            )
+        return {"ok": True, "comparison": comparison}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
 
 @app.post("/api/reset")
 async def api_reset(auth=Depends(require_auth)):
@@ -3234,6 +3397,47 @@ async def api_config(auth=Depends(require_auth)):
         "supports_dreams": True,  
     }
 
+@app.get("/api/language/vocabulary")
+async def api_get_vocabulary(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {
+            "vocabulary": list_vocabulary(db, user_id),
+            "usable_words": sorted(get_usable_words(db, user_id)),
+        }
+
+
+@app.post("/api/language/teach")
+async def api_teach_vocabulary(
+    payload: VocabularyTeachRequest,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    try:
+        with db_connection() as db:
+            existing = db.execute(
+                "SELECT state FROM personal_vocabulary WHERE user_id=? AND word=?",
+                (user_id, payload.word.strip().casefold()),
+            ).fetchone()
+            if existing is None:
+                if payload.state != "heard":
+                    raise ValueError(
+                        "Commence par valider l'étape « entendu » pour ce nouveau mot."
+                    )
+                response = record_heard_word(
+                    db, user_id, payload.word, payload.evidence
+                )
+            else:
+                response = advance_word(
+                    db, user_id, payload.word, payload.state,
+                    payload.meaning, payload.evidence,
+                )
+            db.commit()
+        return {"ok": True, "word": response}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @app.websocket("/ws")
 @app.websocket("/ws/live")
 async def websocket_endpoint(
@@ -3264,19 +3468,13 @@ async def websocket_endpoint(
             setup_message = {  
                 "setup": {  
                     "model": f"models/{GEMINI_LIVE_MODEL}",  
-                    "generation_config": {  
-                        "response_modalities": ["AUDIO"],  
-                        "speech_config": {  
-                            "voice_config": {  
-                                "prebuilt_voice_config": {  
-                                    "voice_name": "Puck"  
-                                }  
-                            }  
-                        }  
+                    "generation_config": {
+                        "response_modalities": ["TEXT"]
                     },  
-                    "system_instruction": {  
-                        "parts": [{"text": current_identity_prompt}]  
-                    }  
+                    "system_instruction": {
+                        "parts": [{"text": current_identity_prompt}]
+                    },
+                    "input_audio_transcription": {}
                 }  
             }  
             await gemini_ws.send(json.dumps(setup_message))  
@@ -3326,23 +3524,52 @@ async def websocket_endpoint(
                             continue
 
                         server_content = response.get("serverContent", {})
-                        model_turn = server_content.get("modelTurn", {})
-                        parts = model_turn.get("parts", [])  
 
-                        for part in parts:  
-                            if "inlineData" in part:  
-                                audio_b64 = part["inlineData"]["data"]  
-                                await websocket.send_json({  
-                                    "type": "audio_session",  
-                                    "audio": audio_b64,  
-                                    "sample_rate": 24000  
-                                })  
-                            if "text" in part:  
-                                await websocket.send_json({  
-                                    "type": "text",  
-                                    "text": part["text"]  
-                                })  
-                                
+                        input_transcription = server_content.get("inputTranscription", {})
+                        if isinstance(input_transcription, dict) and input_transcription.get("text"):
+                            heard_text = str(input_transcription["text"]).strip()
+                            if heard_text:
+                                with db_connection() as sensory_db:
+                                    record_heard_text(
+                                        sensory_db, user_id, heard_text,
+                                        evidence="Transcription confirmée par Gemini Live",
+                                    )
+                                    record_observation(
+                                        sensory_db, user_id, "audio", heard_text,
+                                        "gemini_live_transcription",
+                                        confidence=0.7,
+                                        metadata={"language": "fr"},
+                                    )
+                                    sensory_db.commit()
+                                await websocket.send_json({
+                                    "type": "user_text",
+                                    "text": heard_text
+                                })
+
+                        model_turn = server_content.get("modelTurn", {})
+                        parts = model_turn.get("parts", [])
+
+                        # Gemini Live ne décide pas du vocabulaire acquis.
+                        with db_connection() as language_db:
+                            repeatable_words = get_repeatable_words(language_db, user_id)
+
+                        for part in parts:
+                            if "text" in part and isinstance(part["text"], str):
+                                maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+                                safe_text = gate_spoken_text(
+                                    part["text"], repeatable_words,
+                                    max_words=1 if maturity < 3.0 else None,
+                                )
+                                if safe_text:
+                                    await websocket.send_json({
+                                        "type": "text",
+                                        "text": safe_text
+                                    })
+                            elif "inlineData" in part:
+                                log.warning(
+                                    "[GEMINI LIVE] Audio brut supprimé : sortie non vérifiable par le lexique."
+                                )
+
                         if server_content.get("turnComplete"):
                             await websocket.send_json({
                                 "type": "turn_complete"

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#070b14">
-  <meta name="description" content="Interface cognitive et interactive de Chappie V19.4">
-  <title>Chappie V19.4 — Interface cognitive</title>
+  <meta name="description" content="Interface cognitive et interactive de Chappie V22.0">
+  <title>Chappie V22.0 — Interface cognitive</title>
 
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 
@@ -1327,6 +1327,28 @@
           <div id="liveTranscript" class="output" style="min-height:160px">
             Les échanges vocaux apparaîtront ici.
           </div>
+
+          <div class="panel" style="margin-top:14px">
+            <h4>📚 Vocabulaire personnel — apprentissage de Chappie</h4>
+            <p class="muted">Un mot n'est utilisable qu'après validation progressive. Commence par « entendu », puis valide chaque étape séparément.</p>
+            <label for="teachWord">Mot à enseigner</label>
+            <input id="teachWord" type="text" maxlength="80" placeholder="Ex. montre">
+            <label for="teachState">Étape validée</label>
+            <select id="teachState">
+              <option value="heard">1. Entendu</option>
+              <option value="imitated">2. Imité</option>
+              <option value="recognized">3. Reconnu</option>
+              <option value="understood">4. Compris</option>
+              <option value="usable">5. Utilisable</option>
+            </select>
+            <label for="teachMeaning">Signification (à partir de « compris »)</label>
+            <input id="teachMeaning" type="text" maxlength="1000" placeholder="Ce que Chappie a appris sur ce mot">
+            <div class="row-btns">
+              <button type="button" onclick="teachVocabulary()">Valider l'étape</button>
+              <button type="button" class="secondary" onclick="loadVocabulary()">Actualiser les mots</button>
+            </div>
+            <pre id="vocabularyOutput" class="output">Aucun mot chargé.</pre>
+          </div>
         </div>
 
         <div class="panel">
@@ -1354,6 +1376,21 @@
           </div>
 
           <pre id="visionOut" class="output">Caméra inactive.</pre>
+
+          <input id="visionObservationId" type="hidden" value="">
+          <div class="panel" style="margin-top:12px">
+            <h4>🧩 Associer un mot à ce que Chappie voit</h4>
+            <p class="muted">Après avoir enseigné un mot dans le dictionnaire, tu peux lui montrer l'objet et valider l'association. L'analyse visuelle reste une observation, pas une compréhension automatique.</p>
+            <label for="visionWord">Mot déjà imité par Chappie</label>
+            <input id="visionWord" type="text" maxlength="80" placeholder="Ex. coq">
+            <button type="button" onclick="associateVisionWord()">Associer le mot à l'image</button>
+            <div id="visionObservationStatus" class="status">Aucune observation visuelle sélectionnée.</div>
+          </div>
+          <div class="panel" style="margin-top:12px">
+            <h4>🧠 Historique sensoriel</h4>
+            <button type="button" class="secondary" onclick="loadSensoryObservations()">Actualiser les expériences</button>
+            <pre id="sensoryHistory" class="output">Aucune expérience sensorielle chargée.</pre>
+          </div>
         </div>
 
         <div class="panel">
@@ -1647,6 +1684,75 @@ En attente de synchronisation du cerveau...
       ========================= -->
 
       <section id="section-world" class="tab-section">
+        <div class="panel">
+          <h3>🧠 Ce que Chappie apprend sur les objets</h3>
+          <p class="muted">Les propriétés ci-dessous sont des informations enseignées ou validées. Une propriété inconnue reste inconnue : Chappie ne doit pas la deviner.</p>
+          <div class="row-btns" style="margin-top:12px">
+            <button type="button" class="secondary" onclick="loadKnownObjects()">Actualiser les objets connus</button>
+          </div>
+          <pre id="knownObjectsOutput" class="output">Aucun objet chargé.</pre>
+        </div>
+
+        <div class="panel">
+          <h3>📚 Enseigner une propriété</h3>
+          <p class="muted">L'objet doit déjà avoir été montré, son mot imité et reconnu.</p>
+          <label for="objectWord">Objet</label>
+          <input id="objectWord" maxlength="80" placeholder="Ex. montre">
+          <label for="objectProperty">Caractéristique</label>
+          <select id="objectProperty">
+            <option value="couleur">Couleur</option>
+            <option value="forme">Forme</option>
+            <option value="taille">Taille</option>
+            <option value="matiere">Matière</option>
+            <option value="texture">Texture</option>
+            <option value="poids">Poids</option>
+            <option value="fonction">Fonction</option>
+            <option value="usage">Usage</option>
+            <option value="etat">État</option>
+            <option value="son">Son</option>
+            <option value="odeur">Odeur</option>
+            <option value="gout">Goût</option>
+            <option value="temperature">Température</option>
+            <option value="autre">Autre</option>
+          </select>
+          <label for="objectValue">Valeur enseignée</label>
+          <input id="objectValue" maxlength="500" placeholder="Ex. rouge">
+          <label for="objectEvidence">Contexte / preuve (facultatif)</label>
+          <textarea id="objectEvidence" rows="2" maxlength="1000" placeholder="Ex. Tu lui montres la pomme et lui dis : elle est rouge."></textarea>
+          <button type="button" onclick="teachObjectProperty()">Enseigner cette propriété</button>
+          <div id="objectLearningStatus" class="status">En attente d'un enseignement.</div>
+        </div>
+
+        <div class="panel">
+          <h3>🧪 Expériences supervisées</h3>
+          <p class="muted">Enregistre une action et son résultat. L'expérience est mémorisée, mais elle ne devient pas automatiquement une règle générale.</p>
+          <label for="experienceWord">Objet</label>
+          <input id="experienceWord" maxlength="80" placeholder="Ex. balle">
+          <label for="experienceAction">Action effectuée</label>
+          <input id="experienceAction" maxlength="300" placeholder="Ex. pousser doucement">
+          <label for="experienceOutcome">Résultat observé</label>
+          <textarea id="experienceOutcome" rows="2" maxlength="1000" placeholder="Ex. la balle a roulé sur le sol"></textarea>
+          <button type="button" onclick="recordObjectExperience()">Enregistrer l'expérience</button>
+          <div id="objectExperienceStatus" class="status">Aucune expérience enregistrée.</div>
+        </div>
+
+        <div class="panel">
+          <h3>⚖️ Comparer deux objets</h3>
+          <p class="muted">Chappie compare uniquement les caractéristiques qu'il connaît pour chacun des deux objets. Une donnée absente n'est jamais considérée comme une différence.</p>
+          <div class="world-grid">
+            <div>
+              <label for="compareObjectA">Premier objet</label>
+              <input id="compareObjectA" maxlength="80" placeholder="Ex. pomme">
+            </div>
+            <div>
+              <label for="compareObjectB">Deuxième objet</label>
+              <input id="compareObjectB" maxlength="80" placeholder="Ex. banane">
+            </div>
+          </div>
+          <button type="button" onclick="compareKnownObjects()">Comparer</button>
+          <pre id="objectComparisonOutput" class="output">Aucune comparaison effectuée.</pre>
+        </div>
+
 
         <div class="panel">
           <h3>🌍 Modèle du monde de Chappie</h3>

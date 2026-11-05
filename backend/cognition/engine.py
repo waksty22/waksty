@@ -56,14 +56,14 @@ from cognition.catalog import COGNITIVE_CATALOG
 # CONFIGURATION
 # ============================================================
 
-ENGINE_VERSION = "19.3"
+ENGINE_VERSION = "21.0"
 
-DEFAULT_LEVEL = 1
+DEFAULT_LEVEL = 0
 DEFAULT_MASTERY = 0.0
 DEFAULT_CONFIDENCE = 0.5
 DEFAULT_XP = 0
 
-MIN_LEVEL = 1
+MIN_LEVEL = 0
 MAX_LEVEL = 30
 
 MIN_MASTERY = 0.0

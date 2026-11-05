@@ -76,6 +76,183 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    window.loadVocabulary = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/language/vocabulary', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const output = document.getElementById('vocabularyOutput');
+            if (output) output.textContent = (data.vocabulary || []).map(item =>
+                item.word + ' — ' + item.state + (item.meaning ? ' : ' + item.meaning : '')
+            ).join('\n') || 'Aucun mot appris pour le moment.';
+        } catch (error) {
+            const output = document.getElementById('vocabularyOutput');
+            if (output) output.textContent = 'Erreur : ' + error.message;
+        }
+    };
+
+    window.teachVocabulary = async function() {
+        const word = document.getElementById('teachWord')?.value?.trim();
+        const state = document.getElementById('teachState')?.value || 'heard';
+        const meaning = document.getElementById('teachMeaning')?.value?.trim() || '';
+        const token = getToken();
+        if (!word) return alert('Saisis un mot à enseigner.');
+        try {
+            await apiCall('/api/language/teach', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token },
+                body: { user_id: 'creator', word, state, meaning,
+                    evidence: 'Enseignement validé depuis le tableau de bord' }
+            });
+            await window.loadVocabulary();
+        } catch (error) { alert(error.message); }
+    };
+
+    window.associateVisionWord = async function() {
+        const word = document.getElementById("visionWord")?.value?.trim();
+        const observationId = document.getElementById("visionObservationId")?.value?.trim();
+        const token = getToken();
+        if (!word || !observationId) {
+            alert("Analyse d'abord une image et enseigne le mot à associer.");
+            return;
+        }
+        try {
+            const result = await apiCall("/api/vision/associate", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + token },
+                body: {
+                    word: word,
+                    observation_id: observationId,
+                    evidence: "Association image-mot validée manuellement par le créateur"
+                }
+            });
+            const status = document.getElementById("visionObservationStatus");
+            if (status) status.textContent =
+                "Association enregistrée : " + result.association.word
+                + " ↔ observation visuelle. Le mot n'est pas automatiquement compris.";
+        } catch (error) {
+            alert(error.message);
+        }
+    };
+
+    window.loadSensoryObservations = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall("/api/senses/observations", {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const output = document.getElementById("sensoryHistory");
+            if (output) output.textContent = (data.observations || []).map(item =>
+                "[" + item.modality + "] " + item.content
+            ).join("\n\n") || "Aucune expérience sensorielle enregistrée.";
+        } catch (error) {
+            const output = document.getElementById("sensoryHistory");
+            if (output) output.textContent = "Erreur : " + error.message;
+        }
+    };
+
+    window.loadKnownObjects = async function() {
+        const token = getToken();
+        const output = document.getElementById("knownObjectsOutput");
+        try {
+            const data = await apiCall("/api/learning/objects", {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const objects = data.objects || [];
+            if (output) output.textContent = objects.length
+                ? objects.map(object => {
+                    const props = (object.properties || []).map(p =>
+                        "  • " + p.property_key + " : " + p.property_value
+                        + " [" + p.source_type + ", confiance "
+                        + Math.round(p.confidence * 100) + "%]"
+                    ).join("\\n");
+                    const experiences = (object.experiences || []).map(e =>
+                        "  ↳ " + e.action + " → " + e.outcome
+                    ).join("\\n");
+                    return object.word + " (" + object.vocabulary_state + ")\\n"
+                        + (props || "  Aucune propriété apprise.") + "\\n"
+                        + (experiences || "  Aucune expérience enregistrée.");
+                }).join("\\n\\n")
+                : "Aucun objet reconnu pour le moment.";
+        } catch (error) {
+            if (output) output.textContent = "Erreur : " + error.message;
+        }
+    };
+
+    window.teachObjectProperty = async function() {
+        const word = document.getElementById("objectWord")?.value?.trim();
+        const property = document.getElementById("objectProperty")?.value;
+        const value = document.getElementById("objectValue")?.value?.trim();
+        const evidence = document.getElementById("objectEvidence")?.value?.trim() || "";
+        const status = document.getElementById("objectLearningStatus");
+        if (!word || !value) return alert("Indique un objet et une valeur.");
+        try {
+            const result = await apiCall("/api/learning/object-property", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + getToken() },
+                body: { word, property, value, evidence, confidence: 0.9 }
+            });
+            if (status) status.textContent = "Appris : " + result.property.word
+                + " — " + result.property.property_key + " : "
+                + result.property.property_value;
+            await window.loadKnownObjects();
+        } catch (error) {
+            if (status) status.textContent = "Non enregistré : " + error.message;
+        }
+    };
+
+    window.recordObjectExperience = async function() {
+        const word = document.getElementById("experienceWord")?.value?.trim();
+        const action = document.getElementById("experienceAction")?.value?.trim();
+        const outcome = document.getElementById("experienceOutcome")?.value?.trim();
+        const status = document.getElementById("objectExperienceStatus");
+        if (!word || !action || !outcome) {
+            return alert("Renseigne l'objet, l'action et le résultat observé.");
+        }
+        try {
+            const result = await apiCall("/api/learning/object-experience", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + getToken() },
+                body: { word, action, outcome, confidence: 0.6 }
+            });
+            if (status) status.textContent = "Expérience mémorisée pour "
+                + result.experience.word + ". Elle n'est pas encore une règle générale.";
+            await window.loadKnownObjects();
+        } catch (error) {
+            if (status) status.textContent = "Non enregistrée : " + error.message;
+        }
+    };
+
+    window.compareKnownObjects = async function() {
+        const first = document.getElementById("compareObjectA")?.value?.trim();
+        const second = document.getElementById("compareObjectB")?.value?.trim();
+        const output = document.getElementById("objectComparisonOutput");
+        if (!first || !second) return alert("Indique deux objets à comparer.");
+        try {
+            const data = await apiCall("/api/learning/object-compare", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + getToken() },
+                body: { first, second }
+            });
+            const comparison = data.comparison;
+            const shared = Object.entries(comparison.shared_properties || {})
+                .map(([key, values]) => key + " : " + values.join(", "));
+            const differences = Object.entries(comparison.differences || {})
+                .map(([key, values]) => key + " — " + first + " : "
+                    + (values[first].join(", ") || "inconnu")
+                    + " / " + second + " : "
+                    + (values[second].join(", ") || "inconnu"));
+            if (output) output.textContent =
+                "Points communs\\n" + (shared.join("\\n") || "Aucun connu")
+                + "\\n\\nDifférences connues\\n"
+                + (differences.join("\\n") || "Aucune différence enregistrée")
+                + "\\n\\n" + comparison.warning;
+        } catch (error) {
+            if (output) output.textContent = "Comparaison impossible : " + error.message;
+        }
+    };
+
     window.loadSkills = async function() {
         const token = getToken();
         try {
@@ -189,18 +366,25 @@ document.addEventListener("DOMContentLoaded", () => {
                 liveStatus.textContent = data.message;
             }
 
+            if (data.type === "user_text" && typeof data.text === "string") {
+                const transcript = document.getElementById("liveTranscript");
+                if (transcript) {
+                    transcript.textContent += "\nToi : " + data.text;
+                    transcript.scrollTop = transcript.scrollHeight;
+                }
+            }
+
+            if (data.type === "text" && typeof data.text === "string") {
+                const transcript = document.getElementById("liveTranscript");
+                if (transcript) {
+                    transcript.textContent += "\nChappie : " + data.text;
+                    transcript.scrollTop = transcript.scrollHeight;
+                }
+                if ("speechSynthesis" in window) playTextToSpeech(data.text);
+            }
+            // Raw Gemini audio is discarded because it cannot be lexically validated.
             if (data.type === "audio_session" || data.type === "audio_stream" || data.audio) {
-                if (data.text) {
-                    const transcript = document.getElementById("liveTranscript");
-                    if (transcript) {
-                        transcript.textContent += "\nChappie : " + data.text;
-                        transcript.scrollTop = transcript.scrollHeight;
-                    }
-                }
-                const audioContent = data.audio || data.audio_data;
-                if (audioContent) {
-                    playAudioChunk(audioContent, data.sample_rate || 24000);
-                }
+                console.warn("Audio Live brut ignoré : validation lexicale obligatoire.");
             }
         });
 
@@ -300,7 +484,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     question: "Décris ce que tu vois."
                 }
             });
-            if (visionOut) visionOut.textContent = response.analysis;
+            if (visionOut) {
+                visionOut.textContent = response.analysis
+                    + "\n\nObservation sensorielle enregistrée. "
+                    + "Cette description n'est pas encore un savoir acquis.";
+            }
+            const observationField = document.getElementById("visionObservationId");
+            if (observationField) observationField.value = response.observation_id || "";
+            const observationLabel = document.getElementById("visionObservationStatus");
+            if (observationLabel) observationLabel.textContent =
+                response.observation_id ? "Observation enregistrée — associe maintenant un mot enseigné." : "Observation non enregistrée.";
         } catch (error) {
             console.error("Erreur analyse vision :", error);
             if (visionOut) visionOut.textContent = "Erreur lors de l'analyse visuelle : " + error.message;

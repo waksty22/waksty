@@ -863,6 +863,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 .bindPopup(popup).addTo(spatialLayer);
         });
         const all = visits.map(p => [Number(p.latitude), Number(p.longitude)])
+            .concat((data.places || []).filter(p => p.latitude != null && p.longitude != null)
+                .map(p => [Number(p.latitude), Number(p.longitude)]))
             .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
         if (all.length) leafletMap.fitBounds(window.L.latLngBounds(all), { padding: [24, 24], maxZoom: 15 });
         setTimeout(() => leafletMap.invalidateSize(), 100);
@@ -909,7 +911,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 } catch (error) { setLocationStatus("Position non enregistrée : " + error.message); }
             }, error => {
-                setLocationStatus("Erreur de localisation : " + error.message);
+                setLocationStatus("Erreur de localisation : " + error.message + " — fermeture de la session.");
+                window.stopLocationTracking();
             }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
         } catch (error) {
             locationSessionId = null;
@@ -945,6 +948,23 @@ document.addEventListener("DOMContentLoaded", () => {
     window.recordVoice = function() {
         alert("La reconnaissance de profil vocal n'est pas encore implémentée : aucune empreinte biométrique réelle n'est entraînée.");
     };
+
+    window.addEventListener("pagehide", () => {
+        if (locationWatchId !== null && navigator.geolocation) {
+            navigator.geolocation.clearWatch(locationWatchId);
+        }
+        if (locationSessionId) {
+            fetch("/api/world/location/session/stop", {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + getToken(),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ session_id: locationSessionId }),
+                keepalive: true
+            }).catch(() => {});
+        }
+    });
 
     // Charger automatiquement les états si un token est déjà enregistré au démarrage
     const assessmentSystemSelect = document.getElementById("assessmentSystem");

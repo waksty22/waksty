@@ -346,8 +346,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     supervisor_approved: document.getElementById("assessmentApproval")?.checked === true
                 }
             });
-            if (status) status.textContent = "Évaluation enregistrée. Maturité calculée : " +
-                Number(result.maturity || 0).toFixed(2) + "/30.";
+            if (status) status.textContent = result.assessment?.passed
+                ? "Compétence validée. Maturité calculée : " + Number(result.maturity || 0).toFixed(2) + "/30."
+                : "Test enregistré, mais non réussi : aucun niveau n'est ajouté. Une nouvelle preuve sera nécessaire.";
             const evidence = document.getElementById("assessmentEvidence");
             if (evidence) evidence.value = "";
             const approval = document.getElementById("assessmentApproval");
@@ -897,7 +898,7 @@ document.addEventListener("DOMContentLoaded", () => {
             locationSessionId = session.session.session_id;
             setLocationStatus("Session autorisée. Demande de position au navigateur…");
             locationWatchId = navigator.geolocation.watchPosition(async position => {
-                latestLocation = position.coords;
+                latestLocation = position.coords.accuracy <= 250 ? position.coords : null;
                 try {
                     await apiCall("/api/world/location", {
                         method: "POST",

@@ -1420,10 +1420,17 @@ async function toggleLive() {
         setText('liveStatus', data.status);
       }
 
-      if (data.error) {
+      if (data.type === 'connected') {
         setText(
           'liveStatus',
-          'Erreur : ' + data.error
+          'Gemini Live prêt. Micro actif : parle à Chappie.'
+        );
+      }
+
+      if (data.error || data.type === 'error') {
+        setText(
+          'liveStatus',
+          'Erreur Gemini Live : ' + (data.message || data.error)
         );
       }
 

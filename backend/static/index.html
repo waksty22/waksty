@@ -1916,6 +1916,13 @@ Sélectionne une catégorie pour consulter les données.
         title.textContent = pageTitles[tabId] || "Chappie";
       }
 
+      if (tabId === "world" && window.loadWorldMap) {
+        window.loadWorldMap();
+      }
+      if (tabId === "skills" && window.loadSkills) {
+        window.loadSkills();
+      }
+
       const main = document.getElementById("mainContainer");
 
       if (main) {

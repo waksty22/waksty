@@ -126,6 +126,7 @@ from cognition.development import (
 )
 from cognition.engine import cognitive_engine
 from cognition.catalog import COGNITIVE_CATALOG
+from cognition.skill_evidence import build_validated_skill_data
 from cognition.shared_brain import (
     get_shared_brain_snapshot,
     format_shared_brain_context,
@@ -783,37 +784,9 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
         ).fetchall()
 
     skills_list = [dict(row) for row in legacy_rows]
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in test_rows:
-        try:
-            system_key, branch_key = str(row["test_name"]).split(":", 1)
-            details = json.loads(row["details"] or "{}")
-        except (ValueError, TypeError, json.JSONDecodeError):
-            continue
-        if system_key not in COGNITIVE_CATALOG:
-            continue
-        branches = COGNITIVE_CATALOG[system_key].get("sub_branches", {})
-        if branch_key not in branches or details.get("supervisor_approved") is not True:
-            continue
-        if details.get("source") != "supervised_assessment" or not str(details.get("evidence", "")).strip():
-            continue
-        grouped.setdefault((system_key, branch_key), []).append({
-            "score": float(row["score"]),
-            "tested_at": row["tested_at"],
-            "evidence": str(details.get("evidence", ""))[:500],
-        })
-
-    db_skills_data: dict[str, Any] = {}
-    for (system_key, branch_key), assessments in grouped.items():
-        scores = [item["score"] for item in assessments]
-        average_score = sum(scores) / len(scores)
-        db_skills_data.setdefault(system_key, {})[branch_key] = {
-            "level": int(round(average_score * 0.30)),
-            "mastery": average_score,
-            "confidence": min(1.0, len(assessments) / 3.0),
-            "xp": len(assessments) * 10,
-            "evidence": "Évaluations supervisées distinctes : " + str(len(assessments)),
-        }
+    db_skills_data, assessment_count = build_validated_skill_data(
+        [dict(row) for row in test_rows]
+    )
 
     computed_profile = cognitive_engine.compute_cognitive_profile(
         user_id, db_skills_data, force_recompute=True,
@@ -822,7 +795,7 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
         "skills": skills_list,
         "average_level": computed_profile.get("global_maturity", 0.0),
         "cognitive_profile": computed_profile,
-        "validated_branch_assessments": sum(len(items) for items in grouped.values()),
+        "validated_branch_assessments": assessment_count,
         "maturity_source": "validated_supervised_branch_assessments",
         "legacy_aggregate_xp_affects_maturity": False,
     }

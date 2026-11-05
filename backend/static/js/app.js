@@ -253,15 +253,109 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    let skillCatalogCache = [];
+
+    window.loadSkillCatalog = async function() {
+        const data = await apiCall("/api/cognition/skills/catalog");
+        skillCatalogCache = data.systems || [];
+        const select = document.getElementById("assessmentSystem");
+        if (!select) return;
+        select.replaceChildren();
+        skillCatalogCache.forEach(system => {
+            const option = document.createElement("option");
+            option.value = system.key;
+            option.textContent = system.name;
+            select.appendChild(option);
+        });
+        window.updateSkillBranches();
+    };
+
+    window.updateSkillBranches = function() {
+        const systemSelect = document.getElementById("assessmentSystem");
+        const branchSelect = document.getElementById("assessmentBranch");
+        if (!systemSelect || !branchSelect) return;
+        const system = skillCatalogCache.find(item => item.key === systemSelect.value);
+        branchSelect.replaceChildren();
+        (system?.branches || []).forEach(branch => {
+            const option = document.createElement("option");
+            option.value = branch.key;
+            option.textContent = branch.name;
+            branchSelect.appendChild(option);
+        });
+    };
+
     window.loadSkills = async function() {
-        const token = getToken();
+        const summaryEl = document.getElementById("summary");
+        const tree = document.getElementById("skillsTree");
         try {
-            const data = await apiCall('/api/skills', { headers: { 'Authorization': `Bearer ${token}` } });
-            const summaryEl = document.getElementById('summary');
-            if (summaryEl) {
-                summaryEl.textContent = JSON.stringify(data, null, 2);
+            if (!skillCatalogCache.length) await window.loadSkillCatalog();
+            const data = await apiCall("/api/skills");
+            const profile = data.cognition || {};
+            const systems = profile.systems || {};
+            if (tree) {
+                tree.replaceChildren();
+                Object.entries(systems).forEach(([systemKey, system]) => {
+                    const details = document.createElement("details");
+                    const summary = document.createElement("summary");
+                    summary.textContent = (system.name || systemKey) + " · " +
+                        Number(system.average_level || 0).toFixed(1) + "/30";
+                    details.appendChild(summary);
+                    const progress = document.createElement("div");
+                    progress.className = "skill-progress";
+                    const fill = document.createElement("span");
+                    fill.style.width = Math.max(0, Math.min(100, Number(system.average_level || 0) / 30 * 100)) + "%";
+                    progress.appendChild(fill);
+                    details.appendChild(progress);
+                    Object.entries(system.sub_branches || {}).forEach(([branchKey, branch]) => {
+                        const row = document.createElement("div");
+                        row.className = "skill-branch-row";
+                        const label = document.createElement("span");
+                        label.textContent = branch.name || branchKey;
+                        const value = document.createElement("small");
+                        value.textContent = Number(branch.level || 0) + "/30";
+                        row.append(label, value);
+                        details.appendChild(row);
+                    });
+                    tree.appendChild(details);
+                });
+                if (!Object.keys(systems).length) tree.textContent = "Aucune donnée cognitive disponible.";
             }
-        } catch (e) { console.error(e); }
+            if (summaryEl) {
+                summaryEl.textContent = "Maturité : " + Number(profile.global_maturity || 0).toFixed(2) +
+                    "/30 · Évaluations supervisées : " +
+                    Number(data.skills?.validated_branch_assessments || 0) +
+                    " · Les anciens XP agrégés ne déterminent plus la maturité.";
+            }
+        } catch (error) {
+            if (summaryEl) summaryEl.textContent = "Erreur de synchronisation : " + error.message;
+            if (tree) tree.textContent = "Impossible de charger l'arbre cognitif.";
+        }
+    };
+
+    window.recordSkillAssessment = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("assessmentStatus");
+        try {
+            const result = await apiCall("/api/cognition/skills/assessments", {
+                method: "POST",
+                body: {
+                    system: value("assessmentSystem"),
+                    branch: value("assessmentBranch"),
+                    score: Number(value("assessmentScore")),
+                    evidence: value("assessmentEvidence"),
+                    supervisor_approved: document.getElementById("assessmentApproval")?.checked === true
+                }
+            });
+            if (status) status.textContent = "Évaluation enregistrée. Maturité calculée : " +
+                Number(result.maturity || 0).toFixed(2) + "/30.";
+            const evidence = document.getElementById("assessmentEvidence");
+            if (evidence) evidence.value = "";
+            const approval = document.getElementById("assessmentApproval");
+            if (approval) approval.checked = false;
+            await window.loadSkills();
+        } catch (error) {
+            if (status) status.textContent = "Évaluation refusée : " + error.message;
+        }
     };
 
     window.loadGoals = async function() {
@@ -826,9 +920,13 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // Charger automatiquement les états si un token est déjà enregistré au démarrage
+    const assessmentSystemSelect = document.getElementById("assessmentSystem");
+    if (assessmentSystemSelect) assessmentSystemSelect.addEventListener("change", window.updateSkillBranches);
+
     if (savedToken) {
         window.fetchPsychology();
         window.loadWorldMap();
         window.loadCausalLearning();
+        window.loadSkills();
     }
 });

@@ -762,6 +762,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         )  
 
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM word_visual_associations WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM sensory_observations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM personal_vocabulary WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_entities WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM world_relations WHERE user_id=?", (user_id,))  
@@ -807,8 +809,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute(  
             """  
             UPDATE user_intentions  
-            SET current_intent='éveil', confidence=0.9,  
-                details='Première prise de conscience', updated_at=?  
+            SET current_intent='éveil sensoriel', confidence=0.0,  
+                details='Aucune intention acquise : naissance', updated_at=?  
             WHERE user_id=?  
             """,  
             (now, user_id),  
@@ -877,7 +879,7 @@ def update_skill(
         current_xp = float(row["xp"]) if row else 0.0  
 
         new_xp = max(0.0, current_xp + xp_delta)  
-        new_level = min(30.0, 1.0 + math.floor(new_xp / 100.0))  
+        new_level = min(30.0, math.floor(new_xp / 100.0))  
 
         db.execute(  
             """  
@@ -2058,7 +2060,10 @@ async def run_brain(
 
     with db_connection() as language_db:
         repeatable_words = get_repeatable_words(language_db, user_id)
-    reply = gate_spoken_text(reply, repeatable_words)
+    maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+    reply = gate_spoken_text(
+        reply, repeatable_words, max_words=1 if maturity < 3.0 else None
+    )
 
     save_conversation_turn(
         user_id,
@@ -2597,7 +2602,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "19.3",  
+        "version": "21.0",  
     }
 
 @app.post("/api/chat")
@@ -3457,7 +3462,11 @@ async def websocket_endpoint(
 
                         for part in parts:
                             if "text" in part and isinstance(part["text"], str):
-                                safe_text = gate_spoken_text(part["text"], repeatable_words)
+                                maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+                                safe_text = gate_spoken_text(
+                                    part["text"], repeatable_words,
+                                    max_words=1 if maturity < 3.0 else None,
+                                )
                                 if safe_text:
                                     await websocket.send_json({
                                         "type": "text",

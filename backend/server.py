@@ -3675,6 +3675,8 @@ async def api_config(auth=Depends(require_auth)):
         "supports_affective_history": True,
         "supports_decision_journal": True,
         "supports_evidence_based_preferences": True,
+        "supports_supervised_imitation": True,
+        "supports_experiment_approval": True,
         "cognitive_systems": 12,  
         "supports_vision": True,  
         "supports_voice": True,  

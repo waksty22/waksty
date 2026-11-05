@@ -34,6 +34,7 @@ TABLES = {
     "decision_journal": ("decision_journal", "id DESC"),
     "preference_evidence": ("preference_evidence", "id DESC"),
     "emotional_state": ("emotional_state", "updated_at DESC"),
+    "competency_tests": ("competency_tests", "tested_at DESC"),
     "spatial_sessions": ("spatial_sessions", "started_at DESC"),
     "spatial_visits": ("spatial_visits", "recorded_at DESC"),
     "place_memories": ("place_memories", "last_seen_at DESC"),
@@ -42,7 +43,7 @@ TABLES = {
 
 def _decode_json_fields(item: dict[str, Any]) -> dict[str, Any]:
     for key in ("metadata_json", "properties_json", "options_json",
-                "evidence_json", "tags"):
+                "evidence_json", "tags", "details"):
         if key not in item or not isinstance(item[key], str):
             continue
         try:
@@ -139,7 +140,8 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
         ("imitation_attempts", "TENTATIVES D'IMITATION"),
         ("autobiographical_events", "ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS"),
         ("memories", "SOUVENIRS ÉPISODIQUES — conserver source/confiance"),
-        ("skills", "COMPÉTENCES ENREGISTRÉES"),
+        ("skills", "COMPÉTENCES ENREGISTRÉES — les XP hérités ne valident pas une maîtrise"),
+        ("competency_tests", "ÉVALUATIONS DE COMPÉTENCES — progression avec preuve supervisée"),
         ("decision_journal", "DÉCISIONS ET RÉSULTATS"),
         ("preference_evidence", "PRÉFÉRENCES EXPLICITEMENT DOCUMENTÉES"),
         ("emotional_state", "ÉTAT AFFECTIF SIMULÉ"),

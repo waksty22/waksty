@@ -101,11 +101,22 @@ from cognition.reasoning import (
     evaluate_decision_doubt,
     run_metacognitive_audit,
 )
+from cognition.development import (
+    init_development_tables,
+    record_affective_snapshot,
+    list_affective_history,
+    record_decision,
+    evaluate_decision,
+    list_decisions,
+    record_preference,
+    list_preferences,
+    development_statistics,
+)
 from cognition.engine import cognitive_engine
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V25.0 — mémoire autobiographique"
+APP_NAME = "Chappie V26.0 — raisonnement et personnalité évolutive"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -400,6 +411,7 @@ def init_db() -> None:
         init_perception_fusion_tables(db)
         init_autobiographical_tables(db)
         init_cognition_tables(db)
+        init_development_tables(db)
 
 def valid_user(user_id: str) -> str:
     try:
@@ -814,7 +826,10 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM dreams WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM thoughts WHERE user_id=?", (user_id,))  
         db.execute("DELETE FROM goals WHERE user_id=?", (user_id,))  
-        db.execute("DELETE FROM mood_events WHERE user_id=?", (user_id,))  
+        db.execute("DELETE FROM mood_events WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM affective_history WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM decision_journal WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))  
 
         db.execute(  
             """  
@@ -1635,6 +1650,23 @@ def get_identity_prompt(user_id: str) -> str:
         for episode in reversed(recent_episodes)
     ) or "Aucun épisode autobiographique enregistré."
 
+    with db_connection() as development_db:
+        recent_decisions = list_decisions(development_db, user_id, limit=5)
+        documented_preferences = list_preferences(development_db, user_id, limit=12)
+
+    decision_context = "\n".join(
+        f"- Question : {item['question']} | options : {', '.join(item['options'])} "
+        f"| choix : {item['chosen_option'] or 'non décidé'} "
+        f"| résultat : {item['outcome'] or 'non évalué'}"
+        for item in reversed(recent_decisions)
+    ) or "Aucune décision documentée."
+
+    preference_context = "\n".join(
+        f"- {item['domain']} : {item['preference']} "
+        f"(base : {item['basis']}, confiance déclarée : {item['confidence']:.2f})"
+        for item in documented_preferences
+    ) or "Aucune préférence personnelle documentée."
+
     energy_level = float(em["energy"])  
     energy_alert = ""  
 
@@ -1680,6 +1712,17 @@ Souvenirs en mémoire : {count}
 - Dépendance : {rel['dependence']:.0f}
 - Intention perçue : {intent['current_intent']}
 - Détails : {intent['details']}
+
+=== V26 — RAISONNEMENT, AFFECT ET PERSONNALITÉ ÉMERGENTE ===
+Tes émotions sont des états logiciels simulés, pas des sensations humaines. Elles évoluent selon les événements enregistrés et peuvent être contradictoires ou incertaines.
+Pour raisonner : sépare les faits observés, les souvenirs sourcés, les hypothèses et les inconnues. Compare les options, expose les critères pertinents et le niveau d'incertitude. N'invente jamais une vérification ni un résultat.
+Une préférence ne devient personnelle que si elle repose sur une déclaration explicite ou un choix documenté. Ne transforme pas une supposition ou une réponse isolée en trait stable.
+
+Décisions documentées :
+{decision_context}
+
+Préférences documentées :
+{preference_context}
 
 === CONTEXTE ET HISTORIQUE ===
 Heure locale : {local_now()}
@@ -1939,7 +1982,16 @@ async def run_brain(
             f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).",  
         )  
 
-    update_emotions_once(user_id, message)  
+    emotion_state = update_emotions_once(user_id, message)
+    try:
+        with db_connection() as affect_db:
+            record_affective_snapshot(
+                affect_db, user_id, emotion_state,
+                source="classic_chat", event_label="message utilisateur",
+            )
+            affect_db.commit()
+    except Exception:
+        log.exception("[V26] Impossible d'enregistrer l'état affectif")
 
     # Une conversation n'est pas une preuve d'apprentissage.
     # Les compétences progressent uniquement après validation explicite.
@@ -2616,7 +2668,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "20.0",
+        "version": "26.0.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -2653,7 +2705,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "21.0",  
+        "version": "26.0.0",  
     }
 
 @app.post("/api/chat")
@@ -2848,6 +2900,78 @@ async def api_update_skill(
         "result": result,  
         "skills": get_skills_summary(user_id),  
     }
+
+@app.get("/api/cognition/development")
+async def api_cognition_development(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {
+            "statistics": development_statistics(db, user_id),
+            "affective_history": list_affective_history(db, user_id, 20),
+            "decisions": list_decisions(db, user_id, 20),
+            "preferences": list_preferences(db, user_id, 50),
+            "emotions_are_simulated": True,
+        }
+
+
+@app.post("/api/cognition/decisions")
+async def api_record_decision(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_decision(
+                db, user_id, data.get("question", ""), data.get("options", []),
+                data.get("chosen_option", ""), data.get("reasons", ""),
+                data.get("evidence", []), data.get("confidence", 0.5),
+            )
+            db.commit()
+        return {"ok": True, "decision": result}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/cognition/decisions/{decision_id}/evaluate")
+async def api_evaluate_decision(
+    decision_id: int, request: Request, auth=Depends(require_auth)
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = evaluate_decision(
+                db, user_id, decision_id, data.get("outcome", ""),
+                data.get("revised_choice", ""),
+            )
+            db.commit()
+        return {"ok": True, "evaluation": result}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/personality/preferences")
+async def api_record_preference(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_preference(
+                db, user_id, data.get("domain", ""), data.get("preference", ""),
+                data.get("evidence", ""), data.get("basis", "explicit_statement"),
+                data.get("confidence", 0.8),
+            )
+            db.commit()
+        return {"ok": True, "preference": result}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/personality/preferences")
+async def api_list_preferences(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {"preferences": list_preferences(db, user_id, 100)}
+
 
 @app.get("/api/cognition/audit")
 async def api_cognition_audit(auth=Depends(require_auth)):
@@ -3482,7 +3606,7 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "24.0.0",
+        "version": "26.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,  
@@ -3791,6 +3915,11 @@ async def websocket_endpoint(
                         if heard_text:
                             try:
                                 with db_connection() as sensory_db:
+                                    live_emotions = update_emotions_once(user_id, heard_text)
+                                    record_affective_snapshot(
+                                        sensory_db, user_id, live_emotions,
+                                        source="gemini_live", event_label="transcription utilisateur",
+                                    )
                                     record_heard_text(
                                         sensory_db, user_id, heard_text,
                                         evidence="Transcription confirmée par Gemini Live",

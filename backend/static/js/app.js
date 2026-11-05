@@ -1,11 +1,11 @@
 'use strict';
 
 import { initWebSocket } from './websocket.js';
-import { playTextToSpeech, initSpeechRecognition, initLiveAudioStream, playAudioChunk } from './audio.js';
+import { playTextToSpeech, initSpeechRecognition, initLiveAudioStream, playAudioChunk, interruptAudioPlayback } from './audio.js';
 import { apiCall } from './api.js';
 
 document.addEventListener("DOMContentLoaded", () => {
-    console.log("Initialisation de l'application modulaire Chappie V19.3...");
+    console.log("Initialisation de l'application modulaire Chappie V33...");
 
     // Fonction centralisée et robuste pour récupérer le token de partout
     function getToken() {
@@ -253,15 +253,110 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    let skillCatalogCache = [];
+
+    window.loadSkillCatalog = async function() {
+        const data = await apiCall("/api/cognition/skills/catalog");
+        skillCatalogCache = data.systems || [];
+        const select = document.getElementById("assessmentSystem");
+        if (!select) return;
+        select.replaceChildren();
+        skillCatalogCache.forEach(system => {
+            const option = document.createElement("option");
+            option.value = system.key;
+            option.textContent = system.name;
+            select.appendChild(option);
+        });
+        window.updateSkillBranches();
+    };
+
+    window.updateSkillBranches = function() {
+        const systemSelect = document.getElementById("assessmentSystem");
+        const branchSelect = document.getElementById("assessmentBranch");
+        if (!systemSelect || !branchSelect) return;
+        const system = skillCatalogCache.find(item => item.key === systemSelect.value);
+        branchSelect.replaceChildren();
+        (system?.branches || []).forEach(branch => {
+            const option = document.createElement("option");
+            option.value = branch.key;
+            option.textContent = branch.name;
+            branchSelect.appendChild(option);
+        });
+    };
+
     window.loadSkills = async function() {
-        const token = getToken();
+        const summaryEl = document.getElementById("summary");
+        const tree = document.getElementById("skillsTree");
         try {
-            const data = await apiCall('/api/skills', { headers: { 'Authorization': `Bearer ${token}` } });
-            const summaryEl = document.getElementById('summary');
-            if (summaryEl) {
-                summaryEl.textContent = JSON.stringify(data, null, 2);
+            if (!skillCatalogCache.length) await window.loadSkillCatalog();
+            const data = await apiCall("/api/skills");
+            const profile = data.cognition || {};
+            const systems = profile.systems || {};
+            if (tree) {
+                tree.replaceChildren();
+                Object.entries(systems).forEach(([systemKey, system]) => {
+                    const details = document.createElement("details");
+                    const summary = document.createElement("summary");
+                    summary.textContent = (system.name || systemKey) + " · " +
+                        Number(system.average_level || 0).toFixed(1) + "/30";
+                    details.appendChild(summary);
+                    const progress = document.createElement("div");
+                    progress.className = "skill-progress";
+                    const fill = document.createElement("span");
+                    fill.style.width = Math.max(0, Math.min(100, Number(system.average_level || 0) / 30 * 100)) + "%";
+                    progress.appendChild(fill);
+                    details.appendChild(progress);
+                    Object.entries(system.sub_branches || {}).forEach(([branchKey, branch]) => {
+                        const row = document.createElement("div");
+                        row.className = "skill-branch-row";
+                        const label = document.createElement("span");
+                        label.textContent = branch.name || branchKey;
+                        const value = document.createElement("small");
+                        value.textContent = Number(branch.level || 0) + "/30";
+                        row.append(label, value);
+                        details.appendChild(row);
+                    });
+                    tree.appendChild(details);
+                });
+                if (!Object.keys(systems).length) tree.textContent = "Aucune donnée cognitive disponible.";
             }
-        } catch (e) { console.error(e); }
+            if (summaryEl) {
+                summaryEl.textContent = "Maturité : " + Number(profile.global_maturity || 0).toFixed(2) +
+                    "/30 · Évaluations supervisées : " +
+                    Number(data.skills?.validated_branch_assessments || 0) +
+                    " · Les anciens XP agrégés ne déterminent plus la maturité.";
+            }
+        } catch (error) {
+            if (summaryEl) summaryEl.textContent = "Erreur de synchronisation : " + error.message;
+            if (tree) tree.textContent = "Impossible de charger l'arbre cognitif.";
+        }
+    };
+
+    window.recordSkillAssessment = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("assessmentStatus");
+        try {
+            const result = await apiCall("/api/cognition/skills/assessments", {
+                method: "POST",
+                body: {
+                    system: value("assessmentSystem"),
+                    branch: value("assessmentBranch"),
+                    score: Number(value("assessmentScore")),
+                    evidence: value("assessmentEvidence"),
+                    supervisor_approved: document.getElementById("assessmentApproval")?.checked === true
+                }
+            });
+            if (status) status.textContent = result.assessment?.passed
+                ? "Compétence validée. Maturité calculée : " + Number(result.maturity || 0).toFixed(2) + "/30."
+                : "Test enregistré, mais non réussi : aucun niveau n'est ajouté. Une nouvelle preuve sera nécessaire.";
+            const evidence = document.getElementById("assessmentEvidence");
+            if (evidence) evidence.value = "";
+            const approval = document.getElementById("assessmentApproval");
+            if (approval) approval.checked = false;
+            await window.loadSkills();
+        } catch (error) {
+            if (status) status.textContent = "Évaluation refusée : " + error.message;
+        }
     };
 
     window.loadGoals = async function() {
@@ -320,7 +415,16 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     window.consolidate = async function() {
-        alert("Fonction de consolidation déclenchée.");
+        const token = getToken();
+        const output = document.getElementById("memoryOutput");
+        try {
+            const data = await apiCall("/api/memory/consolidate", {
+                method: "POST", headers: { "Authorization": "Bearer " + token }
+            });
+            if (output) output.textContent = JSON.stringify(data.consolidation || data, null, 2);
+        } catch (error) {
+            if (output) output.textContent = "Erreur de consolidation : " + error.message;
+        }
     };
 
     window.resetLife = async function() {
@@ -389,8 +493,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             if (data.type === "interrupt") {
-                // The audio queue is reset on the next incoming chunk after an interruption.
+                interruptAudioPlayback();
                 console.info("Gemini Live a interrompu sa réponse audio.");
+            }
+
+            if (data.type === "speech_blocked") {
+                if (liveStatus) liveStatus.textContent = data.message || "Réponse vocale bloquée par le vocabulaire acquis.";
             }
 
             if (data.type === "error" || data.error) {
@@ -492,7 +600,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: { 'Authorization': `Bearer ${token}` },
                 body: {
                     image: imageBase64,
-                    question: "Décris ce que tu vois."
+                    question: "Décris ce que tu vois.",
+                    ...(locationSessionId && latestLocation ? {
+                        session_id: locationSessionId,
+                        latitude: latestLocation.latitude,
+                        longitude: latestLocation.longitude
+                    } : {})
                 }
             });
             if (visionOut) {
@@ -505,6 +618,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const observationLabel = document.getElementById("visionObservationStatus");
             if (observationLabel) observationLabel.textContent =
                 response.observation_id ? "Observation enregistrée — associe maintenant un mot enseigné." : "Observation non enregistrée.";
+            if (response.place_observation && visionOut) {
+                visionOut.textContent += "\nSouvenir de lieu enregistré : " +
+                    (response.place_observation.identity_status === "candidate"
+                        ? "ressemblance possible à vérifier."
+                        : "nouvelle observation non confirmée.");
+            }
+            if (window.loadWorldMap) await window.loadWorldMap();
         } catch (error) {
             console.error("Erreur analyse vision :", error);
             if (visionOut) visionOut.textContent = "Erreur lors de l'analyse visuelle : " + error.message;
@@ -565,8 +685,303 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+
+    // V33 — causal learning controls
+    window.createCausalObservation = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("causalLearningStatus");
+        try {
+            const result = await apiCall("/api/learning/causal/observations", {
+                method: "POST",
+                body: { event: value("causalEvent"), context: value("causalContext"),
+                    outcome: value("causalOutcome"), source_type: "observed",
+                    evidence: "Observation saisie et confirmée par le superviseur.", confidence: 0.7 }
+            });
+            const field = document.getElementById("causalObservationId");
+            if (field && result.observation?.id) field.value = result.observation.id;
+            if (status) status.textContent = "Observation enregistrée. Identifiant : " + (result.observation?.id ?? "—");
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.createCausalHypothesis = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("causalLearningStatus");
+        try {
+            const result = await apiCall("/api/learning/causal/hypotheses", {
+                method: "POST",
+                body: { observation_id: Number(value("causalObservationId")),
+                    statement: value("causalHypothesis"),
+                    predicted_effect: value("causalPrediction"), confidence: 0.3 }
+            });
+            const field = document.getElementById("causalHypothesisId");
+            if (field && result.hypothesis?.id) field.value = result.hypothesis.id;
+            if (status) status.textContent = "Hypothèse enregistrée, elle reste à vérifier. ID : " + (result.hypothesis?.id ?? "—");
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.createCausalExperiment = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const approved = document.getElementById("causalSupervisorApproval")?.checked === true;
+        const status = document.getElementById("causalLearningStatus");
+        try {
+            const result = await apiCall("/api/learning/causal/experiments", {
+                method: "POST",
+                body: { hypothesis_id: Number(value("causalHypothesisId")),
+                    environment: value("causalEnvironment"), procedure: value("causalProcedure"),
+                    prediction: value("causalExperimentPrediction"), supervisor_approved: approved }
+            });
+            const field = document.getElementById("causalExperimentId");
+            if (field && result.experiment?.id) field.value = result.experiment.id;
+            if (status) status.textContent = "Protocole enregistré. ID : " + (result.experiment?.id ?? "—");
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.evaluateCausalExperiment = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("causalLearningStatus");
+        const id = Number(value("causalExperimentId"));
+        try {
+            await apiCall("/api/learning/causal/experiments/" + id + "/result", {
+                method: "POST",
+                body: { observed_result: value("causalObservedResult"), evaluation: value("causalEvaluation") }
+            });
+            if (status) status.textContent = "Résultat évalué et enregistré.";
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.loadCausalLearning = async function() {
+        const output = document.getElementById("causalLearningOutput");
+        try {
+            const data = await apiCall("/api/learning/causal");
+            if (output) output.textContent = JSON.stringify(data, null, 2);
+        } catch (error) { if (output) output.textContent = "Erreur de chargement : " + error.message; }
+    };
+
+    // V33 — consent-based location tracking and spatial memory
+    let locationWatchId = null;
+    let locationSessionId = null;
+    let latestLocation = null;
+    let leafletMap = null;
+    let spatialLayer = null;
+    let samplesSinceRefresh = 0;
+
+    function setLocationStatus(message) {
+        const el = document.getElementById("locationStatus");
+        if (el) el.textContent = message;
+    }
+
+    function renderWorldMap(data) {
+        const mapElement = document.getElementById("chappieWorldMap");
+        const stats = document.getElementById("worldMapStats");
+        const placesList = document.getElementById("worldPlacesList");
+        if (stats) {
+            const st = data.statistics || {};
+            stats.textContent = (st.sessions || 0) + " sessions · " +
+                (st.location_samples || 0) + " positions · " +
+                (st.known_place_observations || 0) + " observations de lieux";
+        }
+        if (placesList) {
+            placesList.replaceChildren();
+            const places = data.places || [];
+            if (!places.length) {
+                placesList.textContent = "Aucun lieu observé pour le moment.";
+            } else {
+                places.slice(0, 12).forEach(place => {
+                    const item = document.createElement("div");
+                    item.className = "info-card";
+                    const title = document.createElement("strong");
+                    title.textContent = place.label || "Lieu non identifié";
+                    const description = document.createElement("p");
+                    description.className = "muted";
+                    description.textContent = place.description || "Aucune description.";
+                    const meta = document.createElement("small");
+                    meta.textContent = (place.identity_status || "unconfirmed") + " · " +
+                        (place.observations_count || 1) + " observation(s)" +
+                        (place.similarity_score ? " · ressemblance " + Math.round(place.similarity_score * 100) + "% (candidat)" : "");
+                    item.append(title, description, meta);
+                    if (place.identity_status !== "confirmed") {
+                        const labelInput = document.createElement("input");
+                        labelInput.maxLength = 120;
+                        labelInput.placeholder = "Nom du lieu après vérification";
+                        const confirmButton = document.createElement("button");
+                        confirmButton.type = "button";
+                        confirmButton.textContent = "Confirmer ce lieu";
+                        confirmButton.addEventListener("click", async () => {
+                            const label = labelInput.value.trim();
+                            if (!label) {
+                                setLocationStatus("Donne un nom au lieu avant de le confirmer.");
+                                return;
+                            }
+                            try {
+                                await apiCall("/api/world/places/" + encodeURIComponent(place.place_id) + "/confirm", {
+                                    method: "POST",
+                                    body: { label, evidence: "Lieu vérifié et confirmé manuellement par le superviseur." }
+                                });
+                                setLocationStatus("Lieu confirmé : " + label);
+                                await window.loadWorldMap();
+                            } catch (error) {
+                                setLocationStatus("Confirmation impossible : " + error.message);
+                            }
+                        });
+                        item.append(labelInput, confirmButton);
+                    }
+                    placesList.appendChild(item);
+                });
+            }
+        }
+        if (!mapElement || !window.L) {
+            if (mapElement) mapElement.textContent = "La bibliothèque cartographique n'a pas pu être chargée.";
+            return;
+        }
+        if (!leafletMap) {
+            leafletMap = window.L.map(mapElement, { scrollWheelZoom: false }).setView([46.6, 2.45], 6);
+            window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(leafletMap);
+            spatialLayer = window.L.layerGroup().addTo(leafletMap);
+        }
+        spatialLayer.clearLayers();
+        const visits = data.visits || [];
+        const bySession = new Map();
+        visits.forEach(point => {
+            const coords = [Number(point.latitude), Number(point.longitude)];
+            if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return;
+            if (!bySession.has(point.session_id)) bySession.set(point.session_id, []);
+            bySession.get(point.session_id).push(coords);
+            window.L.circleMarker(coords, { radius: 5, weight: 1, fillOpacity: 0.75 })
+                .bindTooltip(new Date(point.recorded_at).toLocaleString("fr-FR"))
+                .addTo(spatialLayer);
+        });
+        bySession.forEach(coords => {
+            if (coords.length > 1) window.L.polyline(coords, { weight: 3, opacity: 0.75 }).addTo(spatialLayer);
+        });
+        (data.places || []).forEach(place => {
+            if (place.latitude == null || place.longitude == null) return;
+            const popup = document.createElement("div");
+            const strong = document.createElement("strong");
+            strong.textContent = place.label || "Lieu non identifié";
+            const p = document.createElement("p");
+            p.textContent = place.description || "";
+            popup.append(strong, p);
+            window.L.marker([Number(place.latitude), Number(place.longitude)])
+                .bindPopup(popup).addTo(spatialLayer);
+        });
+        const all = visits.map(p => [Number(p.latitude), Number(p.longitude)])
+            .concat((data.places || []).filter(p => p.latitude != null && p.longitude != null)
+                .map(p => [Number(p.latitude), Number(p.longitude)]))
+            .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+        if (all.length) leafletMap.fitBounds(window.L.latLngBounds(all), { padding: [24, 24], maxZoom: 15 });
+        setTimeout(() => leafletMap.invalidateSize(), 100);
+    }
+
+    window.loadWorldMap = async function() {
+        try {
+            const data = await apiCall("/api/world/map");
+            renderWorldMap(data.map || {});
+        } catch (error) { setLocationStatus("Impossible de charger la carte : " + error.message); }
+    };
+
+    window.startLocationTracking = async function() {
+        if (!navigator.geolocation) {
+            setLocationStatus("La géolocalisation n'est pas disponible sur ce navigateur.");
+            return;
+        }
+        if (locationWatchId !== null) return;
+        try {
+            const session = await apiCall("/api/world/location/session", {
+                method: "POST", body: { consented: true, device_label: "Navigateur Chappie" }
+            });
+            locationSessionId = session.session.session_id;
+            setLocationStatus("Session autorisée. Demande de position au navigateur…");
+            locationWatchId = navigator.geolocation.watchPosition(async position => {
+                latestLocation = position.coords.accuracy <= 250 ? position.coords : null;
+                try {
+                    await apiCall("/api/world/location", {
+                        method: "POST",
+                        body: {
+                            session_id: locationSessionId,
+                            latitude: position.coords.latitude, longitude: position.coords.longitude,
+                            accuracy_m: position.coords.accuracy, altitude_m: position.coords.altitude,
+                            heading_deg: position.coords.heading, speed_mps: position.coords.speed,
+                            recorded_at: new Date(position.timestamp).toISOString()
+                        }
+                    });
+                    samplesSinceRefresh += 1;
+                    setLocationStatus("Localisation active · précision " +
+                        Math.round(position.coords.accuracy) + " m. Arrête le suivi à tout moment.");
+                    if (samplesSinceRefresh >= 3) {
+                        samplesSinceRefresh = 0;
+                        await window.loadWorldMap();
+                    }
+                } catch (error) { setLocationStatus("Position non enregistrée : " + error.message); }
+            }, error => {
+                setLocationStatus("Erreur de localisation : " + error.message + " — fermeture de la session.");
+                window.stopLocationTracking();
+            }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+        } catch (error) {
+            locationSessionId = null;
+            setLocationStatus("Impossible de démarrer la session : " + error.message);
+        }
+    };
+
+    window.stopLocationTracking = async function() {
+        if (locationWatchId !== null) navigator.geolocation.clearWatch(locationWatchId);
+        locationWatchId = null;
+        const sessionId = locationSessionId;
+        locationSessionId = null;
+        latestLocation = null;
+        if (sessionId) {
+            try {
+                await apiCall("/api/world/location/session/stop", {
+                    method: "POST", body: { session_id: sessionId }
+                });
+            } catch (error) {
+                setLocationStatus("Suivi arrêté localement. Fermeture serveur à vérifier : " + error.message);
+                return;
+            }
+        }
+        setLocationStatus("Suivi arrêté. Aucune position n'est collectée en dehors d'une session active.");
+        await window.loadWorldMap();
+    };
+
+    window.stopSpeech = function() {
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        interruptAudioPlayback();
+    };
+
+    window.recordVoice = function() {
+        alert("La reconnaissance de profil vocal n'est pas encore implémentée : aucune empreinte biométrique réelle n'est entraînée.");
+    };
+
+    window.addEventListener("pagehide", () => {
+        if (locationWatchId !== null && navigator.geolocation) {
+            navigator.geolocation.clearWatch(locationWatchId);
+        }
+        if (locationSessionId) {
+            fetch("/api/world/location/session/stop", {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + getToken(),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ session_id: locationSessionId }),
+                keepalive: true
+            }).catch(() => {});
+        }
+    });
+
     // Charger automatiquement les états si un token est déjà enregistré au démarrage
+    const assessmentSystemSelect = document.getElementById("assessmentSystem");
+    if (assessmentSystemSelect) assessmentSystemSelect.addEventListener("change", window.updateSkillBranches);
+
     if (savedToken) {
         window.fetchPsychology();
+        window.loadWorldMap();
+        window.loadCausalLearning();
+        window.loadSkills();
     }
 });

@@ -4,9 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#070b14">
-  <meta name="description" content="Interface cognitive et interactive de Chappie V22.0">
-  <title>Chappie V22.0 — Interface cognitive</title>
+  <meta name="description" content="Chappie V33 — compagnon cognitif, mémoire et carte du monde">
+  <title>Chappie V33 — Compagnon cognitif</title>
 
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 
   <style>
@@ -740,6 +742,37 @@
        MONDE
     ========================= */
 
+    .advanced-tools > summary { cursor:pointer; font-weight:650; color:var(--cyan); padding:4px 0; }
+    .advanced-tools-content { display:grid; gap:14px; margin-top:14px; }
+    .skills-tree { display:grid; gap:10px; }
+    .skills-tree details { background:rgba(15,23,42,.62); border:1px solid var(--card-border); border-radius:12px; padding:12px; }
+    .skills-tree summary { cursor:pointer; font-weight:600; display:flex; justify-content:space-between; gap:10px; }
+    .skill-progress { height:7px; border-radius:999px; background:#1e293b; overflow:hidden; margin:8px 0; }
+    .skill-progress > span { display:block; height:100%; background:linear-gradient(90deg,var(--accent),var(--cyan)); }
+    .skill-branch-row { display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-top:1px solid rgba(148,163,184,.12); font-size:.88rem; }
+    .skill-branch-row small { color:var(--muted); white-space:nowrap; }
+    .chappie-world-map {
+      width:100%;
+      height: min(48vh, 430px);
+      min-height: 260px;
+      border:1px solid var(--card-border);
+      border-radius:14px;
+      overflow:hidden;
+      background:#0b1322;
+      margin:12px 0;
+      z-index:1;
+    }
+    .spatial-panel .panel-heading {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .spatial-panel .small { font-size:.78rem; line-height:1.45; }
+    .spatial-panel .world-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
+    .leaflet-container { font-family:inherit; }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:#101826; color:#f8fafc; }
     .world-placeholder {
       min-height:190px;
       padding:25px;
@@ -964,25 +997,13 @@
       <img src="/static/chappie-hero.png" alt="Portrait de Chappie" onerror="this.style.display='none'">
       <div>
         <h2>CHAPPIE</h2>
-        <p>Compagnon cognitif · V23.0</p>
+        <p>Compagnon cognitif · V33.0</p>
       </div>
     </div>
 
     <nav class="nav-menu" aria-label="Navigation principale">
       <button class="nav-item active" onclick="switchTab('accueil',this)">
         <span class="nav-icon">🏠</span> Accueil
-      </button>
-
-      <button class="nav-item" onclick="switchTab('chappie-3d',this)">
-        <span class="nav-icon">🤖</span> Visuel &amp; 3D
-      </button>
-
-      <button class="nav-item" onclick="switchTab('media',this)">
-        <span class="nav-icon">🎙️</span> Voix &amp; Vision
-      </button>
-
-      <button class="nav-item" onclick="switchTab('chat',this)">
-        <span class="nav-icon">💬</span> Chat &amp; Direct
       </button>
 
       <button class="nav-item" onclick="switchTab('skills',this)">
@@ -1022,9 +1043,9 @@
       Accueil
     </button>
 
-    <button class="mobile-nav-btn" onclick="switchTab('chappie-3d',this)">
-      <span class="icon">🤖</span>
-      Visuel
+    <button class="mobile-nav-btn" onclick="switchTab('skills',this)">
+      <span class="icon">🧠</span>
+      Cerveau
     </button>
 
     <button class="mobile-mic-btn" onclick="switchTab('media',this)"
@@ -1032,9 +1053,9 @@
       🎙️
     </button>
 
-    <button class="mobile-nav-btn" onclick="switchTab('skills',this)">
-      <span class="icon">🎓</span>
-      Cerveau
+    <button class="mobile-nav-btn" onclick="switchTab('world',this)">
+      <span class="icon">🌍</span>
+      Monde
     </button>
 
     <button class="mobile-nav-btn" onclick="switchTab('memory',this)">
@@ -1152,7 +1173,13 @@
               🎓 Voir mon cerveau
             </button>
             <button type="button" class="secondary" onclick="switchTab('chat')">
-              💬 Discuter
+              💬 Chat écrit
+            </button>
+            <button type="button" class="secondary" onclick="switchTab('media')">
+              🎙️ Parler en direct
+            </button>
+            <button type="button" class="secondary" onclick="switchTab('chappie-3d')">
+              🤖 Voir Chappie en 3D
             </button>
           </div>
         </div>
@@ -1519,149 +1546,25 @@
         </div>
 
         <div class="panel">
-          <h3>🌳 Les douze systèmes cognitifs</h3>
+          <h3>🌳 Arbre des compétences réelles</h3>
+          <p class="muted">Les branches s'ouvrent au fur et à mesure des évaluations. Une compétence n'augmente qu'avec une preuve distincte et ta validation.</p>
+          <div id="skillsTree" class="skills-tree">Chargement du cerveau…</div>
+        </div>
 
-          <div class="skills-grid">
-
-            <div class="skill-node">
-              <h4>🧠 1. La Tête — Raisonnement</h4>
-              <p class="muted">Comprendre, réfléchir et résoudre des problèmes.</p>
-              <div class="skill-children">
-                <span class="skill-child">Logique</span>
-                <span class="skill-child">Déduction</span>
-                <span class="skill-child">Analyse</span>
-                <span class="skill-child">Planification</span>
-                <span class="skill-child">Abstraction</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🗣️ 2. Les Mots — Langage</h4>
-              <p class="muted">Comprendre et produire une communication.</p>
-              <div class="skill-children">
-                <span class="skill-child">Vocabulaire</span>
-                <span class="skill-child">Grammaire</span>
-                <span class="skill-child">Expression</span>
-                <span class="skill-child">Compréhension</span>
-                <span class="skill-child">Conversation</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🤝 3. Le Lien — Relations</h4>
-              <p class="muted">Comprendre les interactions et les relations sociales.</p>
-              <div class="skill-children">
-                <span class="skill-child">Écoute</span>
-                <span class="skill-child">Coopération</span>
-                <span class="skill-child">Confiance</span>
-                <span class="skill-child">Empathie simulée</span>
-                <span class="skill-child">Contexte social</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🖐️ 4. Les Mains — Action</h4>
-              <p class="muted">Organiser et contrôler des actions.</p>
-              <div class="skill-children">
-                <span class="skill-child">Coordination</span>
-                <span class="skill-child">Manipulation</span>
-                <span class="skill-child">Précision</span>
-                <span class="skill-child">Séquençage</span>
-                <span class="skill-child">Exécution</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>✨ 5. L'Âme — Identité</h4>
-              <p class="muted">Construire une identité et un profil comportemental.</p>
-              <div class="skill-children">
-                <span class="skill-child">Préférences</span>
-                <span class="skill-child">Valeurs</span>
-                <span class="skill-child">Personnalité</span>
-                <span class="skill-child">Créativité</span>
-                <span class="skill-child">Expression</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>👁️ 6. Les Sens — Perception</h4>
-              <p class="muted">Interpréter les informations provenant du monde.</p>
-              <div class="skill-children">
-                <span class="skill-child">Vision</span>
-                <span class="skill-child">Audition</span>
-                <span class="skill-child">Reconnaissance</span>
-                <span class="skill-child">Classification</span>
-                <span class="skill-child">Orientation</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🎯 7. Attention — Concentration</h4>
-              <p class="muted">Sélectionner les informations importantes.</p>
-              <div class="skill-children">
-                <span class="skill-child">Attention sélective</span>
-                <span class="skill-child">Concentration</span>
-                <span class="skill-child">Priorisation</span>
-                <span class="skill-child">Vigilance</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>📚 8. Apprentissage — Évolution</h4>
-              <p class="muted">Apprendre à partir des expériences et des corrections.</p>
-              <div class="skill-children">
-                <span class="skill-child">Imitation</span>
-                <span class="skill-child">Enseignement</span>
-                <span class="skill-child">Expérimentation</span>
-                <span class="skill-child">Généralisation</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🗂️ 9. Mémoire — Souvenirs</h4>
-              <p class="muted">Enregistrer, organiser et retrouver les informations.</p>
-              <div class="skill-children">
-                <span class="skill-child">Autobiographique</span>
-                <span class="skill-child">Sémantique</span>
-                <span class="skill-child">Procédurale</span>
-                <span class="skill-child">Épisodique</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>⚖️ 10. Décision — Choix</h4>
-              <p class="muted">Comparer les possibilités et choisir une action.</p>
-              <div class="skill-children">
-                <span class="skill-child">Évaluation</span>
-                <span class="skill-child">Conséquences</span>
-                <span class="skill-child">Incertitude</span>
-                <span class="skill-child">Arbitrage</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🔥 11. Motivation — Objectifs</h4>
-              <p class="muted">Maintenir des objectifs et organiser les efforts.</p>
-              <div class="skill-children">
-                <span class="skill-child">Curiosité</span>
-                <span class="skill-child">Persévérance</span>
-                <span class="skill-child">Initiative</span>
-                <span class="skill-child">Priorités</span>
-              </div>
-            </div>
-
-            <div class="skill-node">
-              <h4>🔍 12. Métacognition — Réflexion</h4>
-              <p class="muted">Évaluer ses propres résultats et ses limites.</p>
-              <div class="skill-children">
-                <span class="skill-child">Auto-évaluation</span>
-                <span class="skill-child">Doute</span>
-                <span class="skill-child">Confiance</span>
-                <span class="skill-child">Correction</span>
-              </div>
-            </div>
-
-          </div>
+        <div class="panel">
+          <h3>🧪 Valider une sous-compétence</h3>
+          <p class="muted">Décris un exercice réellement effectué par Chappie. Un score de 70/100 ou plus valide l'évaluation, après ton approbation explicite.</p>
+          <label for="assessmentSystem">Système cognitif</label>
+          <select id="assessmentSystem"></select>
+          <label for="assessmentBranch">Sous-compétence</label>
+          <select id="assessmentBranch"></select>
+          <label for="assessmentScore">Score obtenu (0–100)</label>
+          <input id="assessmentScore" type="number" min="0" max="100" value="75">
+          <label for="assessmentEvidence">Preuve concrète de l'exercice</label>
+          <textarea id="assessmentEvidence" rows="3" maxlength="2000" placeholder="Décris la tâche, la réponse produite et comment tu as vérifié le résultat."></textarea>
+          <label class="inline-check"><input id="assessmentApproval" type="checkbox"> Je confirme avoir supervisé et vérifié cette évaluation.</label>
+          <button type="button" onclick="recordSkillAssessment()">Valider cette évaluation</button>
+          <div id="assessmentStatus" class="status">Aucune évaluation en attente.</div>
         </div>
 
         <div class="panel">
@@ -1684,6 +1587,29 @@ En attente de synchronisation du cerveau...
       ========================= -->
 
       <section id="section-world" class="tab-section">
+        <div class="panel spatial-panel">
+          <div class="panel-heading">
+            <div>
+              <h3>🌍 Le monde de Chappie</h3>
+              <p class="muted">Ses déplacements et les lieux observés, uniquement pendant une session que tu actives.</p>
+            </div>
+            <span class="badge">V33 · Carte spatiale</span>
+          </div>
+          <div id="chappieWorldMap" class="chappie-world-map" role="application" aria-label="Carte des positions et lieux mémorisés"></div>
+          <div id="worldMapStats" class="muted">Chargement des souvenirs géographiques…</div>
+          <div class="row-btns">
+            <button type="button" onclick="startLocationTracking()">▶ Activer la localisation</button>
+            <button type="button" class="secondary" onclick="stopLocationTracking()">■ Arrêter le suivi</button>
+            <button type="button" class="secondary" onclick="loadWorldMap()">Actualiser la carte</button>
+          </div>
+          <div id="locationStatus" class="status">Localisation inactive. Aucune position n'est collectée avant ton activation.</div>
+          <p class="muted small">La géolocalisation nécessite l'autorisation du navigateur et une connexion HTTPS. Le suivi s'arrête lorsque tu le demandes ou lorsque la page perd sa session. Les lieux visuels restent des observations non confirmées.</p>
+          <h4>Souvenirs visuels des lieux</h4>
+          <div id="worldPlacesList" class="world-grid">Aucun lieu observé pour le moment.</div>
+        </div>
+        <details class="panel advanced-tools">
+          <summary>🧪 Apprentissage avancé : objets et expériences</summary>
+          <div class="advanced-tools-content">
         <div class="panel">
           <h3>🧠 Ce que Chappie apprend sur les objets</h3>
           <p class="muted">Les propriétés ci-dessous sont des informations enseignées ou validées. Une propriété inconnue reste inconnue : Chappie ne doit pas la deviner.</p>
@@ -1804,39 +1730,13 @@ En attente de synchronisation du cerveau...
           <pre id="causalLearningOutput" class="output">Journal causal en attente de synchronisation.</pre>
         </div>
 
-        <div class="panel">
-          <h3>🌍 Modèle du monde de Chappie</h3>
-
-          <p class="muted">
-            Cette page est destinée à représenter l'environnement connu
-            de Chappie : lieux, objets, personnes et relations.
-          </p>
-
-          <div class="world-placeholder" style="margin-top:15px">
-            <div class="world-icon">🌐</div>
-            <h4>Carte de l'environnement</h4>
-            <p class="muted">
-              Le système de localisation et l'historique des lieux
-              restent à connecter au backend.
-            </p>
-            <span class="badge">Module en développement</span>
           </div>
-        </div>
+        </details>
 
         <div class="panel">
-          <h3>📍 Lieux connus</h3>
-
-          <div class="world-grid">
-            <div class="info-card">
-              <h4>🏠 Lieux personnels</h4>
-              <p class="muted">À renseigner avec autorisation.</p>
-            </div>
-
-            <div class="info-card">
-              <h4>🌳 Lieux explorés</h4>
-              <p class="muted">Historique à connecter.</p>
-            </div>
-          </div>
+          <h3>🧭 Modèle du monde</h3>
+          <p class="muted">Les objets, relations et observations restent accessibles dans les outils d'apprentissage ci-dessous. Une scène visuelle n'est jamais automatiquement déclarée comme un lieu reconnu.</p>
+          <button type="button" class="secondary" onclick="loadWorldMap()">Actualiser les souvenirs géographiques</button>
         </div>
 
         <div class="panel">
@@ -1978,9 +1878,9 @@ Sélectionne une catégorie pour consulter les données.
       "chappie-3d": "Visuel & 3D",
       media: "Voix & Vision",
       chat: "Chat & Direct",
-      skills: "Arbre de compétences",
-      world: "Modèle du monde",
-      memory: "Rêves & Pensées"
+      skills: "Cerveau",
+      world: "Carte & Monde",
+      memory: "Mémoire"
     };
 
     function switchTab(tabId, btnElement) {
@@ -2014,6 +1914,13 @@ Sélectionne une catégorie pour consulter les données.
 
       if (title) {
         title.textContent = pageTitles[tabId] || "Chappie";
+      }
+
+      if (tabId === "world" && window.loadWorldMap) {
+        window.loadWorldMap();
+      }
+      if (tabId === "skills" && window.loadSkills) {
+        window.loadSkills();
       }
 
       const main = document.getElementById("mainContainer");

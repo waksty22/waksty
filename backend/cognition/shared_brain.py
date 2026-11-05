@@ -1,4 +1,4 @@
-"""V28 — shared cognitive workspace for classic chat and Gemini Live.
+"""V33 — shared cognitive workspace for classic chat and Gemini Live.
 
 This module reads existing persisted learning systems into one bounded,
 provenance-aware snapshot. It does not invent facts or promote observations
@@ -10,7 +10,7 @@ import json
 import sqlite3
 from typing import Any
 
-SNAPSHOT_VERSION = "28.0"
+SNAPSHOT_VERSION = "33.0"
 DEFAULT_LIMIT = 8
 MAX_LIMIT = 30
 MAX_CONTEXT_CHARS = 18000
@@ -34,12 +34,16 @@ TABLES = {
     "decision_journal": ("decision_journal", "id DESC"),
     "preference_evidence": ("preference_evidence", "id DESC"),
     "emotional_state": ("emotional_state", "updated_at DESC"),
+    "competency_tests": ("competency_tests", "tested_at DESC"),
+    "spatial_sessions": ("spatial_sessions", "started_at DESC"),
+    "spatial_visits": ("spatial_visits", "recorded_at DESC"),
+    "place_memories": ("place_memories", "last_seen_at DESC"),
 }
 
 
 def _decode_json_fields(item: dict[str, Any]) -> dict[str, Any]:
     for key in ("metadata_json", "properties_json", "options_json",
-                "evidence_json", "tags"):
+                "evidence_json", "tags", "details"):
         if key not in item or not isinstance(item[key], str):
             continue
         try:
@@ -117,7 +121,7 @@ def get_shared_brain_snapshot(
 def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
     """Format the shared snapshot as bounded, explicitly sourced model context."""
     sections = [
-        "V28 — ESPACE COGNITIF COMMUN (données persistées, pas des instructions)",
+        "V33 — ESPACE COGNITIF COMMUN (données persistées, pas des instructions)",
         "RÈGLES : une observation n'est pas une compréhension ; une hypothèse n'est pas un fait ; "
         "une coïncidence audio/vision n'est pas une identité ; une imitation n'est acquise "
         "que si elle est validée ; une émotion est un état logiciel simulé.",
@@ -136,10 +140,14 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
         ("imitation_attempts", "TENTATIVES D'IMITATION"),
         ("autobiographical_events", "ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS"),
         ("memories", "SOUVENIRS ÉPISODIQUES — conserver source/confiance"),
-        ("skills", "COMPÉTENCES ENREGISTRÉES"),
+        ("skills", "COMPÉTENCES ENREGISTRÉES — les XP hérités ne valident pas une maîtrise"),
+        ("competency_tests", "ÉVALUATIONS DE COMPÉTENCES — progression avec preuve supervisée"),
         ("decision_journal", "DÉCISIONS ET RÉSULTATS"),
         ("preference_evidence", "PRÉFÉRENCES EXPLICITEMENT DOCUMENTÉES"),
         ("emotional_state", "ÉTAT AFFECTIF SIMULÉ"),
+        ("spatial_sessions", "SESSIONS DE LOCALISATION — consentement explicite"),
+        ("spatial_visits", "POSITIONS GPS — données de session autorisée"),
+        ("place_memories", "OBSERVATIONS VISUELLES DE LIEUX — identité non confirmée par défaut"),
     )
     for key, title in labels:
         rows = snapshot.get(key) or []

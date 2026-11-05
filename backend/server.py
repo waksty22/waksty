@@ -1,4 +1,4 @@
-"""Chappie V19.3 — architecture cognitive complète.
+"""Chappie V33 — architecture cognitive unifiée.
 Python 3.11+. Les émotions et les rêves sont des états logiciels simulés,
 pas une conscience démontrée.
 """
@@ -59,6 +59,10 @@ from memory.autobiographical import (
     search_autobiographical_events,
     autobiographical_statistics,
 )
+from world.spatial_memory import (
+    init_spatial_tables, start_location_session, stop_location_session,
+    record_location, record_place_observation, confirm_place_identity, get_map_state,
+)
 from world.world_model import (
     init_world_tables,
     upsert_world_entity,
@@ -75,7 +79,7 @@ from learning.curriculum import (
 from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
     get_usable_words, get_repeatable_words, gate_spoken_text,
-    record_heard_word, record_heard_text,
+    record_heard_word, record_heard_text, text_uses_only_allowed_words,
 )
 from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,
@@ -121,6 +125,8 @@ from cognition.development import (
     development_statistics,
 )
 from cognition.engine import cognitive_engine
+from cognition.catalog import COGNITIVE_CATALOG
+from cognition.skill_evidence import build_validated_skill_data
 from cognition.shared_brain import (
     get_shared_brain_snapshot,
     format_shared_brain_context,
@@ -129,7 +135,7 @@ from cognition.shared_brain import (
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V28.0 — cerveau cognitif unifié"
+APP_NAME = "Chappie V33.0 — évolution cognitive unifiée"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -415,7 +421,8 @@ def init_db() -> None:
 
     with db_connection() as db:  
         init_memory_tables(db)  
-        init_world_tables(db)  
+        init_world_tables(db)
+        init_spatial_tables(db)
         init_learning_tables(db)
         init_language_tables(db)
         init_sensory_tables(db)
@@ -514,7 +521,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="28.0.0",
+    version="33.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -760,40 +767,37 @@ def get_user_intention(user_id: str) -> dict[str, Any]:
     }
 
 def get_skills_summary(user_id: str) -> dict[str, Any]:
+    """Build maturity only from branch-level assessments approved by the supervisor."""
     get_emotions(user_id)
+    with db_connection() as db:
+        legacy_rows = db.execute(
+            """SELECT skill_name, level, xp, evidence, updated_at
+               FROM skills WHERE user_id=?""",
+            (user_id,),
+        ).fetchall()
+        test_rows = db.execute(
+            """SELECT test_name, passed, score, details, tested_at
+               FROM competency_tests
+               WHERE user_id=? AND passed=1
+               ORDER BY tested_at ASC, id ASC""",
+            (user_id,),
+        ).fetchall()
 
-    with db_connection() as db:  
-        rows = db.execute(  
-            """  
-            SELECT skill_name, level, xp, evidence, updated_at  
-            FROM skills  
-            WHERE user_id=?  
-            """,  
-            (user_id,),  
-        ).fetchall()  
+    skills_list = [dict(row) for row in legacy_rows]
+    db_skills_data, assessment_count = build_validated_skill_data(
+        [dict(row) for row in test_rows]
+    )
 
-    skills_list = [dict(row) for row in rows]  
-
-    db_skills_data: dict[str, Any] = {}  
-
-    for skill in skills_list:  
-        db_skills_data[skill["skill_name"]] = {  
-            "default": {  
-                "level": skill["level"],  
-                "xp": skill["xp"],  
-                "confidence": 0.8,  
-            }  
-        }  
-
-    computed_profile = cognitive_engine.compute_cognitive_profile(  
-        user_id,  
-        db_skills_data,  
-    )  
-
-    return {  
-        "skills": skills_list,  
-        "average_level": computed_profile.get("global_maturity", 1.0),  
-        "cognitive_profile": computed_profile,  
+    computed_profile = cognitive_engine.compute_cognitive_profile(
+        user_id, db_skills_data, force_recompute=True,
+    )
+    return {
+        "skills": skills_list,
+        "average_level": computed_profile.get("global_maturity", 0.0),
+        "cognitive_profile": computed_profile,
+        "validated_branch_assessments": assessment_count,
+        "maturity_source": "validated_supervised_branch_assessments",
+        "legacy_aggregate_xp_affects_maturity": False,
     }
 
 def reset_chappie_life(user_id: str) -> dict[str, Any]:
@@ -845,7 +849,14 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM mood_events WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM affective_history WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM decision_journal WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))  
+        db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))
+        # Clear all autobiographical, cross-modal and spatial traces on a true new-life reset.
+        db.execute("DELETE FROM autobiographical_links WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM autobiographical_events WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM perception_fusion_candidates WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM spatial_visits WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM spatial_sessions WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM place_memories WHERE user_id=?", (user_id,))
 
         db.execute(  
             """  
@@ -1623,10 +1634,23 @@ def get_identity_prompt(user_id: str) -> str:
             (user_id,),  
         ).fetchall()  
 
-    skills_text = "\n".join(  
-        f"- {s['skill_name']} : Niveau {s['level']:.0f} (XP: {s['xp']:.0f})"  
-        for s in skills  
-    ) or "Aucune compétence enregistrée."  
+    validated_skill_lines = []
+    for system_key, system_data in cognitive_profile.get("systems", {}).items():
+        validated_branches = [
+            branch_data.get("name", branch_key)
+            + " (niveau " + str(branch_data.get("level", 0)) + "/30)"
+            for branch_key, branch_data in system_data.get("sub_branches", {}).items()
+            if float(branch_data.get("level", 0) or 0) > 0
+        ]
+        if validated_branches:
+            validated_skill_lines.append(
+                "- " + system_data.get("name", system_key) + " : "
+                + ", ".join(validated_branches[:12])
+            )
+    skills_text = "\n".join(validated_skill_lines) or (
+        "Aucune sous-compétence validée par un test supervisé. "
+        "Les anciens XP agrégés ne prouvent aucune maîtrise."
+    )
 
     if avg_level < 3.0:  
         stage_instruction = (  
@@ -1864,21 +1888,6 @@ TOOLS = [{
             },
         },
         {
-            "name": "update_skill",
-            "description": "Mettre à jour l'XP d'une compétence de Chappie.",
-            "parameters": {
-                "type": "OBJECT",
-                "properties": {
-                    "skill_name": {"type": "STRING"},
-                    "xp_delta": {"type": "NUMBER"},
-                    "evidence": {"type": "STRING"},
-                },
-                "required": [
-                    "skill_name", "xp_delta", "evidence",
-                ],
-            },
-        },
-        {
             "name": "get_shared_brain_state",
             "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
             "parameters": {
@@ -1925,14 +1934,6 @@ def execute_tool(
                     10,  
                 )  
             }  
-
-        if name == "update_skill":  
-            return update_skill(  
-                user_id,  
-                str(args.get("skill_name", "")),  
-                float(args.get("xp_delta", 10.0)),  
-                str(args.get("evidence", "Progression")),  
-            )  
 
         if name == "get_shared_brain_state":
             with db_connection() as brain_db:
@@ -2755,7 +2756,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "28.0.0",
+        "version": "33.0.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -2780,19 +2781,14 @@ async def api_status(auth=Depends(require_auth)):
     emotions = get_emotions(user_id)  
     skills = get_skills_summary(user_id)  
 
-    try:  
-        from cognition.engine import calculate_cognitive_profile  
-
-        profile = calculate_cognitive_profile(user_id)  
-    except Exception:  
-        profile = {}  
+    profile = skills.get("cognitive_profile", {})
 
     return {  
         "user_id": user_id,  
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "27.0.0",  
+        "version": "33.0.0",  
     }
 
 @app.post("/api/chat")
@@ -2938,55 +2934,99 @@ async def api_skills(auth=Depends(require_auth)):
 
     skills = get_skills_summary(user_id)  
 
-    try:  
-        from cognition.engine import calculate_cognitive_profile  
-
-        profile = calculate_cognitive_profile(user_id)  
-    except Exception as exc:  
-        print("[COGNITION PROFILE]", repr(exc))  
-        profile = {}  
+    profile = skills.get("cognitive_profile", {})
 
     return {  
         "skills": skills,  
         "cognition": profile,  
     }
 
-@app.post("/api/skills/update")
-async def api_update_skill(
-    request: Request,
-    auth=Depends(require_auth)
-):
+@app.get("/api/cognition/skills/catalog")
+async def api_cognitive_skill_catalog(auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    return {
+        "systems": [
+            {
+                "key": system_key,
+                "name": system.get("name", system_key),
+                "branches": [
+                    {"key": branch_key, "name": branch.get("name", branch_key)}
+                    for branch_key, branch in system.get("sub_branches", {}).items()
+                ],
+            }
+            for system_key, system in COGNITIVE_CATALOG.items()
+        ],
+        "assessment_requires_supervisor": True,
+        "pass_threshold": 70,
+    }
+
+
+@app.post("/api/cognition/skills/assessments")
+async def api_record_skill_assessment(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     data = await request.json()
-
-    skill_name = str(data.get("skill") or data.get("name") or "").strip()  
-
-    try:  
-        xp_delta = float(data.get("xp", 0))  
-    except (TypeError, ValueError):  
-        raise HTTPException(status_code=400, detail="XP invalide.")  
-
-    if not skill_name:  
-        raise HTTPException(status_code=400, detail="Compétence manquante.")  
-
-    if not math.isfinite(xp_delta):  
-        raise HTTPException(status_code=400, detail="XP invalide.")  
-
-    if abs(xp_delta) > 1000:  
-        raise HTTPException(status_code=400, detail="Valeur XP trop élevée.")  
-
-    result = update_skill(  
-        user_id=user_id,  
-        skill_name=skill_name,  
-        xp_delta=xp_delta,  
-        evidence=str(data.get("evidence") or "manual"),  
-    )  
-
-    return {  
-        "success": True,  
-        "result": result,  
-        "skills": get_skills_summary(user_id),  
+    system_key = str(data.get("system", "")).strip()
+    branch_key = str(data.get("branch", "")).strip()
+    evidence = str(data.get("evidence", "")).strip()
+    if system_key not in COGNITIVE_CATALOG:
+        raise HTTPException(status_code=422, detail="Système cognitif inconnu.")
+    branches = COGNITIVE_CATALOG[system_key].get("sub_branches", {})
+    if branch_key not in branches:
+        raise HTTPException(status_code=422, detail="Sous-compétence inconnue.")
+    if data.get("supervisor_approved") is not True:
+        raise HTTPException(status_code=403, detail="Une validation explicite du superviseur est obligatoire.")
+    if len(evidence) < 20 or len(evidence) > 2000:
+        raise HTTPException(status_code=422, detail="Décris une preuve concrète (20 à 2000 caractères).")
+    try:
+        score = float(data.get("score"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Score invalide.")
+    if not math.isfinite(score) or not 0 <= score <= 100:
+        raise HTTPException(status_code=422, detail="Le score doit être compris entre 0 et 100.")
+    test_name = system_key + ":" + branch_key
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": evidence,
     }
+    try:
+        with db_connection() as db:
+            prior = db.execute(
+                "SELECT details FROM competency_tests WHERE user_id=? AND test_name=?",
+                (user_id, test_name),
+            ).fetchall()
+            for row in prior:
+                try:
+                    old_details = json.loads(row["details"] or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if old_details.get("evidence") == evidence:
+                    raise HTTPException(status_code=409, detail="Cette preuve a déjà été utilisée pour cette sous-compétence.")
+            result = evaluate_competency_test(
+                db, user_id, test_name, score >= 70, score, details
+            )
+            db.commit()
+        cognitive_engine.invalidate_cache(user_id)
+        summary = get_skills_summary(user_id)
+        return {
+            "ok": True,
+            "assessment": result,
+            "maturity": summary["average_level"],
+            "progression_requires_distinct_evidence": True,
+        }
+    except HTTPException:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/skills/update")
+async def api_update_skill(auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    raise HTTPException(
+        status_code=410,
+        detail="La progression par XP libre est désactivée. Utilise une évaluation de sous-compétence avec preuve et validation du superviseur.",
+    )
 
 @app.get("/api/cognition/development")
 async def api_cognition_development(auth=Depends(require_auth)):
@@ -3124,6 +3164,136 @@ async def api_world_relations(auth=Depends(require_auth)):
         "relations": relations,  
     }
 
+@app.get("/api/world/map")
+async def api_world_map(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {"version": "33.0.0", "map": get_map_state(db, user_id)}
+
+
+@app.post("/api/world/location/session")
+async def api_start_location_session(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            session = start_location_session(
+                db, user_id, data.get("consented") is True,
+                str(data.get("device_label", ""))
+            )
+        return {"ok": True, "session": session}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/location/session/stop")
+async def api_stop_location_session(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = stop_location_session(
+                db, user_id, str(data.get("session_id", ""))
+            )
+        return {"ok": True, "session": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/location")
+async def api_record_world_location(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_location(
+                db, user_id, str(data.get("session_id", "")),
+                data.get("latitude"), data.get("longitude"),
+                data.get("accuracy_m"), data.get("altitude_m"),
+                data.get("heading_deg"), data.get("speed_mps"),
+                str(data.get("recorded_at", "")),
+            )
+        return {"ok": True, "location": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/places/observe")
+async def api_record_place_observation(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            place = record_place_observation(
+                db, user_id, str(data.get("description", "")),
+                data.get("latitude"), data.get("longitude"),
+                str(data.get("label", "")),
+                str(data.get("visual_signature", "")),
+                data.get("confidence", 0.35),
+                str(data.get("session_id", "")),
+            )
+        return {"ok": True, "place": place}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/places/{place_id}/confirm")
+async def api_confirm_world_place(place_id: str, request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = confirm_place_identity(
+                db, user_id, place_id,
+                str(data.get("label", "")), str(data.get("evidence", "")),
+            )
+        return {"ok": True, "place": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/diagnostics")
+async def api_diagnostics(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    required_tables = (
+        "conversations", "memories", "personal_vocabulary",
+        "sensory_observations", "world_entities", "world_relations",
+        "autobiographical_events", "autobiographical_links",
+        "affective_history", "decision_journal", "preference_evidence",
+        "competency_tests", "skills", "imitation_examples", "imitation_attempts",
+        "perception_fusion_candidates",
+        "spatial_sessions", "spatial_visits", "place_memories",
+    )
+    with db_connection() as db:
+        existing = {
+            row["name"] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        tables = {name: name in existing for name in required_tables}
+        snapshot = get_shared_brain_snapshot(db, user_id, limit=10)
+    return {
+        "version": "33.0.0",
+        "database": {"path_configured": bool(DB_PATH), "required_tables": tables,
+                     "all_required_tables_present": all(tables.values())},
+        "modules": {
+            "shared_brain": True, "classic_chat": True, "gemini_live_bridge": True,
+            "vocabulary_gate_classic_chat": True,
+            "live_audio_lexical_gate": "buffered_until_transcript_validation",
+            "spatial_memory": True, "visual_place_identity": "description_similarity_candidates_require_manual_confirmation",
+        },
+        "snapshot_totals": snapshot.get("statistics", {}).get("totals", {}),
+        "provider": {"gemini_api_key_configured": bool(GEMINI_API_KEY)},
+        "note": "Diagnostic de configuration et de schéma; ne remplace pas un test audio/vidéo réel.",
+    }
+
+
+@app.post("/api/memory/consolidate")
+async def api_consolidate_memory(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    return {"ok": True, "consolidation": consolidate_conversation(user_id)}
+
+
 @app.get("/api/dreams")
 async def api_dreams(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
@@ -3225,63 +3395,22 @@ async def api_mood_history(limit: int = 10, auth=Depends(require_auth)):
     return {"events": events}
 
 @app.post("/api/voice-profiles/{profile_name}")
-async def api_enroll_voice(
-    profile_name: str,
-    request: Request,
-    auth=Depends(require_auth)
-):
-    user_id = _authenticated_user(auth)
-    profile_name = profile_name.strip()
+async def api_enroll_voice(profile_name: str, auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    raise HTTPException(
+        status_code=501,
+        detail="L'entraînement d'une empreinte vocale n'est pas implémenté. Aucun profil biométrique n'est créé.",
+    )
 
-    if not profile_name:  
-        raise HTTPException(status_code=400, detail="Nom de profil manquant.")  
-
-    body = await request.body()  
-    if not body:  
-        raise HTTPException(status_code=400, detail="Audio manquant.")  
-
-    now = utc_now()  
-    with db_connection() as db:  
-        db.execute(  
-            """  
-            INSERT INTO voice_profiles  
-            (user_id, profile_name, embedding_json, created_at, updated_at)  
-            VALUES (?, ?, ?, ?, ?)  
-            ON CONFLICT(user_id, profile_name) DO UPDATE SET  
-                updated_at=excluded.updated_at  
-            """,  
-            (user_id, profile_name, json.dumps({"size": len(body)}), now, now)  
-        )  
-        db.commit()  
-
-    return {"success": True, "profile_name": profile_name}
 
 @app.post("/api/voice-profiles-identify")
-async def api_identify_voice(
-    request: Request,
-    auth=Depends(require_auth)
-):
-    user_id = _authenticated_user(auth)
-    body = await request.body()
+async def api_identify_voice(auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    raise HTTPException(
+        status_code=501,
+        detail="L'identification biométrique vocale n'est pas implémentée.",
+    )
 
-    if not body:  
-        raise HTTPException(status_code=400, detail="Audio manquant.")  
-
-    with db_connection() as db:  
-        row = db.execute(  
-            """  
-            SELECT profile_name FROM voice_profiles  
-            WHERE user_id = ?  
-            ORDER BY id ASC  
-            LIMIT 1  
-            """,  
-            (user_id,),  
-        ).fetchone()  
-
-    profile_name = row["profile_name"] if row else "Inconnu"  
-    score = 0.85 if row else 0.1  
-
-    return {"profile_name": profile_name, "score": score}
 
 @app.get("/api/goals")
 async def api_goals(auth=Depends(require_auth)):
@@ -3503,6 +3632,12 @@ async def api_vision_analyze(
             link_temporally_cooccurring_observation(
                 db, user_id, observation["observation_id"]
             )
+            place_observation = record_place_observation(
+                db, user_id, answer,
+                data.get("latitude"), data.get("longitude"),
+                str(data.get("place_label", "")), answer, 0.35,
+                str(data.get("session_id", "")),
+            )
             db.commit()
 
         return {
@@ -3510,7 +3645,8 @@ async def api_vision_analyze(
             "analysis": answer,
             "question": question,
             "observation_id": observation["observation_id"],
-            "stored_as": "sensory_observation",
+            "place_observation": place_observation,
+            "stored_as": "sensory_observation_and_unconfirmed_place_observation",
             "is_learned_fact": False,
         }
     except HTTPException:
@@ -3693,7 +3829,7 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "27.0.0",
+        "version": "33.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,
@@ -3703,7 +3839,12 @@ async def api_config(auth=Depends(require_auth)):
         "supports_supervised_imitation": True,
         "supports_experiment_approval": True,
         "supports_shared_cognitive_brain": True,
+        "supports_spatial_memory": True,
+        "supports_consent_based_location_sessions": True,
+        "supports_visual_place_observations": True,
+        "supports_unified_dashboard_v33": True,
         "supports_live_function_tools": True,
+        "supports_live_newborn_audio_gate": True,
         "persists_live_conversations": True,
         "cognitive_systems": 12,  
         "supports_vision": True,  
@@ -3721,7 +3862,7 @@ async def api_shared_brain_snapshot(auth=Depends(require_auth)):
     with db_connection() as db:
         snapshot = get_shared_brain_snapshot(db, user_id, limit=20)
     return {
-        "version": "28.0.0",
+        "version": "33.0.0",
         "brain": snapshot,
         "context": format_shared_brain_context(snapshot),
     }
@@ -4035,7 +4176,7 @@ async def websocket_endpoint(
                 "model": GEMINI_LIVE_MODEL,
             })
 
-            live_turn_state = {"user": "", "assistant": ""}
+            live_turn_state = {"user": "", "assistant": "", "audio": []}
 
             async def client_to_gemini():
                 while True:
@@ -4125,6 +4266,8 @@ async def websocket_endpoint(
                             }, ensure_ascii=False))
 
                     if response.get("serverContent", {}).get("interrupted"):
+                        live_turn_state["audio"] = []
+                        live_turn_state["assistant"] = ""
                         await websocket.send_json({"type": "interrupt"})
 
                     server_content = response.get("serverContent") or {}
@@ -4167,7 +4310,6 @@ async def websocket_endpoint(
                             live_turn_state["assistant"] = merge_live_transcript(
                                 live_turn_state["assistant"], spoken_text
                             )
-                            await websocket.send_json({"type": "text", "text": spoken_text})
 
                     model_turn = server_content.get("modelTurn") or {}
                     for part in model_turn.get("parts", []):
@@ -4176,10 +4318,8 @@ async def websocket_endpoint(
                             mime_type = str(inline.get("mimeType") or inline.get("mime_type") or "")
                             match = re.search(r"rate=(\d+)", mime_type)
                             sample_rate = int(match.group(1)) if match else 24000
-                            await websocket.send_json({
-                                "type": "audio_stream",
-                                "audio": inline["data"],
-                                "sample_rate": sample_rate,
+                            live_turn_state["audio"].append({
+                                "audio": inline["data"], "sample_rate": sample_rate,
                             })
                         elif isinstance(part.get("text"), str) and part["text"].strip():
                             part_text = part["text"].strip()
@@ -4187,30 +4327,55 @@ async def websocket_endpoint(
                                 live_turn_state["assistant"] = merge_live_transcript(
                                     live_turn_state["assistant"], part_text
                                 )
-                            await websocket.send_json({
-                                "type": "text",
-                                "text": part_text,
-                            })
 
                     if server_content.get("turnComplete"):
-                        if live_turn_state["user"] or live_turn_state["assistant"]:
+                        assistant_text = live_turn_state["assistant"].strip()
+                        with db_connection() as language_db:
+                            repeatable_words = get_repeatable_words(language_db, user_id)
+                        maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+                        lexical_gate_passed = (
+                            text_uses_only_allowed_words(assistant_text, repeatable_words)
+                            and (maturity >= 3.0 or sum(
+                                1 for part in assistant_text.split()
+                                if any(character.isalnum() for character in part)
+                            ) <= 1)
+                        )
+                        if lexical_gate_passed:
+                            for audio_chunk in live_turn_state["audio"]:
+                                await websocket.send_json({
+                                    "type": "audio_stream",
+                                    **audio_chunk,
+                                })
+                            if assistant_text:
+                                await websocket.send_json({
+                                    "type": "text", "text": assistant_text,
+                                })
+                        else:
+                            await websocket.send_json({
+                                "type": "speech_blocked",
+                                "message": "Chappie n'a pas encore acquis les mots nécessaires pour prononcer cette réponse.",
+                            })
+
+                        if live_turn_state["user"] or assistant_text:
                             try:
                                 save_conversation_turn(
                                     user_id,
                                     live_turn_state["user"],
-                                    live_turn_state["assistant"],
+                                    assistant_text if lexical_gate_passed else "",
                                     source="gemini_live",
                                 )
                                 log.info(
-                                    "[V28] Tour Live enregistré dans le cerveau commun "
-                                    "(utilisateur=%s, user_chars=%s, assistant_chars=%s)",
+                                    "[V33] Tour Live enregistré dans le cerveau commun "
+                                    "(utilisateur=%s, user_chars=%s, assistant_chars=%s, audio_chunks=%s)",
                                     user_id, len(live_turn_state["user"]),
-                                    len(live_turn_state["assistant"]),
+                                    len(assistant_text) if lexical_gate_passed else 0,
+                                    len(live_turn_state["audio"]) if lexical_gate_passed else 0,
                                 )
                             except Exception:
-                                log.exception("[V28] Échec d'enregistrement du tour Live")
-                            live_turn_state["user"] = ""
-                            live_turn_state["assistant"] = ""
+                                log.exception("[V33] Échec d'enregistrement du tour Live")
+                        live_turn_state["user"] = ""
+                        live_turn_state["assistant"] = ""
+                        live_turn_state["audio"] = []
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

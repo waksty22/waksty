@@ -2795,12 +2795,7 @@ async def api_status(auth=Depends(require_auth)):
     emotions = get_emotions(user_id)  
     skills = get_skills_summary(user_id)  
 
-    try:  
-        from cognition.engine import calculate_cognitive_profile  
-
-        profile = calculate_cognitive_profile(user_id)  
-    except Exception:  
-        profile = {}  
+    profile = skills.get("cognitive_profile", {})
 
     return {  
         "user_id": user_id,  
@@ -2953,55 +2948,99 @@ async def api_skills(auth=Depends(require_auth)):
 
     skills = get_skills_summary(user_id)  
 
-    try:  
-        from cognition.engine import calculate_cognitive_profile  
-
-        profile = calculate_cognitive_profile(user_id)  
-    except Exception as exc:  
-        print("[COGNITION PROFILE]", repr(exc))  
-        profile = {}  
+    profile = skills.get("cognitive_profile", {})
 
     return {  
         "skills": skills,  
         "cognition": profile,  
     }
 
-@app.post("/api/skills/update")
-async def api_update_skill(
-    request: Request,
-    auth=Depends(require_auth)
-):
+@app.get("/api/cognition/skills/catalog")
+async def api_cognitive_skill_catalog(auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    return {
+        "systems": [
+            {
+                "key": system_key,
+                "name": system.get("name", system_key),
+                "branches": [
+                    {"key": branch_key, "name": branch.get("name", branch_key)}
+                    for branch_key, branch in system.get("sub_branches", {}).items()
+                ],
+            }
+            for system_key, system in COGNITIVE_CATALOG.items()
+        ],
+        "assessment_requires_supervisor": True,
+        "pass_threshold": 70,
+    }
+
+
+@app.post("/api/cognition/skills/assessments")
+async def api_record_skill_assessment(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     data = await request.json()
-
-    skill_name = str(data.get("skill") or data.get("name") or "").strip()  
-
-    try:  
-        xp_delta = float(data.get("xp", 0))  
-    except (TypeError, ValueError):  
-        raise HTTPException(status_code=400, detail="XP invalide.")  
-
-    if not skill_name:  
-        raise HTTPException(status_code=400, detail="Compétence manquante.")  
-
-    if not math.isfinite(xp_delta):  
-        raise HTTPException(status_code=400, detail="XP invalide.")  
-
-    if abs(xp_delta) > 1000:  
-        raise HTTPException(status_code=400, detail="Valeur XP trop élevée.")  
-
-    result = update_skill(  
-        user_id=user_id,  
-        skill_name=skill_name,  
-        xp_delta=xp_delta,  
-        evidence=str(data.get("evidence") or "manual"),  
-    )  
-
-    return {  
-        "success": True,  
-        "result": result,  
-        "skills": get_skills_summary(user_id),  
+    system_key = str(data.get("system", "")).strip()
+    branch_key = str(data.get("branch", "")).strip()
+    evidence = str(data.get("evidence", "")).strip()
+    if system_key not in COGNITIVE_CATALOG:
+        raise HTTPException(status_code=422, detail="Système cognitif inconnu.")
+    branches = COGNITIVE_CATALOG[system_key].get("sub_branches", {})
+    if branch_key not in branches:
+        raise HTTPException(status_code=422, detail="Sous-compétence inconnue.")
+    if data.get("supervisor_approved") is not True:
+        raise HTTPException(status_code=403, detail="Une validation explicite du superviseur est obligatoire.")
+    if len(evidence) < 20 or len(evidence) > 2000:
+        raise HTTPException(status_code=422, detail="Décris une preuve concrète (20 à 2000 caractères).")
+    try:
+        score = float(data.get("score"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Score invalide.")
+    if not math.isfinite(score) or not 0 <= score <= 100:
+        raise HTTPException(status_code=422, detail="Le score doit être compris entre 0 et 100.")
+    test_name = system_key + ":" + branch_key
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": evidence,
     }
+    try:
+        with db_connection() as db:
+            prior = db.execute(
+                "SELECT details FROM competency_tests WHERE user_id=? AND test_name=?",
+                (user_id, test_name),
+            ).fetchall()
+            for row in prior:
+                try:
+                    old_details = json.loads(row["details"] or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if old_details.get("evidence") == evidence:
+                    raise HTTPException(status_code=409, detail="Cette preuve a déjà été utilisée pour cette sous-compétence.")
+            result = evaluate_competency_test(
+                db, user_id, test_name, score >= 70, score, details
+            )
+            db.commit()
+        cognitive_engine.invalidate_cache(user_id)
+        summary = get_skills_summary(user_id)
+        return {
+            "ok": True,
+            "assessment": result,
+            "maturity": summary["average_level"],
+            "progression_requires_distinct_evidence": True,
+        }
+    except HTTPException:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/skills/update")
+async def api_update_skill(auth=Depends(require_auth)):
+    _authenticated_user(auth)
+    raise HTTPException(
+        status_code=410,
+        detail="La progression par XP libre est désactivée. Utilise une évaluation de sous-compétence avec preuve et validation du superviseur.",
+    )
 
 @app.get("/api/cognition/development")
 async def api_cognition_development(auth=Depends(require_auth)):

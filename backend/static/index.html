@@ -1376,6 +1376,21 @@
           </div>
 
           <pre id="visionOut" class="output">Caméra inactive.</pre>
+
+          <input id="visionObservationId" type="hidden" value="">
+          <div class="panel" style="margin-top:12px">
+            <h4>🧩 Associer un mot à ce que Chappie voit</h4>
+            <p class="muted">Après avoir enseigné un mot dans le dictionnaire, tu peux lui montrer l'objet et valider l'association. L'analyse visuelle reste une observation, pas une compréhension automatique.</p>
+            <label for="visionWord">Mot déjà entendu par Chappie</label>
+            <input id="visionWord" type="text" maxlength="80" placeholder="Ex. coq">
+            <button type="button" onclick="associateVisionWord()">Associer le mot à l'image</button>
+            <div id="visionObservationStatus" class="status">Aucune observation visuelle sélectionnée.</div>
+          </div>
+          <div class="panel" style="margin-top:12px">
+            <h4>🧠 Historique sensoriel</h4>
+            <button type="button" class="secondary" onclick="loadSensoryObservations()">Actualiser les expériences</button>
+            <pre id="sensoryHistory" class="output">Aucune expérience sensorielle chargée.</pre>
+          </div>
         </div>
 
         <div class="panel">

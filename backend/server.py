@@ -84,7 +84,7 @@ from cognition.engine import cognitive_engine
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V19.3 — architecture cognitive unifiée"
+APP_NAME = "Chappie V21.0 — apprentissage sensoriel"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")

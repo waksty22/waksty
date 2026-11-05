@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -86,6 +87,8 @@ def init_spatial_tables(db: sqlite3.Connection) -> None:
             confidence REAL NOT NULL DEFAULT 0.0,
             identity_status TEXT NOT NULL DEFAULT 'unconfirmed'
                 CHECK(identity_status IN ('unconfirmed','candidate','confirmed')),
+            candidate_place_id TEXT,
+            similarity_score REAL NOT NULL DEFAULT 0.0,
             first_seen_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL,
             observations_count INTEGER NOT NULL DEFAULT 1,
@@ -95,6 +98,11 @@ def init_spatial_tables(db: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_place_memories_user
             ON place_memories(user_id, last_seen_at DESC);
     """)
+    columns = {row[1] for row in db.execute("PRAGMA table_info(place_memories)").fetchall()}
+    if "candidate_place_id" not in columns:
+        db.execute("ALTER TABLE place_memories ADD COLUMN candidate_place_id TEXT")
+    if "similarity_score" not in columns:
+        db.execute("ALTER TABLE place_memories ADD COLUMN similarity_score REAL NOT NULL DEFAULT 0.0")
     db.commit()
 
 
@@ -177,6 +185,34 @@ def record_location(
     db.commit()
     return {"stored": True, "id": cursor.lastrowid, "latitude": lat, "longitude": lon,
             "accuracy_m": accuracy, "recorded_at": stamp}
+
+
+def _signature_tokens(value: str) -> set[str]:
+    stopwords = {
+        "avec", "dans", "pour", "une", "des", "les", "sur", "sous",
+        "the", "and", "with", "from", "this", "that", "lieu", "image",
+        "photo", "scene", "visible", "semble", "probablement",
+    }
+    return {
+        token for token in re.findall(r"[a-zà-ÿ0-9]{3,}", value.casefold())
+        if token not in stopwords
+    }
+
+
+def _signature_similarity(first: str, second: str) -> float:
+    a, b = _signature_tokens(first), _signature_tokens(second)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    value = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(max(0.0, 1 - value)))
 
 
 def record_place_observation(

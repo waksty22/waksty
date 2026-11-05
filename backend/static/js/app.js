@@ -380,11 +380,22 @@ document.addEventListener("DOMContentLoaded", () => {
                     transcript.textContent += "\nChappie : " + data.text;
                     transcript.scrollTop = transcript.scrollHeight;
                 }
-                if ("speechSynthesis" in window) playTextToSpeech(data.text);
+                // The transcription accompanies Gemini's native audio. Do not
+                // start a second browser TTS voice over the native Live voice.
             }
-            // Raw Gemini audio is discarded because it cannot be lexically validated.
-            if (data.type === "audio_session" || data.type === "audio_stream" || data.audio) {
-                console.warn("Audio Live brut ignoré : validation lexicale obligatoire.");
+
+            if (data.type === "audio_stream" && data.audio) {
+                playAudioChunk(data.audio, data.sample_rate || 24000);
+            }
+
+            if (data.type === "interrupt") {
+                // The audio queue is reset on the next incoming chunk after an interruption.
+                console.info("Gemini Live a interrompu sa réponse audio.");
+            }
+
+            if (data.type === "error" || data.error) {
+                console.error("Erreur Gemini Live :", data.message || data.error);
+                if (liveStatus) liveStatus.textContent = "Erreur Gemini Live : " + (data.message || data.error);
             }
         });
 

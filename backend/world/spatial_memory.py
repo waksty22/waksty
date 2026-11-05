@@ -80,6 +80,7 @@ def init_spatial_tables(db: sqlite3.Connection) -> None:
             label TEXT NOT NULL DEFAULT '',
             description TEXT NOT NULL,
             visual_signature TEXT NOT NULL DEFAULT '',
+            session_id TEXT,
             latitude REAL,
             longitude REAL,
             confidence REAL NOT NULL DEFAULT 0.0,
@@ -181,7 +182,8 @@ def record_location(
 def record_place_observation(
     db: sqlite3.Connection, user_id: str, description: str,
     latitude: Any = None, longitude: Any = None,
-    label: str = "", visual_signature: str = "", confidence: Any = 0.35
+    label: str = "", visual_signature: str = "", confidence: Any = 0.35,
+    session_id: str = ""
 ) -> dict[str, Any]:
     description = _text(description, "Description visuelle", 4000, True)
     label = _text(label, "Nom du lieu", 120)
@@ -191,17 +193,26 @@ def record_place_observation(
     lon = None if longitude is None else _finite(longitude, "Longitude", -180, 180)
     if (lat is None) != (lon is None):
         raise ValueError("Latitude et longitude doivent être fournies ensemble.")
+    session_id = _text(session_id, "Session", 80)
+    if lat is not None:
+        active = db.execute(
+            """SELECT session_id FROM spatial_sessions
+               WHERE session_id=? AND user_id=? AND consented=1 AND ended_at IS NULL""",
+            (session_id, user_id),
+        ).fetchone()
+        if active is None:
+            raise ValueError("Une session de localisation active et autorisée est nécessaire pour géolocaliser un lieu.")
     now = _now()
     place_id = "place-" + str(uuid.uuid4())
     # A visual description is stored as an observation. It never auto-confirms
     # a named landmark or a familiar location.
     db.execute(
         """INSERT INTO place_memories
-           (place_id,user_id,label,description,visual_signature,latitude,longitude,
+           (place_id,user_id,label,description,visual_signature,session_id,latitude,longitude,
             confidence,identity_status,first_seen_at,last_seen_at,observations_count,
             created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,'unconfirmed',?,?,1,?,?)""",
-        (place_id, user_id, label, description, signature, lat, lon, conf,
+           VALUES (?,?,?,?,?,?,?,?,?,'unconfirmed',?,?,1,?,?)""",
+        (place_id, user_id, label, description, signature, session_id or None, lat, lon, conf,
          now, now, now, now),
     )
     db.commit()
@@ -228,7 +239,7 @@ def get_map_state(
         (user_id,),
     ).fetchall()
     places = db.execute(
-        """SELECT place_id,label,description,latitude,longitude,confidence,
+        """SELECT place_id,label,description,session_id,latitude,longitude,confidence,
                   identity_status,first_seen_at,last_seen_at,observations_count
            FROM place_memories WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 200""",
         (user_id,),

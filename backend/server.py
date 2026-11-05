@@ -61,7 +61,7 @@ from memory.autobiographical import (
 )
 from world.spatial_memory import (
     init_spatial_tables, start_location_session, stop_location_session,
-    record_location, record_place_observation, get_map_state,
+    record_location, record_place_observation, confirm_place_identity, get_map_state,
 )
 from world.world_model import (
     init_world_tables,
@@ -3260,6 +3260,21 @@ async def api_record_place_observation(request: Request, auth=Depends(require_au
                 str(data.get("session_id", "")),
             )
         return {"ok": True, "place": place}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/world/places/{place_id}/confirm")
+async def api_confirm_world_place(place_id: str, request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = confirm_place_identity(
+                db, user_id, place_id,
+                str(data.get("label", "")), str(data.get("evidence", "")),
+            )
+        return {"ok": True, "place": result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

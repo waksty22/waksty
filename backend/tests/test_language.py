@@ -13,6 +13,7 @@ from learning.language import (
     get_usable_words,
     init_language_tables,
     record_heard_word,
+    text_uses_only_allowed_words,
 )
 
 
@@ -56,3 +57,10 @@ def test_unknown_words_are_never_added_to_output(language_db):
     assert gate_spoken_text(
         "je vois une montre", {"je", "vois", "une", "montre"}, max_words=1
     ) == "je"
+
+
+def test_live_transcript_gate_blocks_unknown_words():
+    allowed = {"bonjour", "chappie", "oui"}
+    assert text_uses_only_allowed_words("Bonjour Chappie !", allowed)
+    assert not text_uses_only_allowed_words("Bonjour ami !", allowed)
+    assert not text_uses_only_allowed_words("", allowed)

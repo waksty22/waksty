@@ -1,4 +1,4 @@
-"""Chappie V19.3 — architecture cognitive complète.
+"""Chappie V33 — architecture cognitive unifiée.
 Python 3.11+. Les émotions et les rêves sont des états logiciels simulés,
 pas une conscience démontrée.
 """
@@ -3305,7 +3305,7 @@ async def api_diagnostics(auth=Depends(require_auth)):
         "modules": {
             "shared_brain": True, "classic_chat": True, "gemini_live_bridge": True,
             "vocabulary_gate_classic_chat": True,
-            "live_audio_lexical_gate": False,
+            "live_audio_lexical_gate": "buffered_until_transcript_validation",
             "spatial_memory": True, "visual_place_identity": "observations_only",
         },
         "snapshot_totals": snapshot.get("statistics", {}).get("totals", {}),
@@ -3911,6 +3911,7 @@ async def api_config(auth=Depends(require_auth)):
         "supports_visual_place_observations": True,
         "supports_unified_dashboard_v33": True,
         "supports_live_function_tools": True,
+        "supports_live_newborn_audio_gate": True,
         "persists_live_conversations": True,
         "cognitive_systems": 12,  
         "supports_vision": True,  

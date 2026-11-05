@@ -742,6 +742,8 @@
        MONDE
     ========================= */
 
+    .advanced-tools > summary { cursor:pointer; font-weight:650; color:var(--cyan); padding:4px 0; }
+    .advanced-tools-content { display:grid; gap:14px; margin-top:14px; }
     .skills-tree { display:grid; gap:10px; }
     .skills-tree details { background:rgba(15,23,42,.62); border:1px solid var(--card-border); border-radius:12px; padding:12px; }
     .skills-tree summary { cursor:pointer; font-weight:600; display:flex; justify-content:space-between; gap:10px; }
@@ -1605,6 +1607,9 @@ En attente de synchronisation du cerveau...
           <h4>Souvenirs visuels des lieux</h4>
           <div id="worldPlacesList" class="world-grid">Aucun lieu observé pour le moment.</div>
         </div>
+        <details class="panel advanced-tools">
+          <summary>🧪 Apprentissage avancé : objets et expériences</summary>
+          <div class="advanced-tools-content">
         <div class="panel">
           <h3>🧠 Ce que Chappie apprend sur les objets</h3>
           <p class="muted">Les propriétés ci-dessous sont des informations enseignées ou validées. Une propriété inconnue reste inconnue : Chappie ne doit pas la deviner.</p>
@@ -1724,6 +1729,9 @@ En attente de synchronisation du cerveau...
           <button type="button" class="secondary" onclick="loadCausalLearning()">Actualiser le journal causal</button>
           <pre id="causalLearningOutput" class="output">Journal causal en attente de synchronisation.</pre>
         </div>
+
+          </div>
+        </details>
 
         <div class="panel">
           <h3>🧭 Modèle du monde</h3>

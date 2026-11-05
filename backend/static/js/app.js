@@ -1,4 +1,3 @@
-// static/js/app.js
 'use strict';
 
 import { initWebSocket } from './websocket.js';
@@ -181,7 +180,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (liveStatus) liveStatus.textContent = "Connexion au flux Live en cours...";
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // Passage du token en paramètre de requête pour correspondre au serveur
         const wsUrl = `${wsProtocol}//${window.location.host}/ws?token=${encodeURIComponent(currentToken)}`;
 
         liveSocket = initWebSocket(wsUrl, (data) => {
@@ -239,9 +237,54 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // ==========================================
-    // CAMÉRA / ANALYSE VISION (/api/vision/analyze)
+    // CAMÉRA / ANALYSE VISION (CORRIGÉ & AJOUTÉ)
     // ==========================================
-    window.analyzeCameraImage = async function(imageBase64, customQuestion = "Décris ce que tu vois.") {
+    let mediaStream = null;
+
+    window.startCamera = async function() {
+        const videoElement = document.getElementById("camera");
+        const visionOut = document.getElementById("visionOut");
+        try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "user" }, 
+                audio: false 
+            });
+            videoElement.srcObject = mediaStream;
+            if (visionOut) visionOut.textContent = "Caméra active. Prêt pour l'analyse.";
+        } catch (err) {
+            console.error("Erreur d'accès à la caméra :", err);
+            if (visionOut) visionOut.textContent = "Erreur : Permissions refusées ou caméra indisponible.";
+        }
+    };
+
+    window.stopCamera = function() {
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(track => track.stop());
+            mediaStream = null;
+        }
+        const videoElement = document.getElementById("camera");
+        if (videoElement) videoElement.srcObject = null;
+        const visionOut = document.getElementById("visionOut");
+        if (visionOut) visionOut.textContent = "Caméra inactive.";
+    };
+
+    window.captureVision = async function() {
+        const videoElement = document.getElementById("camera");
+        const visionOut = document.getElementById("visionOut");
+        if (!mediaStream) {
+            alert("Veuillez d'abord activer la caméra.");
+            return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = videoElement.videoWidth || 640;
+        canvas.height = videoElement.videoHeight || 480;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+        const imageBase64 = canvas.toDataURL("image/jpeg", 0.8);
+
+        if (visionOut) visionOut.textContent = "Analyse de l'image par Chappie...";
+        
         const token = getToken();
         if (!token) {
             alert("Veuillez saisir votre jeton API.");
@@ -254,14 +297,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: { 'Authorization': `Bearer ${token}` },
                 body: {
                     image: imageBase64,
-                    question: customQuestion
+                    question: "Décris ce que tu vois."
                 }
             });
-
-            return response.analysis;
+            if (visionOut) visionOut.textContent = response.analysis;
         } catch (error) {
             console.error("Erreur analyse vision :", error);
-            throw error;
+            if (visionOut) visionOut.textContent = "Erreur lors de l'analyse visuelle : " + error.message;
         }
     };
 

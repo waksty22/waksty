@@ -83,3 +83,5 @@ def test_visual_place_is_stored_as_unconfirmed_observation(db):
         "J'ai vérifié visuellement et confirmé manuellement ce lieu.",
     )
     assert confirmed["identity_status"] == "confirmed"
+    confirmed_state = get_map_state(db, "creator")
+    assert "vérifié" in confirmed_state["places"][0]["confirmation_evidence"]

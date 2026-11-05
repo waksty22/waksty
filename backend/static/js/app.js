@@ -320,7 +320,16 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     window.consolidate = async function() {
-        alert("Fonction de consolidation déclenchée.");
+        const token = getToken();
+        const output = document.getElementById("memoryOutput");
+        try {
+            const data = await apiCall("/api/memory/consolidate", {
+                method: "POST", headers: { "Authorization": "Bearer " + token }
+            });
+            if (output) output.textContent = JSON.stringify(data.consolidation || data, null, 2);
+        } catch (error) {
+            if (output) output.textContent = "Erreur de consolidation : " + error.message;
+        }
     };
 
     window.resetLife = async function() {
@@ -391,6 +400,10 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.type === "interrupt") {
                 // The audio queue is reset on the next incoming chunk after an interruption.
                 console.info("Gemini Live a interrompu sa réponse audio.");
+            }
+
+            if (data.type === "speech_blocked") {
+                if (liveStatus) liveStatus.textContent = data.message || "Réponse vocale bloquée par le vocabulaire acquis.";
             }
 
             if (data.type === "error" || data.error) {
@@ -565,8 +578,251 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+
+    // V33 — causal learning controls
+    window.createCausalObservation = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("causalLearningStatus");
+        try {
+            const result = await apiCall("/api/learning/causal/observations", {
+                method: "POST",
+                body: { event: value("causalEvent"), context: value("causalContext"),
+                    outcome: value("causalOutcome"), source_type: "observed",
+                    evidence: "Observation saisie et confirmée par le superviseur.", confidence: 0.7 }
+            });
+            const field = document.getElementById("causalObservationId");
+            if (field && result.observation?.id) field.value = result.observation.id;
+            if (status) status.textContent = "Observation enregistrée. Identifiant : " + (result.observation?.id ?? "—");
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.createCausalHypothesis = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("causalLearningStatus");
+        try {
+            const result = await apiCall("/api/learning/causal/hypotheses", {
+                method: "POST",
+                body: { observation_id: Number(value("causalObservationId")),
+                    statement: value("causalHypothesis"),
+                    predicted_effect: value("causalPrediction"), confidence: 0.3 }
+            });
+            const field = document.getElementById("causalHypothesisId");
+            if (field && result.hypothesis?.id) field.value = result.hypothesis.id;
+            if (status) status.textContent = "Hypothèse enregistrée, elle reste à vérifier. ID : " + (result.hypothesis?.id ?? "—");
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.createCausalExperiment = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const approved = document.getElementById("causalSupervisorApproval")?.checked === true;
+        const status = document.getElementById("causalLearningStatus");
+        try {
+            const result = await apiCall("/api/learning/causal/experiments", {
+                method: "POST",
+                body: { hypothesis_id: Number(value("causalHypothesisId")),
+                    environment: value("causalEnvironment"), procedure: value("causalProcedure"),
+                    prediction: value("causalExperimentPrediction"), supervisor_approved: approved }
+            });
+            const field = document.getElementById("causalExperimentId");
+            if (field && result.experiment?.id) field.value = result.experiment.id;
+            if (status) status.textContent = "Protocole enregistré. ID : " + (result.experiment?.id ?? "—");
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.evaluateCausalExperiment = async function() {
+        const value = id => document.getElementById(id)?.value?.trim() || "";
+        const status = document.getElementById("causalLearningStatus");
+        const id = Number(value("causalExperimentId"));
+        try {
+            await apiCall("/api/learning/causal/experiments/" + id + "/result", {
+                method: "POST",
+                body: { observed_result: value("causalObservedResult"), evaluation: value("causalEvaluation") }
+            });
+            if (status) status.textContent = "Résultat évalué et enregistré.";
+            await window.loadCausalLearning();
+        } catch (error) { if (status) status.textContent = "Erreur : " + error.message; }
+    };
+
+    window.loadCausalLearning = async function() {
+        const output = document.getElementById("causalLearningOutput");
+        try {
+            const data = await apiCall("/api/learning/causal");
+            if (output) output.textContent = JSON.stringify(data, null, 2);
+        } catch (error) { if (output) output.textContent = "Erreur de chargement : " + error.message; }
+    };
+
+    // V33 — consent-based location tracking and spatial memory
+    let locationWatchId = null;
+    let locationSessionId = null;
+    let latestLocation = null;
+    let leafletMap = null;
+    let spatialLayer = null;
+    let samplesSinceRefresh = 0;
+
+    function setLocationStatus(message) {
+        const el = document.getElementById("locationStatus");
+        if (el) el.textContent = message;
+    }
+
+    function renderWorldMap(data) {
+        const mapElement = document.getElementById("chappieWorldMap");
+        const stats = document.getElementById("worldMapStats");
+        const placesList = document.getElementById("worldPlacesList");
+        if (stats) {
+            const st = data.statistics || {};
+            stats.textContent = (st.sessions || 0) + " sessions · " +
+                (st.location_samples || 0) + " positions · " +
+                (st.known_place_observations || 0) + " observations de lieux";
+        }
+        if (placesList) {
+            placesList.replaceChildren();
+            const places = data.places || [];
+            if (!places.length) {
+                placesList.textContent = "Aucun lieu observé pour le moment.";
+            } else {
+                places.slice(0, 12).forEach(place => {
+                    const item = document.createElement("div");
+                    item.className = "info-card";
+                    const title = document.createElement("strong");
+                    title.textContent = place.label || "Lieu non identifié";
+                    const description = document.createElement("p");
+                    description.className = "muted";
+                    description.textContent = place.description || "Aucune description.";
+                    const meta = document.createElement("small");
+                    meta.textContent = (place.identity_status || "unconfirmed") + " · " +
+                        (place.observations_count || 1) + " observation(s)";
+                    item.append(title, description, meta);
+                    placesList.appendChild(item);
+                });
+            }
+        }
+        if (!mapElement || !window.L) {
+            if (mapElement) mapElement.textContent = "La bibliothèque cartographique n'a pas pu être chargée.";
+            return;
+        }
+        if (!leafletMap) {
+            leafletMap = window.L.map(mapElement, { scrollWheelZoom: false }).setView([46.6, 2.45], 6);
+            window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(leafletMap);
+            spatialLayer = window.L.layerGroup().addTo(leafletMap);
+        }
+        spatialLayer.clearLayers();
+        const visits = data.visits || [];
+        const bySession = new Map();
+        visits.forEach(point => {
+            const coords = [Number(point.latitude), Number(point.longitude)];
+            if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return;
+            if (!bySession.has(point.session_id)) bySession.set(point.session_id, []);
+            bySession.get(point.session_id).push(coords);
+            window.L.circleMarker(coords, { radius: 5, weight: 1, fillOpacity: 0.75 })
+                .bindTooltip(new Date(point.recorded_at).toLocaleString("fr-FR"))
+                .addTo(spatialLayer);
+        });
+        bySession.forEach(coords => {
+            if (coords.length > 1) window.L.polyline(coords, { weight: 3, opacity: 0.75 }).addTo(spatialLayer);
+        });
+        (data.places || []).forEach(place => {
+            if (place.latitude == null || place.longitude == null) return;
+            const popup = document.createElement("div");
+            const strong = document.createElement("strong");
+            strong.textContent = place.label || "Lieu non identifié";
+            const p = document.createElement("p");
+            p.textContent = place.description || "";
+            popup.append(strong, p);
+            window.L.marker([Number(place.latitude), Number(place.longitude)])
+                .bindPopup(popup).addTo(spatialLayer);
+        });
+        const all = visits.map(p => [Number(p.latitude), Number(p.longitude)])
+            .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+        if (all.length) leafletMap.fitBounds(window.L.latLngBounds(all), { padding: [24, 24], maxZoom: 15 });
+        setTimeout(() => leafletMap.invalidateSize(), 100);
+    }
+
+    window.loadWorldMap = async function() {
+        try {
+            const data = await apiCall("/api/world/map");
+            renderWorldMap(data.map || {});
+        } catch (error) { setLocationStatus("Impossible de charger la carte : " + error.message); }
+    };
+
+    window.startLocationTracking = async function() {
+        if (!navigator.geolocation) {
+            setLocationStatus("La géolocalisation n'est pas disponible sur ce navigateur.");
+            return;
+        }
+        if (locationWatchId !== null) return;
+        try {
+            const session = await apiCall("/api/world/location/session", {
+                method: "POST", body: { consented: true, device_label: "Navigateur Chappie" }
+            });
+            locationSessionId = session.session.session_id;
+            setLocationStatus("Session autorisée. Demande de position au navigateur…");
+            locationWatchId = navigator.geolocation.watchPosition(async position => {
+                latestLocation = position.coords;
+                try {
+                    await apiCall("/api/world/location", {
+                        method: "POST",
+                        body: {
+                            session_id: locationSessionId,
+                            latitude: position.coords.latitude, longitude: position.coords.longitude,
+                            accuracy_m: position.coords.accuracy, altitude_m: position.coords.altitude,
+                            heading_deg: position.coords.heading, speed_mps: position.coords.speed,
+                            recorded_at: new Date(position.timestamp).toISOString()
+                        }
+                    });
+                    samplesSinceRefresh += 1;
+                    setLocationStatus("Localisation active · précision " +
+                        Math.round(position.coords.accuracy) + " m. Arrête le suivi à tout moment.");
+                    if (samplesSinceRefresh >= 3) {
+                        samplesSinceRefresh = 0;
+                        await window.loadWorldMap();
+                    }
+                } catch (error) { setLocationStatus("Position non enregistrée : " + error.message); }
+            }, error => {
+                setLocationStatus("Erreur de localisation : " + error.message);
+            }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+        } catch (error) {
+            locationSessionId = null;
+            setLocationStatus("Impossible de démarrer la session : " + error.message);
+        }
+    };
+
+    window.stopLocationTracking = async function() {
+        if (locationWatchId !== null) navigator.geolocation.clearWatch(locationWatchId);
+        locationWatchId = null;
+        const sessionId = locationSessionId;
+        locationSessionId = null;
+        latestLocation = null;
+        if (sessionId) {
+            try {
+                await apiCall("/api/world/location/session/stop", {
+                    method: "POST", body: { session_id: sessionId }
+                });
+            } catch (error) {
+                setLocationStatus("Suivi arrêté localement. Fermeture serveur à vérifier : " + error.message);
+                return;
+            }
+        }
+        setLocationStatus("Suivi arrêté. Aucune position n'est collectée en dehors d'une session active.");
+        await window.loadWorldMap();
+    };
+
+    window.stopSpeech = function() {
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    };
+
+    window.recordVoice = function() {
+        alert("La reconnaissance de profil vocal n'est pas encore implémentée : aucune empreinte biométrique réelle n'est entraînée.");
+    };
+
     // Charger automatiquement les états si un token est déjà enregistré au démarrage
     if (savedToken) {
         window.fetchPsychology();
+        window.loadWorldMap();
+        window.loadCausalLearning();
     }
 });

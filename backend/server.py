@@ -1876,21 +1876,6 @@ TOOLS = [{
             },
         },
         {
-            "name": "update_skill",
-            "description": "Mettre à jour l'XP d'une compétence de Chappie.",
-            "parameters": {
-                "type": "OBJECT",
-                "properties": {
-                    "skill_name": {"type": "STRING"},
-                    "xp_delta": {"type": "NUMBER"},
-                    "evidence": {"type": "STRING"},
-                },
-                "required": [
-                    "skill_name", "xp_delta", "evidence",
-                ],
-            },
-        },
-        {
             "name": "get_shared_brain_state",
             "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
             "parameters": {
@@ -1937,14 +1922,6 @@ def execute_tool(
                     10,  
                 )  
             }  
-
-        if name == "update_skill":  
-            return update_skill(  
-                user_id,  
-                str(args.get("skill_name", "")),  
-                float(args.get("xp_delta", 10.0)),  
-                str(args.get("evidence", "Progression")),  
-            )  
 
         if name == "get_shared_brain_state":
             with db_connection() as brain_db:
@@ -3243,6 +3220,12 @@ async def api_diagnostics(auth=Depends(require_auth)):
     }
 
 
+@app.post("/api/memory/consolidate")
+async def api_consolidate_memory(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    return {"ok": True, "consolidation": consolidate_conversation(user_id)}
+
+
 @app.get("/api/dreams")
 async def api_dreams(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
@@ -4158,7 +4141,7 @@ async def websocket_endpoint(
                 "model": GEMINI_LIVE_MODEL,
             })
 
-            live_turn_state = {"user": "", "assistant": ""}
+            live_turn_state = {"user": "", "assistant": "", "audio": []}
 
             async def client_to_gemini():
                 while True:
@@ -4290,7 +4273,6 @@ async def websocket_endpoint(
                             live_turn_state["assistant"] = merge_live_transcript(
                                 live_turn_state["assistant"], spoken_text
                             )
-                            await websocket.send_json({"type": "text", "text": spoken_text})
 
                     model_turn = server_content.get("modelTurn") or {}
                     for part in model_turn.get("parts", []):
@@ -4299,10 +4281,8 @@ async def websocket_endpoint(
                             mime_type = str(inline.get("mimeType") or inline.get("mime_type") or "")
                             match = re.search(r"rate=(\d+)", mime_type)
                             sample_rate = int(match.group(1)) if match else 24000
-                            await websocket.send_json({
-                                "type": "audio_stream",
-                                "audio": inline["data"],
-                                "sample_rate": sample_rate,
+                            live_turn_state["audio"].append({
+                                "audio": inline["data"], "sample_rate": sample_rate,
                             })
                         elif isinstance(part.get("text"), str) and part["text"].strip():
                             part_text = part["text"].strip()
@@ -4310,30 +4290,57 @@ async def websocket_endpoint(
                                 live_turn_state["assistant"] = merge_live_transcript(
                                     live_turn_state["assistant"], part_text
                                 )
-                            await websocket.send_json({
-                                "type": "text",
-                                "text": part_text,
-                            })
 
                     if server_content.get("turnComplete"):
-                        if live_turn_state["user"] or live_turn_state["assistant"]:
+                        assistant_text = live_turn_state["assistant"].strip()
+                        with db_connection() as language_db:
+                            repeatable_words = get_repeatable_words(language_db, user_id)
+                        maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+                        spoken_tokens = re.findall(
+                            r"[\wÀ-ÖØ-öø-ÿ'-]+", assistant_text.casefold(), flags=re.UNICODE
+                        )
+                        lexical_gate_passed = (
+                            maturity >= 3.0
+                            or bool(spoken_tokens) and all(
+                                token in repeatable_words for token in spoken_tokens
+                            )
+                        )
+                        if lexical_gate_passed:
+                            for audio_chunk in live_turn_state["audio"]:
+                                await websocket.send_json({
+                                    "type": "audio_stream",
+                                    **audio_chunk,
+                                })
+                            if assistant_text:
+                                await websocket.send_json({
+                                    "type": "text", "text": assistant_text,
+                                })
+                        else:
+                            await websocket.send_json({
+                                "type": "speech_blocked",
+                                "message": "Chappie n'a pas encore acquis les mots nécessaires pour prononcer cette réponse.",
+                            })
+
+                        if live_turn_state["user"] or assistant_text:
                             try:
                                 save_conversation_turn(
                                     user_id,
                                     live_turn_state["user"],
-                                    live_turn_state["assistant"],
+                                    assistant_text if lexical_gate_passed else "",
                                     source="gemini_live",
                                 )
                                 log.info(
-                                    "[V28] Tour Live enregistré dans le cerveau commun "
-                                    "(utilisateur=%s, user_chars=%s, assistant_chars=%s)",
+                                    "[V33] Tour Live enregistré dans le cerveau commun "
+                                    "(utilisateur=%s, user_chars=%s, assistant_chars=%s, audio_chunks=%s)",
                                     user_id, len(live_turn_state["user"]),
-                                    len(live_turn_state["assistant"]),
+                                    len(assistant_text) if lexical_gate_passed else 0,
+                                    len(live_turn_state["audio"]) if lexical_gate_passed else 0,
                                 )
                             except Exception:
-                                log.exception("[V28] Échec d'enregistrement du tour Live")
-                            live_turn_state["user"] = ""
-                            live_turn_state["assistant"] = ""
+                                log.exception("[V33] Échec d'enregistrement du tour Live")
+                        live_turn_state["user"] = ""
+                        live_turn_state["assistant"] = ""
+                        live_turn_state["audio"] = []
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

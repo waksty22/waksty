@@ -125,6 +125,7 @@ from cognition.development import (
     development_statistics,
 )
 from cognition.engine import cognitive_engine
+from cognition.catalog import COGNITIVE_CATALOG
 from cognition.shared_brain import (
     get_shared_brain_snapshot,
     format_shared_brain_context,
@@ -765,40 +766,65 @@ def get_user_intention(user_id: str) -> dict[str, Any]:
     }
 
 def get_skills_summary(user_id: str) -> dict[str, Any]:
+    """Build maturity only from branch-level assessments approved by the supervisor."""
     get_emotions(user_id)
+    with db_connection() as db:
+        legacy_rows = db.execute(
+            """SELECT skill_name, level, xp, evidence, updated_at
+               FROM skills WHERE user_id=?""",
+            (user_id,),
+        ).fetchall()
+        test_rows = db.execute(
+            """SELECT test_name, score, details, tested_at
+               FROM competency_tests
+               WHERE user_id=? AND passed=1
+               ORDER BY tested_at ASC, id ASC""",
+            (user_id,),
+        ).fetchall()
 
-    with db_connection() as db:  
-        rows = db.execute(  
-            """  
-            SELECT skill_name, level, xp, evidence, updated_at  
-            FROM skills  
-            WHERE user_id=?  
-            """,  
-            (user_id,),  
-        ).fetchall()  
+    skills_list = [dict(row) for row in legacy_rows]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in test_rows:
+        try:
+            system_key, branch_key = str(row["test_name"]).split(":", 1)
+            details = json.loads(row["details"] or "{}")
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if system_key not in COGNITIVE_CATALOG:
+            continue
+        branches = COGNITIVE_CATALOG[system_key].get("sub_branches", {})
+        if branch_key not in branches or details.get("supervisor_approved") is not True:
+            continue
+        if details.get("source") != "supervised_assessment" or not str(details.get("evidence", "")).strip():
+            continue
+        grouped.setdefault((system_key, branch_key), []).append({
+            "score": float(row["score"]),
+            "tested_at": row["tested_at"],
+            "evidence": str(details.get("evidence", ""))[:500],
+        })
 
-    skills_list = [dict(row) for row in rows]  
+    db_skills_data: dict[str, Any] = {}
+    for (system_key, branch_key), assessments in grouped.items():
+        scores = [item["score"] for item in assessments]
+        average_score = sum(scores) / len(scores)
+        db_skills_data.setdefault(system_key, {})[branch_key] = {
+            "level": int(round(average_score * 0.30)),
+            "mastery": average_score,
+            "confidence": min(1.0, len(assessments) / 3.0),
+            "xp": len(assessments) * 10,
+            "evidence": "Évaluations supervisées distinctes : " + str(len(assessments)),
+        }
 
-    db_skills_data: dict[str, Any] = {}  
-
-    for skill in skills_list:  
-        db_skills_data[skill["skill_name"]] = {  
-            "default": {  
-                "level": skill["level"],  
-                "xp": skill["xp"],  
-                "confidence": 0.8,  
-            }  
-        }  
-
-    computed_profile = cognitive_engine.compute_cognitive_profile(  
-        user_id,  
-        db_skills_data,  
-    )  
-
-    return {  
-        "skills": skills_list,  
-        "average_level": computed_profile.get("global_maturity", 1.0),  
-        "cognitive_profile": computed_profile,  
+    computed_profile = cognitive_engine.compute_cognitive_profile(
+        user_id, db_skills_data, force_recompute=True,
+    )
+    return {
+        "skills": skills_list,
+        "average_level": computed_profile.get("global_maturity", 0.0),
+        "cognitive_profile": computed_profile,
+        "validated_branch_assessments": sum(len(items) for items in grouped.values()),
+        "maturity_source": "validated_supervised_branch_assessments",
+        "legacy_aggregate_xp_affects_maturity": False,
     }
 
 def reset_chappie_life(user_id: str) -> dict[str, Any]:

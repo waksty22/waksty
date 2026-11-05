@@ -74,6 +74,10 @@ from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,
     associate_word_with_observation,
 )
+from learning.object_learning import (
+    init_object_learning_tables, teach_object_property,
+    list_known_objects, compare_known_objects, record_object_experience,
+)
 from cognition.reasoning import (
     init_cognition_tables,
     log_cognitive_trace,
@@ -373,6 +377,7 @@ def init_db() -> None:
         init_learning_tables(db)
         init_language_tables(db)
         init_sensory_tables(db)
+        init_object_learning_tables(db)
         init_cognition_tables(db)
 
 def valid_user(user_id: str) -> str:
@@ -762,6 +767,8 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         )  
 
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM object_experiences WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM object_properties WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM word_visual_associations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM sensory_observations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM personal_vocabulary WHERE user_id=?", (user_id,))  
@@ -3267,6 +3274,92 @@ async def api_associate_visual_word(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+
+
+@app.get("/api/learning/objects")
+async def api_list_known_objects(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {"objects": list_known_objects(db, user_id)}
+
+
+@app.post("/api/learning/object-property")
+async def api_teach_object_property(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = teach_object_property(
+                db, user_id,
+                str(data.get("word", "")),
+                str(data.get("property", "")),
+                str(data.get("value", "")),
+                evidence=str(data.get("evidence", "Enseignement du créateur")),
+                confidence=data.get("confidence", 0.9),
+                source_type="taught",
+            )
+            object_id = "object:" + result["word"]
+            entity = get_world_entity(db, user_id, object_id) or {}
+            properties = dict(entity.get("properties") or {})
+            learned = dict(properties.get("learned_properties") or {})
+            learned.setdefault(result["property_key"], [])
+            if result["property_value"] not in learned[result["property_key"]]:
+                learned[result["property_key"]].append(result["property_value"])
+            properties["learned_properties"] = learned
+            upsert_world_entity(
+                db, user_id, object_id, "object", properties,
+                source_type="taught", confidence=result["confidence"],
+            )
+            db.commit()
+        return {"ok": True, "property": result}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/object-experience")
+async def api_record_object_experience(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_object_experience(
+                db, user_id,
+                str(data.get("word", "")),
+                str(data.get("action", "")),
+                str(data.get("outcome", "")),
+                evidence=str(data.get("evidence", "Expérience supervisée")),
+                confidence=data.get("confidence", 0.6),
+                source_type="observed",
+            )
+            db.commit()
+        return {"ok": True, "experience": result}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/object-compare")
+async def api_compare_known_objects(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            comparison = compare_known_objects(
+                db, user_id,
+                str(data.get("first", "")),
+                str(data.get("second", "")),
+            )
+        return {"ok": True, "comparison": comparison}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.post("/api/reset")

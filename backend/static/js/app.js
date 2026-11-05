@@ -76,6 +76,39 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    window.loadVocabulary = async function() {
+        const token = getToken();
+        try {
+            const data = await apiCall('/api/language/vocabulary', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            const output = document.getElementById('vocabularyOutput');
+            if (output) output.textContent = (data.vocabulary || []).map(item =>
+                item.word + ' — ' + item.state + (item.meaning ? ' : ' + item.meaning : '')
+            ).join('\n') || 'Aucun mot appris pour le moment.';
+        } catch (error) {
+            const output = document.getElementById('vocabularyOutput');
+            if (output) output.textContent = 'Erreur : ' + error.message;
+        }
+    };
+
+    window.teachVocabulary = async function() {
+        const word = document.getElementById('teachWord')?.value?.trim();
+        const state = document.getElementById('teachState')?.value || 'heard';
+        const meaning = document.getElementById('teachMeaning')?.value?.trim() || '';
+        const token = getToken();
+        if (!word) return alert('Saisis un mot à enseigner.');
+        try {
+            await apiCall('/api/language/teach', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token },
+                body: { user_id: 'creator', word, state, meaning,
+                    evidence: 'Enseignement validé depuis le tableau de bord' }
+            });
+            await window.loadVocabulary();
+        } catch (error) { alert(error.message); }
+    };
+
     window.loadSkills = async function() {
         const token = getToken();
         try {

@@ -2730,7 +2730,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "26.0.0",
+        "version": "27.0.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -2767,7 +2767,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "26.0.0",  
+        "version": "27.0.0",  
     }
 
 @app.post("/api/chat")
@@ -3668,7 +3668,7 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "26.0.0",
+        "version": "27.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,

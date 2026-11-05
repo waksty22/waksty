@@ -1327,6 +1327,28 @@
           <div id="liveTranscript" class="output" style="min-height:160px">
             Les échanges vocaux apparaîtront ici.
           </div>
+
+          <div class="panel" style="margin-top:14px">
+            <h4>📚 Vocabulaire personnel — apprentissage de Chappie</h4>
+            <p class="muted">Un mot n'est utilisable qu'après validation progressive. Commence par « entendu », puis valide chaque étape séparément.</p>
+            <label for="teachWord">Mot à enseigner</label>
+            <input id="teachWord" type="text" maxlength="80" placeholder="Ex. montre">
+            <label for="teachState">Étape validée</label>
+            <select id="teachState">
+              <option value="heard">1. Entendu</option>
+              <option value="imitated">2. Imité</option>
+              <option value="recognized">3. Reconnu</option>
+              <option value="understood">4. Compris</option>
+              <option value="usable">5. Utilisable</option>
+            </select>
+            <label for="teachMeaning">Signification (à partir de « compris »)</label>
+            <input id="teachMeaning" type="text" maxlength="1000" placeholder="Ce que Chappie a appris sur ce mot">
+            <div class="row-btns">
+              <button type="button" onclick="teachVocabulary()">Valider l'étape</button>
+              <button type="button" class="secondary" onclick="loadVocabulary()">Actualiser les mots</button>
+            </div>
+            <pre id="vocabularyOutput" class="output">Aucun mot chargé.</pre>
+          </div>
         </div>
 
         <div class="panel">

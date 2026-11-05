@@ -12,6 +12,7 @@ from world.spatial_memory import (
     stop_location_session,
     record_location,
     record_place_observation,
+    confirm_place_identity,
     get_map_state,
 )
 
@@ -77,3 +78,8 @@ def test_visual_place_is_stored_as_unconfirmed_observation(db):
     state = get_map_state(db, "creator")
     assert state["places"][0]["place_id"] == revisit["place_id"]
     assert state["visual_identity_is_not_automatically_confirmed"] is True
+    confirmed = confirm_place_identity(
+        db, "creator", revisit["place_id"], "Parc du quartier",
+        "J'ai vérifié visuellement et confirmé manuellement ce lieu.",
+    )
+    assert confirmed["identity_status"] == "confirmed"

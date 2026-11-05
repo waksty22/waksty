@@ -3179,6 +3179,7 @@ async def api_record_place_observation(request: Request, auth=Depends(require_au
                 str(data.get("label", "")),
                 str(data.get("visual_signature", "")),
                 data.get("confidence", 0.35),
+                str(data.get("session_id", "")),
             )
         return {"ok": True, "place": place}
     except ValueError as exc:
@@ -3605,6 +3606,12 @@ async def api_vision_analyze(
             link_temporally_cooccurring_observation(
                 db, user_id, observation["observation_id"]
             )
+            place_observation = record_place_observation(
+                db, user_id, answer,
+                data.get("latitude"), data.get("longitude"),
+                str(data.get("place_label", "")), answer, 0.35,
+                str(data.get("session_id", "")),
+            )
             db.commit()
 
         return {
@@ -3612,7 +3619,8 @@ async def api_vision_analyze(
             "analysis": answer,
             "question": question,
             "observation_id": observation["observation_id"],
-            "stored_as": "sensory_observation",
+            "place_observation": place_observation,
+            "stored_as": "sensory_observation_and_unconfirmed_place_observation",
             "is_learned_fact": False,
         }
     except HTTPException:

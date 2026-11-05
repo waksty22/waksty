@@ -1,4 +1,3 @@
-// static/js/audio.js
 'use strict';
 
 let sharedAudioCtx = null;
@@ -82,7 +81,6 @@ export async function initLiveAudioStream(socket) {
             }
             const base64Audio = btoa(binary);
 
-            // Format de payload standard attendu par le protocole Gemini Live BidiGenerateContent
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({
                     realtimeInput: {
@@ -98,6 +96,7 @@ export async function initLiveAudioStream(socket) {
         };
 
         source.connect(processor);
+        processor.connect(audioCtx.destination);
 
         console.log("Flux audio Live (PCM 16kHz) démarré.");
         return {

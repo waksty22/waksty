@@ -152,6 +152,107 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    window.loadKnownObjects = async function() {
+        const token = getToken();
+        const output = document.getElementById("knownObjectsOutput");
+        try {
+            const data = await apiCall("/api/learning/objects", {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const objects = data.objects || [];
+            if (output) output.textContent = objects.length
+                ? objects.map(object => {
+                    const props = (object.properties || []).map(p =>
+                        "  • " + p.property_key + " : " + p.property_value
+                        + " [" + p.source_type + ", confiance "
+                        + Math.round(p.confidence * 100) + "%]"
+                    ).join("\\n");
+                    const experiences = (object.experiences || []).map(e =>
+                        "  ↳ " + e.action + " → " + e.outcome
+                    ).join("\\n");
+                    return object.word + " (" + object.vocabulary_state + ")\\n"
+                        + (props || "  Aucune propriété apprise.") + "\\n"
+                        + (experiences || "  Aucune expérience enregistrée.");
+                }).join("\\n\\n")
+                : "Aucun objet reconnu pour le moment.";
+        } catch (error) {
+            if (output) output.textContent = "Erreur : " + error.message;
+        }
+    };
+
+    window.teachObjectProperty = async function() {
+        const word = document.getElementById("objectWord")?.value?.trim();
+        const property = document.getElementById("objectProperty")?.value;
+        const value = document.getElementById("objectValue")?.value?.trim();
+        const evidence = document.getElementById("objectEvidence")?.value?.trim() || "";
+        const status = document.getElementById("objectLearningStatus");
+        if (!word || !value) return alert("Indique un objet et une valeur.");
+        try {
+            const result = await apiCall("/api/learning/object-property", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + getToken() },
+                body: { word, property, value, evidence, confidence: 0.9 }
+            });
+            if (status) status.textContent = "Appris : " + result.property.word
+                + " — " + result.property.property_key + " : "
+                + result.property.property_value;
+            await window.loadKnownObjects();
+        } catch (error) {
+            if (status) status.textContent = "Non enregistré : " + error.message;
+        }
+    };
+
+    window.recordObjectExperience = async function() {
+        const word = document.getElementById("experienceWord")?.value?.trim();
+        const action = document.getElementById("experienceAction")?.value?.trim();
+        const outcome = document.getElementById("experienceOutcome")?.value?.trim();
+        const status = document.getElementById("objectExperienceStatus");
+        if (!word || !action || !outcome) {
+            return alert("Renseigne l'objet, l'action et le résultat observé.");
+        }
+        try {
+            const result = await apiCall("/api/learning/object-experience", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + getToken() },
+                body: { word, action, outcome, confidence: 0.6 }
+            });
+            if (status) status.textContent = "Expérience mémorisée pour "
+                + result.experience.word + ". Elle n'est pas encore une règle générale.";
+            await window.loadKnownObjects();
+        } catch (error) {
+            if (status) status.textContent = "Non enregistrée : " + error.message;
+        }
+    };
+
+    window.compareKnownObjects = async function() {
+        const first = document.getElementById("compareObjectA")?.value?.trim();
+        const second = document.getElementById("compareObjectB")?.value?.trim();
+        const output = document.getElementById("objectComparisonOutput");
+        if (!first || !second) return alert("Indique deux objets à comparer.");
+        try {
+            const data = await apiCall("/api/learning/object-compare", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + getToken() },
+                body: { first, second }
+            });
+            const comparison = data.comparison;
+            const shared = Object.entries(comparison.shared_properties || {})
+                .map(([key, values]) => key + " : " + values.join(", "));
+            const differences = Object.entries(comparison.differences || {})
+                .map(([key, values]) => key + " — " + first + " : "
+                    + (values[first].join(", ") || "inconnu")
+                    + " / " + second + " : "
+                    + (values[second].join(", ") || "inconnu"));
+            if (output) output.textContent =
+                "Points communs\\n" + (shared.join("\\n") || "Aucun connu")
+                + "\\n\\nDifférences connues\\n"
+                + (differences.join("\\n") || "Aucune différence enregistrée")
+                + "\\n\\n" + comparison.warning;
+        } catch (error) {
+            if (output) output.textContent = "Comparaison impossible : " + error.message;
+        }
+    };
+
     window.loadSkills = async function() {
         const token = getToken();
         try {

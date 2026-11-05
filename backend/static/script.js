@@ -2397,6 +2397,7 @@ function handleTokenChange(source) {
     fetchPsychology();
     checkInitialGreeting();
     loadSkills();
+    loadCausalLearning();
 
   }, 700);
 }

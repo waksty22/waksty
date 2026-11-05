@@ -76,7 +76,7 @@ def test_context_format_is_bounded_and_explicit():
     db = make_db()
     snapshot = get_shared_brain_snapshot(db, "creator")
     context = format_shared_brain_context(snapshot)
-    assert "V28" in context
+    assert "V33" in context
     assert "une hypothèse n'est pas un fait" in context
     assert len(context) <= 19000
     db.close()

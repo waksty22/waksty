@@ -67,7 +67,12 @@ from learning.curriculum import (
 )
 from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
-    get_usable_words, get_repeatable_words, gate_spoken_text, record_heard_word,
+    get_usable_words, get_repeatable_words, gate_spoken_text,
+    record_heard_word, record_heard_text,
+)
+from learning.sensory import (
+    init_sensory_tables, record_observation, list_observations,
+    associate_word_with_observation,
 )
 from cognition.reasoning import (
     init_cognition_tables,
@@ -366,7 +371,8 @@ def init_db() -> None:
         init_memory_tables(db)  
         init_world_tables(db)  
         init_learning_tables(db)
-        init_language_tables(db)  
+        init_language_tables(db)
+        init_sensory_tables(db)
         init_cognition_tables(db)
 
 def valid_user(user_id: str) -> str:
@@ -3130,82 +3136,114 @@ async def api_vision_analyze(
 ):
     user_id = _authenticated_user(auth)
     data = await request.json()
+    image_value = (
+        data.get("image")
+        or data.get("image_data")
+        or data.get("image_base64")
+    )
+    image_bytes = _decode_data_url(image_value, MAX_CAMERA_IMAGE_BYTES)
+    question = str(
+        data.get("question") or data.get("prompt")
+        or "Observe cette image et relève uniquement les éléments visuellement perceptibles."
+    ).strip()
+    if len(question) > 1000:
+        raise HTTPException(status_code=400, detail="Question trop longue.")
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="Clé Gemini non configurée.")
 
-    image_value = (  
-        data.get("image")  
-        or data.get("image_data")  
-        or data.get("image_base64")  
-    )  
+    if image_bytes.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        image_mime = "image/png"
+    elif image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        image_mime = "image/webp"
+    elif image_bytes.startswith(b"\\xff\\xd8\\xff"):
+        image_mime = "image/jpeg"
+    else:
+        raise HTTPException(status_code=415, detail="Image JPEG, PNG ou WEBP invalide.")
 
-    image_bytes = _decode_data_url(  
-        image_value,  
-        MAX_CAMERA_IMAGE_BYTES,  
-    )  
+    try:
+        from google import genai
+        from google.genai import types
 
-    question = str(  
-        data.get("question")  
-        or data.get("prompt")  
-        or "Décris ce que vois."  
-    ).strip()  
-
-    if len(question) > 1000:  
-        raise HTTPException(status_code=400, detail="Question trop longue.")  
-
-    try:  
-        import google.generativeai as genai  
-        from PIL import Image  
-        import io  
-
-        if not GEMINI_API_KEY:  
-            raise HTTPException(  
-                status_code=503,  
-                detail="Clé Gemini non configurée."  
-            )  
-
-        genai.configure(api_key=GEMINI_API_KEY)  
-
-        model = genai.GenerativeModel(  
-            model_name=GEMINI_MODEL,  
-        )  
-
-        image = Image.open(io.BytesIO(image_bytes))  
-        image.verify()  
-
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")  
-
-        response = model.generate_content(  
-            [  
-                get_identity_prompt(user_id),  
-                question,  
-                image,  
-            ],  
-            generation_config={  
-                "temperature": 0.4,  
-                "max_output_tokens": 1200,  
-            },  
-        )  
-
-        answer = str(  
-            getattr(response, "text", "") or ""  
-        ).strip()  
-
-        if not answer:  
-            answer = "Je n'ai pas réussi à analyser cette image."  
-
-        return {  
-            "success": True,  
-            "analysis": answer,  
-            "question": question,  
-        }  
-
-    except HTTPException:  
-        raise  
-    except Exception as exc:  
-        print("[VISION ERROR]", repr(exc))  
-        raise HTTPException(  
-            status_code=500,  
-            detail="L'analyse visuelle a échoué."  
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        perception_prompt = (
+            "Tu es le module de perception visuelle interne de Chappie, un robot "
+            "au stade nouveau-né. Décris sobrement les formes, couleurs, objets "
+            "et positions que tu peux réellement observer. Signale l'incertitude. "
+            "N'invente pas d'histoire, de fonction ou de relation non visible. "
+            "Cette analyse est une donnée sensorielle interne, pas une réponse "
+            "que Chappie est autorisé à prononcer ni une preuve qu'il comprend "
+            "les mots employés."
         )
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                perception_prompt,
+                question,
+                types.Part.from_bytes(data=image_bytes, mime_type=image_mime),
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=700,
+            ),
+        )
+        answer = str(response.text or "").strip()
+        if not answer:
+            answer = "Aucun élément visuel exploitable n'a été identifié."
+
+        with db_connection() as db:
+            observation = record_observation(
+                db, user_id, "vision", answer, "camera_snapshot",
+                confidence=0.45,
+                metadata={"mime_type": image_mime, "question": question},
+            )
+            db.commit()
+
+        return {
+            "success": True,
+            "analysis": answer,
+            "question": question,
+            "observation_id": observation["observation_id"],
+            "stored_as": "sensory_observation",
+            "is_learned_fact": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("Erreur du module de perception visuelle")
+        raise HTTPException(
+            status_code=502,
+            detail="Le module de vision n'a pas pu analyser cette image.",
+        ) from exc
+
+
+@app.get("/api/senses/observations")
+async def api_list_sensory_observations(auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {"observations": list_observations(db, user_id)}
+
+
+@app.post("/api/vision/associate")
+async def api_associate_visual_word(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = associate_word_with_observation(
+                db, user_id,
+                str(data.get("word", "")),
+                str(data.get("observation_id", "")),
+                str(data.get("evidence", "Association validée par le créateur")),
+            )
+            db.commit()
+        return {"ok": True, "association": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 
 @app.post("/api/reset")
 async def api_reset(auth=Depends(require_auth)):
@@ -3372,10 +3410,24 @@ async def websocket_endpoint(
 
                         input_transcription = server_content.get("inputTranscription", {})
                         if isinstance(input_transcription, dict) and input_transcription.get("text"):
-                            await websocket.send_json({
-                                "type": "user_text",
-                                "text": str(input_transcription["text"])
-                            })
+                            heard_text = str(input_transcription["text"]).strip()
+                            if heard_text:
+                                with db_connection() as sensory_db:
+                                    record_heard_text(
+                                        sensory_db, user_id, heard_text,
+                                        evidence="Transcription confirmée par Gemini Live",
+                                    )
+                                    record_observation(
+                                        sensory_db, user_id, "audio", heard_text,
+                                        "gemini_live_transcription",
+                                        confidence=0.7,
+                                        metadata={"language": "fr"},
+                                    )
+                                    sensory_db.commit()
+                                await websocket.send_json({
+                                    "type": "user_text",
+                                    "text": heard_text
+                                })
 
                         model_turn = server_content.get("modelTurn", {})
                         parts = model_turn.get("parts", [])

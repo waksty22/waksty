@@ -4402,9 +4402,10 @@ async def websocket_endpoint(
                         maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
                         lexical_gate_passed = (
                             text_uses_only_allowed_words(assistant_text, repeatable_words)
-                            and (maturity >= 3.0 or len(re.findall(
-                                r"[\\wÀ-ÖØ-öø-ÿ'-]+", assistant_text.casefold(), flags=re.UNICODE
-                            )) <= 1)
+                            and (maturity >= 3.0 or sum(
+                                1 for part in assistant_text.split()
+                                if any(character.isalnum() for character in part)
+                            ) <= 1)
                         )
                         if lexical_gate_passed:
                             for audio_chunk in live_turn_state["audio"]:

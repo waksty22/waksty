@@ -964,7 +964,7 @@
       <img src="/static/chappie-hero.png" alt="Portrait de Chappie" onerror="this.style.display='none'">
       <div>
         <h2>CHAPPIE</h2>
-        <p>Compagnon cognitif · V19.4</p>
+        <p>Compagnon cognitif · V23.0</p>
       </div>
     </div>
 
@@ -1753,6 +1753,56 @@ En attente de synchronisation du cerveau...
           <pre id="objectComparisonOutput" class="output">Aucune comparaison effectuée.</pre>
         </div>
 
+
+        <div class="panel">
+          <h3>🔬 V23 — Apprendre par expérimentation</h3>
+          <p class="muted">Chappie sépare les faits observés, les hypothèses et les résultats des tests. Aucun objet ni appareil n'est manipulé automatiquement : chaque expérience exige ton approbation et doit être réalisée dans une simulation ou un cadre sûr.</p>
+          <h4>1. Enregistrer une observation</h4>
+          <label for="causalEvent">Événement observé</label>
+          <input id="causalEvent" maxlength="2000" placeholder="Ex. une balle est lâchée">
+          <label for="causalContext">Contexte (facultatif)</label>
+          <input id="causalContext" maxlength="1000" placeholder="Ex. balle posée dans la main, à faible hauteur">
+          <label for="causalOutcome">Résultat observé</label>
+          <textarea id="causalOutcome" rows="2" maxlength="2000" placeholder="Ex. la balle tombe et touche le sol"></textarea>
+          <button type="button" onclick="createCausalObservation()">Enregistrer l'observation</button>
+          <h4 style="margin-top:18px">2. Formuler une hypothèse</h4>
+          <label for="causalObservationId">Identifiant de l'observation</label>
+          <input id="causalObservationId" type="number" min="1" placeholder="ID de l'observation">
+          <label for="causalHypothesis">Hypothèse de Chappie</label>
+          <textarea id="causalHypothesis" rows="2" maxlength="2000" placeholder="Ex. lorsqu'on lâche cette balle, elle tombe"></textarea>
+          <label for="causalPrediction">Effet prédit</label>
+          <input id="causalPrediction" maxlength="2000" placeholder="Ex. elle devrait atteindre le sol">
+          <button type="button" onclick="createCausalHypothesis()">Enregistrer l'hypothèse</button>
+          <h4 style="margin-top:18px">3. Préparer une expérience supervisée</h4>
+          <label for="causalHypothesisId">Identifiant de l'hypothèse</label>
+          <input id="causalHypothesisId" type="number" min="1" placeholder="ID de l'hypothèse">
+          <label for="causalEnvironment">Environnement</label>
+          <select id="causalEnvironment">
+            <option value="simulation">Simulation</option>
+            <option value="controlled_safe">Cadre contrôlé sûr</option>
+          </select>
+          <label for="causalProcedure">Protocole (réalisé par le superviseur)</label>
+          <textarea id="causalProcedure" rows="2" maxlength="2000" placeholder="Décris le test sans action dangereuse"></textarea>
+          <label for="causalExperimentPrediction">Prédiction avant le test</label>
+          <input id="causalExperimentPrediction" maxlength="2000" placeholder="Ce que Chappie prévoit">
+          <label><input id="causalSupervisorApproval" type="checkbox"> Je confirme avoir vérifié et approuver ce test sûr</label>
+          <button type="button" onclick="createCausalExperiment()">Valider le protocole</button>
+          <h4 style="margin-top:18px">4. Comparer le résultat à la prédiction</h4>
+          <label for="causalExperimentId">Identifiant de l'expérience</label>
+          <input id="causalExperimentId" type="number" min="1" placeholder="ID de l'expérience">
+          <label for="causalObservedResult">Résultat réellement constaté</label>
+          <textarea id="causalObservedResult" rows="2" maxlength="2000" placeholder="Ce qui s'est réellement passé"></textarea>
+          <label for="causalEvaluation">Évaluation</label>
+          <select id="causalEvaluation">
+            <option value="supported">Hypothèse soutenue</option>
+            <option value="contradicted">Hypothèse contredite</option>
+            <option value="inconclusive">Résultat non concluant</option>
+          </select>
+          <button type="button" onclick="evaluateCausalExperiment()">Évaluer et apprendre</button>
+          <div id="causalLearningStatus" class="status">Aucune expérience causale enregistrée.</div>
+          <button type="button" class="secondary" onclick="loadCausalLearning()">Actualiser le journal causal</button>
+          <pre id="causalLearningOutput" class="output">Journal causal en attente de synchronisation.</pre>
+        </div>
 
         <div class="panel">
           <h3>🌍 Modèle du monde de Chappie</h3>

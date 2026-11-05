@@ -73,6 +73,29 @@ def record_heard_word(
     return dict(row)
 
 
+def record_heard_text(
+    db: sqlite3.Connection,
+    user_id: str,
+    text: str,
+    evidence: str = "Transcription vocale Gemini Live",
+    max_tokens: int = 30,
+) -> list[dict[str, Any]]:
+    """Record only lexical exposure, never comprehension or mastery."""
+    tokens = re.findall(r"[\\wÀ-ÖØ-öø-ÿ'-]+", str(text), flags=re.UNICODE)
+    recorded: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for token in tokens[:max_tokens]:
+        try:
+            word = normalize_word(token)
+        except ValueError:
+            continue
+        if word in seen:
+            continue
+        seen.add(word)
+        recorded.append(record_heard_word(db, user_id, word, evidence))
+    return recorded
+
+
 def advance_word(
     db: sqlite3.Connection,
     user_id: str,

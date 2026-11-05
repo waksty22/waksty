@@ -79,7 +79,7 @@ from learning.curriculum import (
 from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
     get_usable_words, get_repeatable_words, gate_spoken_text,
-    record_heard_word, record_heard_text,
+    record_heard_word, record_heard_text, text_uses_only_allowed_words,
 )
 from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,
@@ -4239,6 +4239,8 @@ async def websocket_endpoint(
                             }, ensure_ascii=False))
 
                     if response.get("serverContent", {}).get("interrupted"):
+                        live_turn_state["audio"] = []
+                        live_turn_state["assistant"] = ""
                         await websocket.send_json({"type": "interrupt"})
 
                     server_content = response.get("serverContent") or {}
@@ -4304,14 +4306,9 @@ async def websocket_endpoint(
                         with db_connection() as language_db:
                             repeatable_words = get_repeatable_words(language_db, user_id)
                         maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
-                        spoken_tokens = re.findall(
-                            r"[\wÀ-ÖØ-öø-ÿ'-]+", assistant_text.casefold(), flags=re.UNICODE
-                        )
                         lexical_gate_passed = (
                             maturity >= 3.0
-                            or bool(spoken_tokens) and all(
-                                token in repeatable_words for token in spoken_tokens
-                            )
+                            or text_uses_only_allowed_words(assistant_text, repeatable_words)
                         )
                         if lexical_gate_passed:
                             for audio_chunk in live_turn_state["audio"]:

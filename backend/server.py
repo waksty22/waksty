@@ -3287,7 +3287,8 @@ async def api_diagnostics(auth=Depends(require_auth)):
         "sensory_observations", "world_entities", "world_relations",
         "autobiographical_events", "autobiographical_links",
         "affective_history", "decision_journal", "preference_evidence",
-        "imitation_examples", "imitation_attempts",
+        "competency_tests", "skills", "imitation_examples", "imitation_attempts",
+        "perception_fusion_candidates",
         "spatial_sessions", "spatial_visits", "place_memories",
     )
     with db_connection() as db:
@@ -3306,7 +3307,7 @@ async def api_diagnostics(auth=Depends(require_auth)):
             "shared_brain": True, "classic_chat": True, "gemini_live_bridge": True,
             "vocabulary_gate_classic_chat": True,
             "live_audio_lexical_gate": "buffered_until_transcript_validation",
-            "spatial_memory": True, "visual_place_identity": "observations_only",
+            "spatial_memory": True, "visual_place_identity": "description_similarity_candidates_require_manual_confirmation",
         },
         "snapshot_totals": snapshot.get("statistics", {}).get("totals", {}),
         "provider": {"gemini_api_key_configured": bool(GEMINI_API_KEY)},

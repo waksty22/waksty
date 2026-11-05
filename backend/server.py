@@ -3323,9 +3323,10 @@ async def websocket_endpoint(
                             }  
                         }  
                     },  
-                    "system_instruction": {  
-                        "parts": [{"text": current_identity_prompt}]  
-                    }  
+                    "system_instruction": {
+                        "parts": [{"text": current_identity_prompt}]
+                    },
+                    "input_audio_transcription": {}
                 }  
             }  
             await gemini_ws.send(json.dumps(setup_message))  

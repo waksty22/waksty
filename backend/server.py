@@ -1,4 +1,4 @@
-"""Chappie V33 — architecture cognitive unifiée.
+"""Chappie V34 — architecture cognitive unifiée.
 Python 3.11+. Les émotions et les rêves sont des états logiciels simulés,
 pas une conscience démontrée.
 """
@@ -45,6 +45,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from utils.validators import normalize_and_validate_user_id
+from utils.live_tickets import OneTimeTicketStore
 
 from memory.episodic_memory import (
     init_memory_tables,
@@ -135,7 +136,7 @@ from cognition.shared_brain import (
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V33.0 — évolution cognitive unifiée"
+APP_NAME = "Chappie V34.0 — consolidation et fiabilisation cognitive"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -238,6 +239,8 @@ log = logging.getLogger("chappie")
 security = HTTPBearer(auto_error=False)
 
 _rate_buckets: dict[str, list[float]] = {}
+LIVE_WS_TICKET_TTL_SECONDS = 45
+live_ws_tickets = OneTimeTicketStore(LIVE_WS_TICKET_TTL_SECONDS)
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -521,7 +524,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="33.0.0",
+    version="34.0.0",
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -818,6 +821,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         )  
 
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM memories_v19 WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM causal_experiments WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM imitation_attempts WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM imitation_examples WHERE user_id=?", (user_id,))
@@ -850,6 +854,17 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
         db.execute("DELETE FROM affective_history WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM decision_journal WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM preference_evidence WHERE user_id=?", (user_id,))
+        # A new life must not inherit old journal notes or inactivity timers.
+        db.execute("DELETE FROM journal WHERE user_id=?", (user_id,))
+        maintenance = db.execute(
+            "UPDATE maintenance_state SET last_active_at=?,last_dream_at='',updated_at=? WHERE user_id=?",
+            (now, now, user_id),
+        )
+        if maintenance.rowcount == 0:
+            db.execute(
+                "INSERT INTO maintenance_state(user_id,last_active_at,last_dream_at,updated_at) VALUES(?,?,?,?)",
+                (user_id, now, "", now),
+            )
         # Clear all autobiographical, cross-modal and spatial traces on a true new-life reset.
         db.execute("DELETE FROM autobiographical_links WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM autobiographical_events WHERE user_id=?", (user_id,))
@@ -2756,7 +2771,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "33.0.0",
+        "version": "34.0.0",
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -2788,7 +2803,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "33.0.0",  
+        "version": "34.0.0",  
     }
 
 @app.post("/api/chat")
@@ -3168,7 +3183,7 @@ async def api_world_relations(auth=Depends(require_auth)):
 async def api_world_map(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     with db_connection() as db:
-        return {"version": "33.0.0", "map": get_map_state(db, user_id)}
+        return {"version": "34.0.0", "map": get_map_state(db, user_id)}
 
 
 @app.post("/api/world/location/session")
@@ -3273,7 +3288,7 @@ async def api_diagnostics(auth=Depends(require_auth)):
         tables = {name: name in existing for name in required_tables}
         snapshot = get_shared_brain_snapshot(db, user_id, limit=10)
     return {
-        "version": "33.0.0",
+        "version": "34.0.0",
         "database": {"path_configured": bool(DB_PATH), "required_tables": tables,
                      "all_required_tables_present": all(tables.values())},
         "modules": {
@@ -3829,7 +3844,7 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "33.0.0",
+        "version": "34.0.0",
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,
@@ -3862,7 +3877,7 @@ async def api_shared_brain_snapshot(auth=Depends(require_auth)):
     with db_connection() as db:
         snapshot = get_shared_brain_snapshot(db, user_id, limit=20)
     return {
-        "version": "33.0.0",
+        "version": "34.0.0",
         "brain": snapshot,
         "context": format_shared_brain_context(snapshot),
     }
@@ -4063,15 +4078,33 @@ async def api_reject_imitation(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+@app.post("/api/live/ticket")
+async def create_live_websocket_ticket(user_id: str = Depends(require_auth)):
+    """Issue a short-lived, single-use WebSocket ticket, never the API key in a URL."""
+    user_id = valid_user(user_id)
+    if not GEMINI_API_KEY:
+        raise HTTPException(503, "Gemini Live n'est pas configuré sur le serveur.")
+    ticket = live_ws_tickets.issue(user_id)
+    return JSONResponse(
+        {"ticket": ticket, "expires_in": LIVE_WS_TICKET_TTL_SECONDS},
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+
+
 @app.websocket("/ws")
 @app.websocket("/ws/live")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None),
+    ticket: Optional[str] = Query(None),
 ):
-    """Authenticated bridge: browser PCM -> Gemini Live -> browser PCM."""
-    token = str(token or "").strip()
-    if not CHAPPIE_API_TOKEN or not token or not hmac.compare_digest(token, CHAPPIE_API_TOKEN):
+    """Authenticated bridge using a short-lived, single-use ticket."""
+    ticket_user = live_ws_tickets.consume(str(ticket or "").strip())
+    if not ticket_user:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    try:
+        user_id = valid_user(ticket_user)
+    except HTTPException:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -4085,7 +4118,6 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
-    user_id = CHAPPIE_OWNER_ID
 
     try:
         log.info("[GEMINI LIVE] Ouverture session modèle=%s", GEMINI_LIVE_MODEL)
@@ -4365,14 +4397,14 @@ async def websocket_endpoint(
                                     source="gemini_live",
                                 )
                                 log.info(
-                                    "[V33] Tour Live enregistré dans le cerveau commun "
+                                    "[V34] Tour Live enregistré dans le cerveau commun "
                                     "(utilisateur=%s, user_chars=%s, assistant_chars=%s, audio_chunks=%s)",
                                     user_id, len(live_turn_state["user"]),
                                     len(assistant_text) if lexical_gate_passed else 0,
                                     len(live_turn_state["audio"]) if lexical_gate_passed else 0,
                                 )
                             except Exception:
-                                log.exception("[V33] Échec d'enregistrement du tour Live")
+                                log.exception("[V34] Échec d'enregistrement du tour Live")
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []

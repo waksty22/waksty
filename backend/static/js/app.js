@@ -5,7 +5,7 @@ import { playTextToSpeech, initSpeechRecognition, initLiveAudioStream, playAudio
 import { apiCall } from './api.js';
 
 document.addEventListener("DOMContentLoaded", () => {
-    console.log("Initialisation de l'application modulaire Chappie V33...");
+    console.log("Initialisation de l'application modulaire Chappie V34...");
 
     // Fonction centralisée et robuste pour récupérer le token de partout
     function getToken() {
@@ -461,9 +461,18 @@ document.addEventListener("DOMContentLoaded", () => {
         if (liveStatus) liveStatus.textContent = "Connexion au flux Live en cours...";
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws?token=${encodeURIComponent(currentToken)}`;
+        const wsUrlFactory = async () => {
+            const ticketData = await apiCall('/api/live/ticket', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            if (!ticketData || !ticketData.ticket) {
+                throw new Error('Le serveur n’a pas délivré de ticket Live.');
+            }
+            return `${wsProtocol}//${window.location.host}/ws?ticket=${encodeURIComponent(ticketData.ticket)}`;
+        };
 
-        liveSocket = initWebSocket(wsUrl, (data) => {
+        liveSocket = initWebSocket(wsUrlFactory, (data) => {
             console.log("Message Live reçu :", data);
 
             if (data.message && liveStatus) {
@@ -505,13 +514,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 console.error("Erreur Gemini Live :", data.message || data.error);
                 if (liveStatus) liveStatus.textContent = "Erreur Gemini Live : " + (data.message || data.error);
             }
+        }, (state, detail) => {
+            if (!liveStatus) return;
+            if (state === "open") liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
+            if (state === "error") liveStatus.textContent = "Connexion Live impossible : " + (detail?.message || "ticket indisponible");
+            if (state === "close" && detail?.code === 1008) liveStatus.textContent = "Session refusée ou expirée. Relance le mode Live.";
         });
 
         try {
             liveRecorder = await initLiveAudioStream(liveSocket);
             if (liveRecorder && liveBtn) {
                 liveBtn.textContent = "⏹ Arrêter la conversation live";
-                if (liveStatus) liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
+                if (liveStatus) liveStatus.textContent = "Microphone prêt. Connexion à Chappie...";
             }
         } catch (e) {
             console.error("Erreur initialisation micro live :", e);
@@ -686,7 +700,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
 
-    // V33 — causal learning controls
+    // V34 — causal learning controls
     window.createCausalObservation = async function() {
         const value = id => document.getElementById(id)?.value?.trim() || "";
         const status = document.getElementById("causalLearningStatus");
@@ -761,7 +775,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) { if (output) output.textContent = "Erreur de chargement : " + error.message; }
     };
 
-    // V33 — consent-based location tracking and spatial memory
+    // V34 — consent-based location tracking and spatial memory
     let locationWatchId = null;
     let locationSessionId = null;
     let latestLocation = null;

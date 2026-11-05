@@ -1,20 +1,34 @@
 // static/js/websocket.js
 'use strict';
 
-export function initWebSocket(url, onMessageCallback) {
+export function initWebSocket(url, onMessageCallback, onStateCallback) {
     let ws = null;
     let isConnecting = false;
     let shouldReconnect = true;
 
-    function connect() {
+    async function connect() {
         if (isConnecting || !shouldReconnect) return;
         isConnecting = true;
 
-        ws = new WebSocket(url);
+        try {
+            const targetUrl = typeof url === 'function' ? await url() : url;
+            if (!shouldReconnect) {
+                isConnecting = false;
+                return;
+            }
+            ws = new WebSocket(targetUrl);
+        } catch (error) {
+            isConnecting = false;
+            shouldReconnect = false;
+            console.error("Impossible d'obtenir un ticket WebSocket :", error);
+            if (onStateCallback) onStateCallback("error", error);
+            return;
+        }
 
         ws.onopen = () => {
             isConnecting = false;
             console.log("Connexion WebSocket établie.");
+            if (onStateCallback) onStateCallback("open");
         };
 
         ws.onmessage = (event) => {
@@ -32,6 +46,7 @@ export function initWebSocket(url, onMessageCallback) {
 
         ws.onclose = (event) => {
             isConnecting = false;
+            if (onStateCallback) onStateCallback("close", event);
             // Si la fermeture est due à une violation de politique (token invalide, ex: 1008), on stoppe les essais
             if (event.code === 1008) {
                 console.error("Connexion WebSocket refusée : Jeton invalide ou manquant.");

@@ -10,6 +10,7 @@ on:
       - feature/v36-4-libsql-integration-tests
       - feature/v36-5-episodic-memory-libsql
       - feature/v36-6-spatial-memory-libsql
+      - feature/v36-7-autobiographical-memory-libsql
   pull_request:
     branches:
       - main
@@ -45,4 +46,4 @@ jobs:
           PY
           node --check /tmp/chappie-inline.mjs
       - name: Test storage adapter, learning and shared cognitive brain
-        run: python -m pytest backend/tests/test_libsql_adapter.py backend/tests/test_libsql_spatial_memory.py backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py backend/tests/test_spatial_memory.py backend/tests/test_skill_evidence.py backend/tests/test_memory_integration.py backend/tests/test_live_tickets.py -q
+        run: python -m pytest backend/tests/test_libsql_adapter.py backend/tests/test_libsql_spatial_memory.py backend/tests/test_libsql_autobiographical_memory.py backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py backend/tests/test_spatial_memory.py backend/tests/test_skill_evidence.py backend/tests/test_memory_integration.py backend/tests/test_live_tickets.py -q

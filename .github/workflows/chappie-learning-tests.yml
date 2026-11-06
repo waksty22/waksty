@@ -16,6 +16,7 @@ on:
   pull_request:
     branches:
       - main
+      - feature/v36-8-shared-brain-autobiographical-libsql
 
 jobs:
   learning-tests:

@@ -96,6 +96,26 @@ class CompatCursor:
                 yield converted
 
 
+def _raise_sqlite_compatible_error(exc: Exception) -> None:
+    """Translate libsql's DB-API exception classes into sqlite3 equivalents."""
+    if isinstance(exc, sqlite3.Error):
+        raise exc
+    error_types = {
+        "OperationalError": sqlite3.OperationalError,
+        "IntegrityError": sqlite3.IntegrityError,
+        "ProgrammingError": sqlite3.ProgrammingError,
+        "DataError": sqlite3.DataError,
+        "InterfaceError": sqlite3.InterfaceError,
+        "DatabaseError": sqlite3.DatabaseError,
+        "NotSupportedError": sqlite3.NotSupportedError,
+        "InternalError": sqlite3.InternalError,
+    }
+    error_class = error_types.get(type(exc).__name__)
+    if error_class is not None:
+        raise error_class(str(exc)) from exc
+    raise exc
+
+
 class LibSQLConnectionAdapter:
     """Provide the subset of sqlite3.Connection used by the current backend."""
 
@@ -109,15 +129,21 @@ class LibSQLConnectionAdapter:
 
     def execute(self, sql: str, parameters: Any = ()) -> CompatCursor:
         self._ensure_open()
-        return CompatCursor(self._connection.execute(sql, parameters))
+        try:
+            return CompatCursor(self._connection.execute(sql, parameters))
+        except Exception as exc:
+            _raise_sqlite_compatible_error(exc)
 
     def executemany(
         self, sql: str, seq_of_parameters: Iterable[Sequence[Any]]
     ) -> CompatCursor:
         self._ensure_open()
-        return CompatCursor(
-            self._connection.executemany(sql, seq_of_parameters)
-        )
+        try:
+            return CompatCursor(
+                self._connection.executemany(sql, seq_of_parameters)
+            )
+        except Exception as exc:
+            _raise_sqlite_compatible_error(exc)
 
     def executescript(self, script: str) -> None:
         """Delegate script execution to libsql's native implementation."""
@@ -127,15 +153,24 @@ class LibSQLConnectionAdapter:
             raise NotImplementedError(
                 "Le pilote libsql ne fournit pas executescript()."
             )
-        execute_script(script)
+        try:
+            execute_script(script)
+        except Exception as exc:
+            _raise_sqlite_compatible_error(exc)
 
     def commit(self) -> None:
         self._ensure_open()
-        self._connection.commit()
+        try:
+            self._connection.commit()
+        except Exception as exc:
+            _raise_sqlite_compatible_error(exc)
 
     def rollback(self) -> None:
         self._ensure_open()
-        self._connection.rollback()
+        try:
+            self._connection.rollback()
+        except Exception as exc:
+            _raise_sqlite_compatible_error(exc)
 
     def close(self) -> None:
         if not self._closed:

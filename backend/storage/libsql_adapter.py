@@ -1,7 +1,7 @@
 """Small DB-API compatibility wrappers for the synchronous libsql driver.
 
 This module is intentionally not wired into the production connection factory yet.
-V36.3 first validates the adapter in isolation; switching the live database is a
+V36.3 validates the adapter in isolation; switching the live database is a
 separate, explicitly reviewed step.
 """
 from __future__ import annotations
@@ -12,19 +12,19 @@ from typing import Any
 
 
 class CompatRow(Sequence[Any]):
-    """Tuple-like row with sqlite3.Row-style named lookup."""
+    """Tuple-like row with sqlite3.Row-style indexed and named lookup."""
 
     __slots__ = ("_values", "_names", "_index")
 
     def __init__(self, values: Iterable[Any], names: Iterable[str]) -> None:
         self._values = tuple(values)
         self._names = tuple(names)
-        self._index = {name: i for i, name in enumerate(self._names)}
+        self._index = {name.casefold(): i for i, name in enumerate(self._names)}
 
     def __getitem__(self, key: int | slice | str) -> Any:
         if isinstance(key, str):
             try:
-                key = self._index[key]
+                key = self._index[key.casefold()]
             except KeyError as exc:
                 raise IndexError(f"No such column: {key}") from exc
         return self._values[key]
@@ -68,8 +68,11 @@ class CompatCursor:
         if isinstance(row, CompatRow):
             return row
         if isinstance(row, dict):
-            names = tuple(row.keys())
-            return CompatRow(row.values(), names)
+            return CompatRow(row.values(), row.keys())
+        if not self._names:
+            raise RuntimeError(
+                "Le pilote libsql n'a fourni aucun nom de colonne pour une ligne."
+            )
         return CompatRow(row, self._names)
 
     def fetchone(self) -> CompatRow | None:
@@ -117,24 +120,14 @@ class LibSQLConnectionAdapter:
         )
 
     def executescript(self, script: str) -> None:
-        """Execute complete SQL statements one by one.
-
-        Unlike sqlite3.Connection.executescript, this does not implicitly commit
-        an existing transaction. Statements are sent sequentially to the driver.
-        """
+        """Delegate script execution to libsql's native implementation."""
         self._ensure_open()
-        statement = ""
-        for line in script.splitlines(keepends=True):
-            statement += line
-            if sqlite3.complete_statement(statement):
-                sql = statement.strip()
-                if sql:
-                    self._connection.execute(sql)
-                statement = ""
-        if statement.strip():
-            # sqlite3.complete_statement can be false for a final statement
-            # without a semicolon; execute it and let the driver validate SQL.
-            self._connection.execute(statement)
+        execute_script = getattr(self._connection, "executescript", None)
+        if not callable(execute_script):
+            raise NotImplementedError(
+                "Le pilote libsql ne fournit pas executescript()."
+            )
+        execute_script(script)
 
     def commit(self) -> None:
         self._ensure_open()
@@ -154,11 +147,12 @@ class LibSQLConnectionAdapter:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        # Match sqlite3.Connection's context-manager behavior: finish the
+        # transaction, but do not close the connection.
         if exc_type is None:
             self.commit()
         else:
             self.rollback()
-        self.close()
         return False
 
 

@@ -111,8 +111,28 @@ def _raise_sqlite_compatible_error(exc: Exception) -> None:
         "InternalError": sqlite3.InternalError,
     }
     error_class = error_types.get(type(exc).__name__)
+    message = str(exc)
+    lowered = message.casefold()
+
+    # libsql-python 0.1.x reports some SQLite engine failures as ValueError.
+    # Translate only recognizable database diagnostics; leave unrelated
+    # ValueErrors untouched.
+    if isinstance(exc, ValueError):
+        if any(marker in lowered for marker in (
+            "no such table",
+            "no such column",
+            "syntax error",
+            "database is locked",
+            "database or disk is full",
+            "unable to open database",
+            "not a database",
+        )):
+            error_class = sqlite3.OperationalError
+        elif "constraint failed" in lowered:
+            error_class = sqlite3.IntegrityError
+
     if error_class is not None:
-        raise error_class(str(exc)) from exc
+        raise error_class(message) from exc
     raise exc
 
 

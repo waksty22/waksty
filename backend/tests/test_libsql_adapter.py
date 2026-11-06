@@ -200,3 +200,17 @@ def test_real_libsql_missing_table_raises_sqlite_compatible_error():
             db.execute("SELECT * FROM table_that_does_not_exist")
     finally:
         db.close()
+
+
+def test_world_model_accepts_libsql_adapter_connection_overload():
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    from world.world_model import get_entity_relations, init_world_tables
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        init_world_tables(db)
+        assert get_entity_relations(db, "creator", "not-yet-created") == []
+    finally:
+        db.close()

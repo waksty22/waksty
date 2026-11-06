@@ -20,8 +20,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install test dependency
-        run: python -m pip install --upgrade pytest
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pytest libsql
       - name: Check Python syntax
         run: python -m compileall -q backend
       - name: Check browser JavaScript syntax
@@ -40,5 +40,5 @@ jobs:
           Path("/tmp/chappie-inline.mjs").write_text("\n".join(scripts), encoding="utf-8")
           PY
           node --check /tmp/chappie-inline.mjs
-      - name: Test learning and shared cognitive brain
-        run: python -m pytest backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py backend/tests/test_spatial_memory.py backend/tests/test_skill_evidence.py backend/tests/test_memory_integration.py backend/tests/test_live_tickets.py -q
+      - name: Test storage adapter, learning and shared cognitive brain
+        run: python -m pytest backend/tests/test_libsql_adapter.py backend/tests/test_language.py backend/tests/test_sensory.py backend/tests/test_object_learning.py backend/tests/test_causal_learning.py backend/tests/test_supervised_learning.py backend/tests/test_shared_brain.py backend/tests/test_spatial_memory.py backend/tests/test_skill_evidence.py backend/tests/test_memory_integration.py backend/tests/test_live_tickets.py -q

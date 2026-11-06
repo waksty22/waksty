@@ -33,6 +33,7 @@ class FakeConnection:
         self.commits = 0
         self.rollbacks = 0
         self.closed = False
+        self.scripts = []
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
@@ -44,6 +45,9 @@ class FakeConnection:
         self.calls.append((sql, list(params)))
         return FakeCursor([], lastrowid=0, rowcount=2)
 
+    def executescript(self, script):
+        self.scripts.append(script)
+
     def commit(self):
         self.commits += 1
 
@@ -54,11 +58,12 @@ class FakeConnection:
         self.closed = True
 
 
-def test_compat_row_supports_index_and_name_access():
+def test_compat_row_supports_index_and_case_insensitive_name_access():
     row = CompatRow((10, "memory"), ("id", "kind"))
 
     assert row[0] == 10
     assert row["kind"] == "memory"
+    assert row["KIND"] == "memory"
     assert row.keys() == ["id", "kind"]
     assert row.as_dict() == {"id": 10, "kind": "memory"}
 
@@ -93,33 +98,27 @@ def test_executemany_forwards_parameters():
     assert raw.calls[-1][1] == [("a",), ("b",)]
 
 
-def test_executescript_sends_statements_sequentially():
+def test_executescript_delegates_to_native_driver():
     raw = FakeConnection()
     db = LibSQLConnectionAdapter(raw)
+    script = "CREATE TABLE first_table (id INTEGER PRIMARY KEY);"
 
-    db.executescript(
-        """
-        CREATE TABLE first_table (id INTEGER PRIMARY KEY);
-        CREATE TABLE second_table (id INTEGER PRIMARY KEY);
-        """
-    )
+    db.executescript(script)
 
-    assert len(raw.calls) == 2
-    assert raw.calls[0][0].lstrip().startswith("CREATE TABLE first_table")
-    assert raw.calls[1][0].lstrip().startswith("CREATE TABLE second_table")
+    assert raw.scripts == [script]
 
 
-def test_context_manager_commits_and_closes_on_success():
+def test_context_manager_commits_without_closing_connection():
     raw = FakeConnection()
     with LibSQLConnectionAdapter(raw) as db:
         db.execute("SELECT id, label FROM sample")
 
     assert raw.commits == 1
     assert raw.rollbacks == 0
-    assert raw.closed is True
+    assert raw.closed is False
 
 
-def test_context_manager_rolls_back_and_closes_on_error():
+def test_context_manager_rolls_back_without_closing_on_error():
     raw = FakeConnection()
 
     try:
@@ -130,4 +129,45 @@ def test_context_manager_rolls_back_and_closes_on_error():
 
     assert raw.commits == 0
     assert raw.rollbacks == 1
+    assert raw.closed is False
+
+
+def test_explicit_close_closes_underlying_connection():
+    raw = FakeConnection()
+    db = LibSQLConnectionAdapter(raw)
+
+    db.close()
+
     assert raw.closed is True
+
+
+def test_real_libsql_in_memory_driver_contract():
+    """Exercise the actual installed libsql binding without touching Turso."""
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    raw = libsql.connect(database=":memory:")
+    db = adapt_libsql_connection(raw)
+    try:
+        db.executescript(
+            """
+            CREATE TABLE sample (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+            INSERT INTO sample(label) VALUES ('Chappie');
+            """
+        )
+        row = db.execute(
+            "SELECT id, label FROM sample WHERE label = ?", ("Chappie",)
+        ).fetchone()
+
+        assert row is not None
+        assert row["id"] == 1
+        assert row["LABEL"] == "Chappie"
+        assert row[0] == 1
+
+        inserted = db.execute(
+            "INSERT INTO sample(label) VALUES (?)", ("Nova",)
+        )
+        assert inserted.lastrowid is not None
+        assert db.execute("SELECT COUNT(*) AS total FROM sample").fetchone()["total"] == 2
+    finally:
+        db.close()

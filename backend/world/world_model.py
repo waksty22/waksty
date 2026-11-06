@@ -749,7 +749,11 @@ def get_entity_relations(
     1. get_entity_relations(db, user_id, entity_id)
     2. get_entity_relations(user_id, entity_id) [rétrocompatibilité]
     """
-    if isinstance(db_or_user_id, sqlite3.Connection):
+    # Accept native SQLite and the explicit libsql adapter without
+    # mistaking ordinary user-id strings for connection objects.
+    if isinstance(db_or_user_id, sqlite3.Connection) or callable(
+        getattr(db_or_user_id, "execute", None)
+    ):
         db = db_or_user_id
         user_id = _validate_user_id(user_id_or_entity_id)
         entity_id = _validate_text(entity_id_opt, "entity_id", MAX_ID_LENGTH)

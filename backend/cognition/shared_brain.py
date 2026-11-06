@@ -119,9 +119,14 @@ def get_shared_brain_snapshot(
         state: sum(1 for word in data["vocabulary"] if word.get("state") == state)
         for state in ("heard", "imitated", "recognized", "understood", "usable")
     }
+    data["cross_memory_evidence"] = _cross_reference_memories(
+        data.get("autobiographical_events", []),
+        data.get("memories", []),
+    )
     data["statistics"] = {
         "totals": totals,
         "vocabulary_states_in_recent_sample": vocabulary_states,
+        "cross_memory_evidence_links": len(data["cross_memory_evidence"]),
     }
     data["rules"] = {
         "observed_is_not_understood": True,
@@ -130,6 +135,8 @@ def get_shared_brain_snapshot(
         "hypotheses_are_not_facts": True,
         "emotion_states_are_simulated": True,
         "unknowns_must_remain_unknown": True,
+        "textual_match_is_not_truth": True,
+        "repeated_storage_is_not_independent_corroboration": True,
     }
     data["snapshot_version"] = SNAPSHOT_VERSION
     return data
@@ -157,6 +164,7 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
         ("imitation_attempts", "TENTATIVES D'IMITATION"),
         ("autobiographical_events", "ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS"),
         ("memories", "SOUVENIRS ÉPISODIQUES — conserver source/confiance"),
+        ("cross_memory_evidence", "RAPPROCHEMENTS TEXTUELS — chevauchement seulement, jamais preuve indépendante"),
         ("skills", "COMPÉTENCES ENREGISTRÉES — les XP hérités ne valident pas une maîtrise"),
         ("competency_tests", "ÉVALUATIONS DE COMPÉTENCES — progression avec preuve supervisée"),
         ("decision_journal", "DÉCISIONS ET RÉSULTATS"),

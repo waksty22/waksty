@@ -1,0 +1,167 @@
+"""Small DB-API compatibility wrappers for the synchronous libsql driver.
+
+This module is intentionally not wired into the production connection factory yet.
+V36.3 first validates the adapter in isolation; switching the live database is a
+separate, explicitly reviewed step.
+"""
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Iterable, Iterator, Sequence
+from typing import Any
+
+
+class CompatRow(Sequence[Any]):
+    """Tuple-like row with sqlite3.Row-style named lookup."""
+
+    __slots__ = ("_values", "_names", "_index")
+
+    def __init__(self, values: Iterable[Any], names: Iterable[str]) -> None:
+        self._values = tuple(values)
+        self._names = tuple(names)
+        self._index = {name: i for i, name in enumerate(self._names)}
+
+    def __getitem__(self, key: int | slice | str) -> Any:
+        if isinstance(key, str):
+            try:
+                key = self._index[key]
+            except KeyError as exc:
+                raise IndexError(f"No such column: {key}") from exc
+        return self._values[key]
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._values)
+
+    def keys(self) -> list[str]:
+        return list(self._names)
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(zip(self._names, self._values))
+
+
+class CompatCursor:
+    """Normalize cursor rows and expose the attributes used by Chappie."""
+
+    def __init__(self, cursor: Any) -> None:
+        self._cursor = cursor
+        description = getattr(cursor, "description", None) or ()
+        self.description = tuple(description)
+        self._names = tuple(
+            item[0] if isinstance(item, (tuple, list)) else str(item)
+            for item in self.description
+        )
+
+    @property
+    def lastrowid(self) -> int | None:
+        return getattr(self._cursor, "lastrowid", None)
+
+    @property
+    def rowcount(self) -> int:
+        return int(getattr(self._cursor, "rowcount", -1))
+
+    def _row(self, row: Any) -> CompatRow | None:
+        if row is None:
+            return None
+        if isinstance(row, CompatRow):
+            return row
+        if isinstance(row, dict):
+            names = tuple(row.keys())
+            return CompatRow(row.values(), names)
+        return CompatRow(row, self._names)
+
+    def fetchone(self) -> CompatRow | None:
+        return self._row(self._cursor.fetchone())
+
+    def fetchall(self) -> list[CompatRow]:
+        return [self._row(row) for row in self._cursor.fetchall()]
+
+    def fetchmany(self, size: int | None = None) -> list[CompatRow]:
+        rows = (
+            self._cursor.fetchmany()
+            if size is None
+            else self._cursor.fetchmany(size)
+        )
+        return [self._row(row) for row in rows]
+
+    def __iter__(self) -> Iterator[CompatRow]:
+        for row in self._cursor:
+            converted = self._row(row)
+            if converted is not None:
+                yield converted
+
+
+class LibSQLConnectionAdapter:
+    """Provide the subset of sqlite3.Connection used by the current backend."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+        self._closed = False
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise sqlite3.ProgrammingError("Cannot operate on a closed database.")
+
+    def execute(self, sql: str, parameters: Any = ()) -> CompatCursor:
+        self._ensure_open()
+        return CompatCursor(self._connection.execute(sql, parameters))
+
+    def executemany(
+        self, sql: str, seq_of_parameters: Iterable[Sequence[Any]]
+    ) -> CompatCursor:
+        self._ensure_open()
+        return CompatCursor(
+            self._connection.executemany(sql, seq_of_parameters)
+        )
+
+    def executescript(self, script: str) -> None:
+        """Execute complete SQL statements one by one.
+
+        Unlike sqlite3.Connection.executescript, this does not implicitly commit
+        an existing transaction. Statements are sent sequentially to the driver.
+        """
+        self._ensure_open()
+        statement = ""
+        for line in script.splitlines(keepends=True):
+            statement += line
+            if sqlite3.complete_statement(statement):
+                sql = statement.strip()
+                if sql:
+                    self._connection.execute(sql)
+                statement = ""
+        if statement.strip():
+            # sqlite3.complete_statement can be false for a final statement
+            # without a semicolon; execute it and let the driver validate SQL.
+            self._connection.execute(statement)
+
+    def commit(self) -> None:
+        self._ensure_open()
+        self._connection.commit()
+
+    def rollback(self) -> None:
+        self._ensure_open()
+        self._connection.rollback()
+
+    def close(self) -> None:
+        if not self._closed:
+            self._connection.close()
+            self._closed = True
+
+    def __enter__(self) -> "LibSQLConnectionAdapter":
+        self._ensure_open()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+        self.close()
+        return False
+
+
+def adapt_libsql_connection(connection: Any) -> LibSQLConnectionAdapter:
+    """Wrap an already-created libsql connection without opening a new one."""
+    return LibSQLConnectionAdapter(connection)

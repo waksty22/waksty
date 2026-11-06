@@ -8,6 +8,7 @@ on:
       - feat/chappie-v29-v33-unified-evolution
       - feature/v36-3-turso-compatibility
       - feature/v36-4-libsql-integration-tests
+      - feature/v36-5-episodic-memory-libsql
   pull_request:
     branches:
       - main

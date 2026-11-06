@@ -330,3 +330,95 @@ def test_real_libsql_constraint_error_is_normalized():
             db.execute("INSERT INTO unique_test(label) VALUES (?)", ("same",))
     finally:
         db.close()
+
+
+
+def test_real_libsql_episodic_memory_module_round_trip():
+    """Exercise the real episodic-memory module on an isolated in-memory libSQL DB."""
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    from memory.episodic_memory import (
+        get_memory_statistics,
+        init_memory_tables,
+        save_episodic_memory,
+        search_episodic_memories,
+    )
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        init_memory_tables(db)
+        db.commit()
+
+        saved = save_episodic_memory(
+            db,
+            user_id="creator",
+            content="Chappie apprend à reconnaître une guitare.",
+            category="apprentissage",
+            importance=4,
+            source_type="observed",
+            confidence=0.95,
+            tags=["musique", "instrument"],
+        )
+        assert saved["saved"] is True
+        db.commit()
+
+        results = search_episodic_memories(
+            db, "creator", query="GUITARE", limit=5
+        )
+        assert len(results) == 1
+        assert results[0]["content"] == (
+            "Chappie apprend à reconnaître une guitare."
+        )
+        assert results[0]["tags"] == ["musique", "instrument"]
+        assert results[0]["access_count"] == 0
+
+        # A second search observes the persisted access counter increment.
+        db.commit()
+        stats = get_memory_statistics(db, "creator")
+        assert stats["total"] == 1
+        assert stats["important_memories"] == 1
+        assert stats["total_accesses"] == 1
+
+        # Re-saving the same memory must preserve its higher importance.
+        save_episodic_memory(
+            db,
+            user_id="creator",
+            content="Chappie apprend à reconnaître une guitare.",
+            category="musique",
+            importance=2,
+            source_type="confirmed",
+            confidence=1.0,
+        )
+        db.commit()
+        refreshed = search_episodic_memories(db, "creator", query="guitare")
+        assert refreshed[0]["importance"] == 4
+        assert refreshed[0]["source_type"] == "confirmed"
+    finally:
+        db.close()
+
+
+def test_real_libsql_episodic_memory_init_is_idempotent_and_user_scoped():
+    """Repeated schema initialization must not duplicate or erase memories."""
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    from memory.episodic_memory import (
+        init_memory_tables,
+        save_episodic_memory,
+        search_episodic_memories,
+    )
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(db, "creator", "Souvenir privé du créateur.")
+        db.commit()
+
+        init_memory_tables(db)
+        db.commit()
+
+        assert len(search_episodic_memories(db, "creator")) == 1
+        assert search_episodic_memories(db, "another-user") == []
+    finally:
+        db.close()

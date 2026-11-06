@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Chappie — Sauvegarde Turso</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#e8f4ff}
+    body{margin:0;padding:24px 16px;max-width:680px;margin-inline:auto}
+    h1{font-size:1.45rem;color:#7dd3fc}
+    p{color:#b6c9dc;line-height:1.55}
+    .panel{background:#102238;border:1px solid #24445f;border-radius:14px;padding:18px;margin:16px 0}
+    label{display:block;margin-bottom:8px;font-weight:600}
+    input{box-sizing:border-box;width:100%;padding:13px;border-radius:9px;border:1px solid #41617c;background:#071827;color:white;font-size:16px}
+    button{margin-top:12px;padding:13px 16px;border:0;border-radius:9px;background:#0284c7;color:white;font-weight:700;font-size:15px;width:100%}
+    button:disabled{opacity:.6}
+    #status{white-space:pre-wrap}.ok{color:#86efac}.bad{color:#fca5a5}
+    .warning{border-left:3px solid #fbbf24;padding-left:12px;color:#fde68a}
+    .muted{font-size:.9rem;color:#91a8be}
+  </style>
+</head>
+<body>
+  <h1>Sauvegarde de la mémoire Turso</h1>
+  <section class="panel">
+    <p>Cette opération crée une copie JSON des tables, de leur structure et de leurs enregistrements. Elle ne modifie et ne supprime aucune donnée dans Turso.</p>
+    <p class="warning">Le fichier contient des conversations, souvenirs et autres données personnelles de Chappie. Conserve-le dans un endroit privé et ne le publie pas.</p>
+    <label for="apiToken">Jeton API Chappie</label>
+    <input id="apiToken" type="password" autocomplete="off" placeholder="Saisis ton CHAPPIE_API_TOKEN">
+    <button id="backupButton" type="button">Télécharger la sauvegarde complète</button>
+    <p class="muted">Le jeton sert uniquement à cette requête. Il n'est ni enregistré ni transmis à un autre service.</p>
+    <p id="status" role="status"></p>
+  </section>
+  <script>
+    const button = document.getElementById("backupButton");
+    const tokenInput = document.getElementById("apiToken");
+    const statusBox = document.getElementById("status");
+    button.addEventListener("click", async () => {
+      const token = tokenInput.value.trim();
+      if (!token) {
+        statusBox.textContent = "Saisis d'abord ton jeton API Chappie.";
+        statusBox.className = "bad";
+        return;
+      }
+      button.disabled = true;
+      statusBox.textContent = "Lecture de Turso et préparation du fichier…";
+      statusBox.className = "";
+      try {
+        const response = await fetch("/api/turso/backup", {
+          method: "GET",
+          headers: {"Authorization": "Bearer " + token},
+          cache: "no-store"
+        });
+        if (!response.ok) {
+          let message = "La sauvegarde a échoué.";
+          try { const data = await response.json(); message = data.detail || message; } catch (_) {}
+          throw new Error(message);
+        }
+        const blob = await response.blob();
+        const disposition = response.headers.get("Content-Disposition") || "";
+        const match = disposition.match(/filename="([^"]+)"/);
+        const filename = match ? match[1] : "chappie-turso-backup.json";
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+        const sizeMb = (blob.size / 1024 / 1024).toFixed(2);
+        statusBox.textContent = "Sauvegarde générée : " + filename + " (" + sizeMb + " Mo). Vérifie qu'elle apparaît bien dans les téléchargements de ton téléphone.";
+        statusBox.className = "ok";
+      } catch (error) {
+        statusBox.textContent = error.message || "Erreur pendant la sauvegarde.";
+        statusBox.className = "bad";
+      } finally {
+        tokenInput.value = "";
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

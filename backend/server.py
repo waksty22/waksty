@@ -4461,3 +4461,69 @@ async def websocket_endpoint(
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         except Exception:
             pass
+
+
+@app.get("/api/turso/diagnostics")
+async def api_turso_diagnostics(auth=Depends(require_auth)):
+    """Read-only inspection of the configured Turso database.
+
+    This endpoint never creates, alters, or deletes remote data.
+    """
+    _authenticated_user(auth)
+    database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not database_url or not auth_token:
+        return {
+            "configured": False,
+            "connected": False,
+            "message": "Les variables Turso ne sont pas toutes configurées.",
+            "tables": [],
+        }
+
+    connection = None
+    try:
+        import libsql
+
+        connection = libsql.connect(
+            database=database_url,
+            auth_token=auth_token,
+        )
+        connection.execute("SELECT 1").fetchone()
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY name LIMIT 100"
+        ).fetchall()
+
+        tables = []
+        for row in rows:
+            table_name = str(row[0])
+            quoted_name = '"' + table_name.replace('"', '""') + '"'
+            count_row = connection.execute(
+                f"SELECT COUNT(*) FROM {quoted_name}"
+            ).fetchone()
+            tables.append({
+                "name": table_name,
+                "rows": int(count_row[0]),
+            })
+
+        return {
+            "configured": True,
+            "connected": True,
+            "database_host": database_url.split("://", 1)[-1].split("/", 1)[0],
+            "table_count": len(tables),
+            "tables": tables,
+            "read_only": True,
+        }
+    except Exception:
+        log.exception("[TURSO] Échec du diagnostic en lecture seule.")
+        raise HTTPException(
+            status_code=503,
+            detail="Connexion Turso impossible. Vérifie les variables Render et les logs.",
+        )
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass

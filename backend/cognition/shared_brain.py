@@ -41,6 +41,46 @@ TABLES = {
 }
 
 
+
+def _normalize_memory_text(value: Any) -> str:
+    """Normalize whitespace and case for conservative exact-text matching."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _cross_reference_memories(
+    autobiographical_events: list[dict[str, Any]],
+    episodic_memories: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Link exact textual overlaps without treating repetition as corroboration."""
+    memories_by_text: dict[str, list[dict[str, Any]]] = {}
+    for memory in episodic_memories:
+        normalized = _normalize_memory_text(memory.get("content"))
+        if normalized:
+            memories_by_text.setdefault(normalized, []).append(memory)
+
+    links: list[dict[str, Any]] = []
+    for event in autobiographical_events:
+        normalized = _normalize_memory_text(event.get("content"))
+        if not normalized:
+            continue
+        for memory in memories_by_text.get(normalized, []):
+            links.append({
+                "autobiographical_event_id": event.get("id"),
+                "source_conversation_id": event.get("source_conversation_id"),
+                "episodic_memory_id": memory.get("id"),
+                "match_type": "exact_normalized_text",
+                "evidence_status": "textual_overlap_only",
+                "verified_fact": False,
+                "independent_corroboration": False,
+                "autobiographical_actor": event.get("actor"),
+                "autobiographical_event_type": event.get("event_type"),
+                "autobiographical_importance": event.get("importance"),
+                "episodic_source_type": memory.get("source_type"),
+                "episodic_confidence": memory.get("confidence"),
+            })
+    return links
+
+
 def _decode_json_fields(item: dict[str, Any]) -> dict[str, Any]:
     for key in ("metadata_json", "properties_json", "options_json",
                 "evidence_json", "tags", "details"):

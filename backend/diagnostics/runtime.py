@@ -4,6 +4,7 @@ No environment values, credentials, database contents, or user data are exposed.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import time
@@ -132,13 +133,13 @@ def collect_runtime_snapshot() -> dict[str, Any]:
     }
 
 
-async def runtime_monitor_loop(logger: Any, interval_seconds: int = 60) -> None:
+async def runtime_monitor_loop(logger: Any, interval_seconds: int = 30) -> None:
     """Log periodic CPU and memory samples; intended to run as a lifespan task."""
     previous_cpu = time.process_time()
     previous_wall = time.monotonic()
 
     while True:
-        await __import__("asyncio").sleep(interval_seconds)
+        await asyncio.sleep(interval_seconds)
         current_cpu = time.process_time()
         current_wall = time.monotonic()
         elapsed = max(current_wall - previous_wall, 0.001)

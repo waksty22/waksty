@@ -171,3 +171,32 @@ def test_real_libsql_in_memory_driver_contract():
         assert db.execute("SELECT COUNT(*) AS total FROM sample").fetchone()["total"] == 2
     finally:
         db.close()
+
+
+def test_libsql_operational_errors_are_normalized():
+    import sqlite3
+    import pytest
+
+    class OperationalError(Exception):
+        pass
+
+    class ErroringConnection(FakeConnection):
+        def execute(self, sql, params=()):
+            raise OperationalError("no such table")
+
+    db = LibSQLConnectionAdapter(ErroringConnection())
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        db.execute("SELECT * FROM missing_table")
+
+
+def test_real_libsql_missing_table_raises_sqlite_compatible_error():
+    import sqlite3
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            db.execute("SELECT * FROM table_that_does_not_exist")
+    finally:
+        db.close()

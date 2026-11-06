@@ -3833,24 +3833,142 @@ async def api_compare_known_objects(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+def reset_turso_life(user_id: str) -> dict[str, Any]:
+    """Efface les données d'expérience de Chappie dans Turso sans toucher au schéma.
+
+    Les profils vocaux sont conservés pour préserver la fonctionnalité de voix.
+    Le catalogue et les mécanismes cognitifs restent dans le code.
+    """
+    database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not database_url or not auth_token:
+        raise RuntimeError("Turso n'est pas entièrement configuré.")
+
+    import libsql
+
+    connection = libsql.connect(database=database_url, auth_token=auth_token)
+    try:
+        existing = {
+            str(row[0]) for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        required = {
+            "conversation_summaries", "conversations", "dreams", "goal_steps",
+            "goals", "emotional_state", "journal", "maintenance_state",
+            "memories", "mood_events", "relationships", "skills", "voice_profiles",
+        }
+        missing = sorted(required - existing)
+        if missing:
+            raise RuntimeError(
+                "Schéma Turso inattendu; aucune donnée distante n'a été modifiée. "
+                "Tables manquantes: " + ", ".join(missing)
+            )
+
+        now = utc_now()
+        deleted: dict[str, int] = {}
+        connection.execute("BEGIN")
+        try:
+            for table in (
+                "conversation_summaries", "conversations", "dreams",
+                "memories", "mood_events", "journal",
+            ):
+                cursor = connection.execute(
+                    f'DELETE FROM "{table}" WHERE user_id=?', (user_id,)
+                )
+                deleted[table] = max(0, int(cursor.rowcount))
+
+            cursor = connection.execute(
+                "DELETE FROM goal_steps WHERE goal_id IN "
+                "(SELECT id FROM goals WHERE user_id=?)", (user_id,)
+            )
+            deleted["goal_steps"] = max(0, int(cursor.rowcount))
+            cursor = connection.execute("DELETE FROM goals WHERE user_id=?", (user_id,))
+            deleted["goals"] = max(0, int(cursor.rowcount))
+
+            cursor = connection.execute(
+                "UPDATE skills SET level=0.0, xp=0.0, "
+                "evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?",
+                (now, user_id),
+            )
+            deleted["skills_reset"] = max(0, int(cursor.rowcount))
+
+            cursor = connection.execute(
+                "UPDATE emotional_state SET joy=0.0, fear=0.0, curiosity=0.0, "
+                "frustration=0.0, sadness=0.0, energy=100.0, updated_at=? WHERE user_id=?",
+                (now, user_id),
+            )
+            if cursor.rowcount == 0:
+                connection.execute(
+                    "INSERT INTO emotional_state "
+                    "(user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at) "
+                    "VALUES (?, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, ?)",
+                    (user_id, now),
+                )
+
+            cursor = connection.execute(
+                "UPDATE relationships SET trust=0.0, affection=0.0, dependence=0.0, "
+                "updated_at=? WHERE user_id=?", (now, user_id)
+            )
+            if cursor.rowcount == 0:
+                connection.execute(
+                    "INSERT INTO relationships "
+                    "(user_id, trust, affection, dependence, updated_at) "
+                    "VALUES (?, 0.0, 0.0, 0.0, ?)", (user_id, now)
+                )
+
+            cursor = connection.execute(
+                "UPDATE maintenance_state SET last_active_at=?, last_dream_at='', "
+                "updated_at=? WHERE user_id=?", (now, now, user_id)
+            )
+            if cursor.rowcount == 0:
+                connection.execute(
+                    "INSERT INTO maintenance_state "
+                    "(user_id, last_active_at, last_dream_at, updated_at) "
+                    "VALUES (?, ?, '', ?)", (user_id, now, now)
+                )
+
+            connection.execute(
+                "INSERT INTO journal(user_id, entry, kind, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, "Nouvelle naissance : mémoire remise à zéro.", "reset", now),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
+        return {
+            "database_host": database_url.split("://", 1)[-1].split("/", 1)[0],
+            "deleted_or_reset": deleted,
+            "voice_profiles_preserved": True,
+            "schema_preserved": True,
+        }
+    finally:
+        connection.close()
+
+
 @app.post("/api/reset")
 async def api_reset(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
 
-    try:  
-        result = reset_chappie_life(user_id)  
+    try:
+        # Turso is cleared first. If its schema or connection is unexpected,
+        # the local SQLite reset is not started.
+        turso_result = reset_turso_life(user_id)
+        local_result = reset_chappie_life(user_id)
 
-        return {  
-            "success": True,  
-            "message": "Le cycle de vie de Chappie a été réinitialisé.",  
-            "result": result,  
-        }  
-
-    except Exception as exc:  
-        print("[RESET ERROR]", repr(exc))  
-        raise HTTPException(  
-            status_code=500,  
-            detail="La réinitialisation a échoué."  
+        return {
+            "success": True,
+            "message": "Chappie est né à nouveau : mémoire distante et locale réinitialisées.",
+            "result": local_result,
+            "turso": turso_result,
+        }
+    except Exception:
+        log.exception("[RESET] Échec de la réinitialisation complète.")
+        raise HTTPException(
+            status_code=500,
+            detail="La réinitialisation complète a échoué. Consulte les logs Render sans partager de secrets."
         )
 
 @app.get("/api/config")

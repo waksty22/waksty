@@ -134,6 +134,7 @@ from cognition.shared_brain import (
     format_shared_brain_context,
     merge_live_transcript,
 )
+from storage.turso_compat import inspect_turso_driver
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
@@ -4599,6 +4600,19 @@ async def websocket_endpoint(
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         except Exception:
             pass
+
+
+@app.get("/api/turso/compatibility")
+async def api_turso_compatibility(auth=Depends(require_auth)):
+    """Read-only V36.1 probe; never changes local or remote Chappie data."""
+    _authenticated_user(auth)
+    result = inspect_turso_driver()
+    if not result.get("connected"):
+        raise HTTPException(
+            status_code=503,
+            detail=result,
+        )
+    return result
 
 
 @app.get("/api/turso/diagnostics")

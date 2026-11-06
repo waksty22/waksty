@@ -3886,12 +3886,32 @@ def reset_turso_life(user_id: str) -> dict[str, Any]:
             cursor = connection.execute("DELETE FROM goals WHERE user_id=?", (user_id,))
             deleted["goals"] = max(0, int(cursor.rowcount))
 
-            cursor = connection.execute(
-                "UPDATE skills SET level=0.0, xp=0.0, "
-                "evidence='Renaissance (Page Blanche)', updated_at=? WHERE user_id=?",
-                (now, user_id),
-            )
-            deleted["skills_reset"] = max(0, int(cursor.rowcount))
+            # Le schéma historique de Turso ne contient pas toujours les mêmes
+            # colonnes que SQLite local (notamment xp). On ne met à zéro que
+            # les colonnes réellement présentes, sans modifier le schéma.
+            skill_columns = {
+                str(row[1]) for row in connection.execute(
+                    "PRAGMA table_info(skills)"
+                ).fetchall()
+            }
+            skill_updates = []
+            if "level" in skill_columns:
+                skill_updates.append("level=0.0")
+            if "xp" in skill_columns:
+                skill_updates.append("xp=0.0")
+            if "evidence" in skill_columns:
+                skill_updates.append("evidence='Renaissance (Page Blanche)'")
+            if "updated_at" in skill_columns:
+                skill_updates.append("updated_at=?")
+            if skill_updates:
+                skill_params = ([now] if "updated_at" in skill_columns else []) + [user_id]
+                cursor = connection.execute(
+                    "UPDATE skills SET " + ", ".join(skill_updates) + " WHERE user_id=?",
+                    tuple(skill_params),
+                )
+                deleted["skills_reset"] = max(0, int(cursor.rowcount))
+            else:
+                deleted["skills_reset"] = 0
 
             cursor = connection.execute(
                 "UPDATE emotional_state SET joy=0.0, fear=0.0, curiosity=0.0, "

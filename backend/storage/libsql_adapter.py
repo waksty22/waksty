@@ -90,7 +90,12 @@ class CompatCursor:
         return [self._row(row) for row in rows]
 
     def __iter__(self) -> Iterator[CompatRow]:
-        for row in self._cursor:
+        # libsql-python's native Cursor is not iterable (unlike sqlite3.Cursor).
+        # Repeated fetchone() preserves streaming behavior across both drivers.
+        while True:
+            row = self._cursor.fetchone()
+            if row is None:
+                break
             converted = self._row(row)
             if converted is not None:
                 yield converted

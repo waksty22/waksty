@@ -214,3 +214,119 @@ def test_world_model_accepts_libsql_adapter_connection_overload():
         assert get_entity_relations(db, "creator", "not-yet-created") == []
     finally:
         db.close()
+
+
+
+def test_real_libsql_executemany_and_cursor_iteration_contract():
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        db.execute(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
+        )
+        db.executemany(
+            "INSERT INTO events(label) VALUES (?)",
+            [("wake",), ("learn",), ("remember",)],
+        )
+        db.commit()
+
+        cursor = db.execute("SELECT id, label FROM events ORDER BY id")
+        first_batch = cursor.fetchmany(2)
+        assert [row["label"] for row in first_batch] == ["wake", "learn"]
+
+        remaining = list(cursor)
+        assert len(remaining) == 1
+        assert remaining[0][1] == "remember"
+
+        empty_cursor = db.execute(
+            "SELECT id, label FROM events WHERE id < 0"
+        )
+        assert empty_cursor.description
+        assert empty_cursor.fetchone() is None
+        assert empty_cursor.fetchall() == []
+    finally:
+        db.close()
+
+
+def test_real_libsql_explicit_rollback_discards_pending_insert():
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        db.execute(
+            "CREATE TABLE transactions_test "
+            "(id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
+        )
+        db.commit()
+
+        db.execute(
+            "INSERT INTO transactions_test(label) VALUES (?)", ("temporary",)
+        )
+        db.rollback()
+
+        count = db.execute(
+            "SELECT COUNT(*) AS total FROM transactions_test"
+        ).fetchone()["total"]
+        assert count == 0
+    finally:
+        db.close()
+
+
+def test_real_libsql_context_manager_commits_and_rolls_back():
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        db.execute(
+            "CREATE TABLE context_test "
+            "(id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
+        )
+        db.commit()
+
+        with db:
+            db.execute(
+                "INSERT INTO context_test(label) VALUES (?)", ("committed",)
+            )
+        assert db.execute(
+            "SELECT COUNT(*) AS total FROM context_test"
+        ).fetchone()["total"] == 1
+
+        try:
+            with db:
+                db.execute(
+                    "INSERT INTO context_test(label) VALUES (?)", ("rolled-back",)
+                )
+                raise RuntimeError("force rollback")
+        except RuntimeError:
+            pass
+
+        rows = db.execute(
+            "SELECT label FROM context_test ORDER BY id"
+        ).fetchall()
+        assert [row["label"] for row in rows] == ["committed"]
+    finally:
+        db.close()
+
+
+def test_real_libsql_constraint_error_is_normalized():
+    import sqlite3
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        db.execute(
+            "CREATE TABLE unique_test "
+            "(id INTEGER PRIMARY KEY, label TEXT UNIQUE NOT NULL)"
+        )
+        db.execute("INSERT INTO unique_test(label) VALUES (?)", ("same",))
+        db.commit()
+
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO unique_test(label) VALUES (?)", ("same",))
+    finally:
+        db.close()

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Chappie — Diagnostic Turso V36.1</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#e8f4ff}
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px 16px;max-width:680px;margin-inline:auto}
+    h1{font-size:1.4rem;color:#7dd3fc}
+    p{color:#b6c9dc;line-height:1.55}
+    .panel{background:#102238;border:1px solid #24445f;border-radius:14px;padding:18px;margin:16px 0}
+    label{display:block;margin:14px 0 7px;font-weight:650}
+    input{width:100%;padding:13px;border-radius:9px;border:1px solid #41617c;background:#071827;color:white;font-size:16px}
+    button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:9px;background:#087eaa;color:white;font-weight:750;font-size:16px}
+    button:disabled{opacity:.55}
+    #status{white-space:pre-wrap;overflow-wrap:anywhere}
+    .ok{color:#86efac}.bad{color:#fca5a5}.muted{font-size:.9rem;color:#91a8be}
+    code{color:#bae6fd}
+  </style>
+</head>
+<body>
+  <h1>🔎 Diagnostic Turso — V36.1</h1>
+  <p>Cette page vérifie si Chappie peut communiquer avec sa base Turso et si le pilote libsql possède les comportements attendus par son code SQLite.</p>
+  <section class="panel">
+    <p><strong>Diagnostic strictement en lecture seule.</strong> Aucun souvenir, aucune conversation, aucune table et aucun réglage ne sera modifié.</p>
+    <p class="muted">Le test ne bascule pas encore Chappie vers Turso : SQLite local reste le stockage utilisé par l'application à cette étape.</p>
+    <label for="apiToken">Jeton API Chappie</label>
+    <input id="apiToken" type="password" autocomplete="off" placeholder="Saisis ton jeton API">
+    <button id="testButton" type="button">Lancer le diagnostic</button>
+    <p class="muted">Le jeton sert uniquement à cette requête, n'est pas enregistré et sera effacé après le test. Ne le partage jamais dans une conversation.</p>
+    <p id="status" role="status"></p>
+  </section>
+  <script>
+    const button = document.getElementById("testButton");
+    const tokenInput = document.getElementById("apiToken");
+    const statusBox = document.getElementById("status");
+    button.addEventListener("click", async () => {
+      const token = tokenInput.value.trim();
+      if (!token) {
+        statusBox.textContent = "Saisis ton jeton API Chappie.";
+        statusBox.className = "bad";
+        return;
+      }
+      button.disabled = true;
+      statusBox.textContent = "Connexion à Turso et vérifications en cours…";
+      statusBox.className = "";
+      try {
+        const response = await fetch("/api/turso/compatibility", {
+          method: "GET",
+          headers: { "Authorization": "Bearer " + token }
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const detail = data.detail || data;
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail, null, 2));
+        }
+        statusBox.textContent = JSON.stringify(data, null, 2);
+        statusBox.className = data.compatible ? "ok" : "bad";
+      } catch (error) {
+        statusBox.textContent = error.message || "Échec du diagnostic. Consulte les logs Render sans partager de secrets.";
+        statusBox.className = "bad";
+      } finally {
+        tokenInput.value = "";
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ on:
       - v23-causalite-gemini-live
       - feat/chappie-v29-v33-unified-evolution
       - feature/v36-3-turso-compatibility
+      - feature/v36-4-libsql-integration-tests
   pull_request:
     branches:
       - main

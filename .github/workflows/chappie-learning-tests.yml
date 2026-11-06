@@ -6,6 +6,7 @@ on:
       - main
       - v23-causalite-gemini-live
       - feat/chappie-v29-v33-unified-evolution
+      - feature/v36-3-turso-compatibility
   pull_request:
     branches:
       - main

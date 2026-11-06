@@ -135,6 +135,7 @@ from cognition.shared_brain import (
     merge_live_transcript,
 )
 from storage.turso_compat import inspect_turso_driver
+from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
@@ -507,22 +508,34 @@ async def require_auth(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    startup_started = time.monotonic()
+    log.info(
+        "V36.2 runtime phase=before_init_db %s",
+        collect_runtime_snapshot(),
+    )
     init_db()
+    log.info(
+        "V36.2 runtime phase=after_init_db elapsed_seconds=%.2f %s",
+        time.monotonic() - startup_started,
+        collect_runtime_snapshot(),
+    )
     task = asyncio.create_task(autonomous_maintenance_loop())
+    runtime_task = asyncio.create_task(runtime_monitor_loop(log))
 
-    log.info(  
-        "%s démarré; boucle de maintenance active.",  
-        APP_NAME,  
-    )  
+    log.info(
+        "%s démarré; boucle de maintenance active.",
+        APP_NAME,
+    )
 
-    try:  
-        yield  
-    finally:  
-        task.cancel()  
-        try:  
-            await task  
-        except asyncio.CancelledError:  
-            pass
+    try:
+        yield
+    finally:
+        for background_task in (task, runtime_task):
+            background_task.cancel()
+            try:
+                await background_task
+            except asyncio.CancelledError:
+                pass
 
 app = FastAPI(
     title=APP_NAME,
@@ -544,6 +557,15 @@ app.add_middleware(
 
 # Montage correct du dossier static situé à la racine du projet
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+
+@app.get("/api/system/diagnostics")
+async def system_diagnostics(_: str = Depends(require_auth)):
+    """Authenticated, read-only runtime metrics; never returns environment secrets."""
+    return {
+        "diagnostics_version": "36.2",
+        "read_only": True,
+        **collect_runtime_snapshot(),
+    }
 
 @app.middleware("http")
 async def body_size_guard(request: Request, call_next):

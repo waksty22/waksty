@@ -41,6 +41,46 @@ TABLES = {
 }
 
 
+
+def _normalize_memory_text(value: Any) -> str:
+    """Normalize whitespace and case for conservative exact-text matching."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _cross_reference_memories(
+    autobiographical_events: list[dict[str, Any]],
+    episodic_memories: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Link exact textual overlaps without treating repetition as corroboration."""
+    memories_by_text: dict[str, list[dict[str, Any]]] = {}
+    for memory in episodic_memories:
+        normalized = _normalize_memory_text(memory.get("content"))
+        if normalized:
+            memories_by_text.setdefault(normalized, []).append(memory)
+
+    links: list[dict[str, Any]] = []
+    for event in autobiographical_events:
+        normalized = _normalize_memory_text(event.get("content"))
+        if not normalized:
+            continue
+        for memory in memories_by_text.get(normalized, []):
+            links.append({
+                "autobiographical_event_id": event.get("id"),
+                "source_conversation_id": event.get("source_conversation_id"),
+                "episodic_memory_id": memory.get("id"),
+                "match_type": "exact_normalized_text",
+                "evidence_status": "textual_overlap_only",
+                "verified_fact": False,
+                "independent_corroboration": False,
+                "autobiographical_actor": event.get("actor"),
+                "autobiographical_event_type": event.get("event_type"),
+                "autobiographical_importance": event.get("importance"),
+                "episodic_source_type": memory.get("source_type"),
+                "episodic_confidence": memory.get("confidence"),
+            })
+    return links
+
+
 def _decode_json_fields(item: dict[str, Any]) -> dict[str, Any]:
     for key in ("metadata_json", "properties_json", "options_json",
                 "evidence_json", "tags", "details"):
@@ -119,9 +159,14 @@ def get_shared_brain_snapshot(
         state: sum(1 for word in data["vocabulary"] if word.get("state") == state)
         for state in ("heard", "imitated", "recognized", "understood", "usable")
     }
+    data["cross_memory_evidence"] = _cross_reference_memories(
+        data.get("autobiographical_events", []),
+        data.get("memories", []),
+    )
     data["statistics"] = {
         "totals": totals,
         "vocabulary_states_in_recent_sample": vocabulary_states,
+        "cross_memory_evidence_links": len(data["cross_memory_evidence"]),
     }
     data["rules"] = {
         "observed_is_not_understood": True,
@@ -130,6 +175,8 @@ def get_shared_brain_snapshot(
         "hypotheses_are_not_facts": True,
         "emotion_states_are_simulated": True,
         "unknowns_must_remain_unknown": True,
+        "textual_match_is_not_truth": True,
+        "repeated_storage_is_not_independent_corroboration": True,
     }
     data["snapshot_version"] = SNAPSHOT_VERSION
     return data
@@ -157,6 +204,7 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
         ("imitation_attempts", "TENTATIVES D'IMITATION"),
         ("autobiographical_events", "ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS"),
         ("memories", "SOUVENIRS ÉPISODIQUES — conserver source/confiance"),
+        ("cross_memory_evidence", "RAPPROCHEMENTS TEXTUELS — chevauchement seulement, jamais preuve indépendante"),
         ("skills", "COMPÉTENCES ENREGISTRÉES — les XP hérités ne valident pas une maîtrise"),
         ("competency_tests", "ÉVALUATIONS DE COMPÉTENCES — progression avec preuve supervisée"),
         ("decision_journal", "DÉCISIONS ET RÉSULTATS"),

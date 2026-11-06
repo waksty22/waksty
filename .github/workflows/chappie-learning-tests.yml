@@ -12,6 +12,7 @@ on:
       - feature/v36-6-spatial-memory-libsql
       - feature/v36-7-autobiographical-memory-libsql
       - feature/v36-8-shared-brain-autobiographical-libsql
+      - feature/v36-9-cross-memory-evidence
   pull_request:
     branches:
       - main

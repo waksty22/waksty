@@ -15,6 +15,31 @@ L'audit de production du 7 novembre 2026 a relevé 41 tables / 84 objets dans SQ
 - N'inclut aucune copie, fusion, mise à jour ou suppression de données.
 - N'exécute rien par défaut : `apply_migration_plan(...)` reste en mode simulation sauf si un appelant fournit explicitement `apply=True`.
 
+## Préparation des sauvegardes vérifiables
+
+### SQLite local (sauvegarde prise en charge par le code)
+
+Le dépôt contient déjà `storage.backup.create_verified_backup(source_path, backup_path)`. Cette fonction :
+- utilise l'API de sauvegarde SQLite pour obtenir une copie cohérente ;
+- vérifie `PRAGMA integrity_check` sur la copie ;
+- calcule un SHA-256 et renvoie le chemin, la taille, le checksum et l'état d'intégrité ;
+- refuse que la destination soit le fichier source.
+
+La restauration vérifiée préserve également une copie de retour arrière avant le remplacement. Les tests `test_v50_backup_restore_rollback.py` couvrent sauvegarde, restauration, rollback et rejet d'une sauvegarde corrompue.
+
+**Limite Render :** le fichier SQLite du conteneur peut être éphémère sur une instance sans disque persistant. Une sauvegarde stockée uniquement dans le même conteneur n'est pas une sauvegarde durable. Il faudra exporter le fichier vers un stockage externe contrôlé et vérifier son SHA-256 avant toute opération.
+
+### Turso distant (non encore automatisé)
+
+Le helper actuel ne sauvegarde que les fichiers SQLite locaux. Il ne réalise pas d'export ni de snapshot distant Turso. Avant toute écriture Turso, il faudra donc :
+1. obtenir un export/snapshot de la base `chappie-db` via un mécanisme Turso officiellement pris en charge ;
+2. conserver l'artefact hors du service Render ;
+3. calculer et archiver son SHA-256 ;
+4. vérifier que l'artefact est lisible/restaurable dans une base Turso de test isolée ;
+5. relever les compteurs de lignes et l'inventaire de schéma avant/après.
+   
+Tant que cette sauvegarde distante n'est pas démontrée restaurable, la migration de production est bloquée. La base `chappie-memory` distincte n'est pas la cible.
+
 ## Garde-fous
 
 1. La migration n'est pas raccordée au démarrage de l'application ni à une route HTTP.

@@ -340,3 +340,15 @@ Le module `storage.backup` fournit des opérations ciblées sur des fichiers SQL
 Le test `test_v50_backup_restore_rollback.py` crée des bases temporaires et vérifie le cycle sauvegarde → modification → restauration → retour arrière, ainsi que le refus d'un fichier corrompu sans altération de la base cible.
 
 **Limite importante :** ces fonctions sont destinées aux fichiers SQLite locaux. Elles ne constituent pas une sauvegarde native de Turso et ne sont pas branchées sur le serveur de production. Avant toute bascule distante, il faudra définir et tester séparément la méthode de sauvegarde/restauration prise en charge par Turso, avec vérification de cohérence et procédure de retour vers SQLite.
+
+
+## 17. Audit de schéma et répétition de migration isolée
+
+Le module `storage.schema_audit` inspecte en lecture seule les tables, colonnes, index, vues et déclencheurs exposés par `sqlite_master` et `PRAGMA table_info`. La comparaison signale les objets absents, les définitions SQL différentes et les colonnes divergentes. Elle ne crée, ne modifie et ne supprime aucun objet.
+
+Le test `test_v50_schema_migration_dry_run.py` poursuit deux contrôles distincts :
+
+- initialise les treize sous-systèmes sur SQLite et libSQL local, puis compare les schémas obtenus ;
+- copie un jeu de données entièrement synthétique depuis un fichier SQLite temporaire vers une base libSQL locale vide, puis vérifie les colonnes, les valeurs, un BLOB, une relation de clé étrangère, un index, une vue et un déclencheur.
+
+Cette répétition de migration est volontairement limitée à un petit schéma de démonstration. Elle valide le principe du transfert et les contrôles de cohérence, mais **ne migre pas la base réelle de Chappie** et ne prouve pas encore la compatibilité de chaque table historique. L'audit complet devra être exécuté sur un export cohérent et autorisé de la base de production, avec inventaire des tables, volumes, index, contraintes, séquences et données orphelines, avant toute décision de bascule.

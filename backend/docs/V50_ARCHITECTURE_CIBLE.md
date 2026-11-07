@@ -279,3 +279,90 @@ Les numéros représentent des jalons de livraison et de validation, pas nécess
 **Choix retenu : monolithe modulaire, orchestrateur cognitif partagé, stockage derrière un contrat, événements versionnés et autonomie graduée.**
 
 Ce choix permet d'atteindre la cible V50 sans imposer prématurément une infrastructure complexe, tout en gardant une voie d'évolution vers un corps robotique et des services séparés si les besoins réels le justifient.
+
+
+## 12. Journal du chantier intégré V50
+
+### Lot V50-A — fondation du stockage (en cours)
+
+Branche de travail : `feature/chappie-v50-integrated-build`.
+
+- Une fabrique isolée `storage.connection_factory` sait ouvrir SQLite ou, sur sélection explicite, Turso via l'adaptateur libSQL.
+- Le défaut reste SQLite. Le mode Turso refuse de démarrer si l'URL ou le jeton manque.
+- La fabrique n'est pas encore utilisée par `server.db_connection()` : aucun changement du stockage de production.
+- Les tests couvrent le défaut SQLite, les opérations locales, le rejet d'un backend inconnu et les garde-fous de configuration.
+- Un test transversal exécute les modules de mémoire épisodique, autobiographique, spatiale et de modèle du monde sur une même base libSQL locale `:memory:`.
+
+**Critères avant raccordement au serveur :** tests transversaux verts, audit des opérations SQL et transactions utilisées par chaque module, comparaison de schéma en lecture seule, procédure de sauvegarde/restauration vérifiée, puis plan de retour arrière testé. Le déploiement Turso restera une décision distincte et explicitement approuvée.
+
+Ce journal décrit le code de la branche de chantier ; il ne certifie pas encore une utilisation de Turso en production.
+
+
+### 13. Validation transversale des schémas
+
+Le chantier ajoute un test qui initialise, sur une seule connexion libSQL locale éphémère, les treize sous-systèmes actuellement initialisés par le serveur : mémoires épisodique, autobiographique et spatiale, modèle du monde, curriculum, langage, perception sensorielle, apprentissage des objets, causalité, imitation supervisée, fusion perceptive, raisonnement et développement cognitif.
+
+Ce contrôle valide la compatibilité de création des schémas et des index avec l'adaptateur. Il ne constitue pas une migration de la base distante et ne prouve pas encore que toutes les opérations métier de chaque module sont compatibles. La bascule de production reste interdite avant les tests fonctionnels, la comparaison de schéma, une sauvegarde restaurable et un plan de retour arrière.
+
+
+## 14. Validation causale et multimodale sur stockage partagé
+
+Le test `test_v50_causal_and_multimodal_integration.py` exerce deux parcours sur une même connexion libSQL locale :
+
+- rapprochement temporel audio/vision, enregistré comme candidat à vérifier ; la proximité temporelle n'est jamais considérée comme une preuve d'identité ;
+- observation causale, proposition d'hypothèse, refus d'une expérience sans approbation explicite, planification en simulation après approbation, puis évaluation du résultat.
+
+Les données sont synthétiques et la base est `:memory:`. Aucun capteur réel, aucune action physique, aucun service distant et aucune donnée de production ne sont sollicités.
+
+
+## 15. Raisonnement, décisions et développement cognitif
+
+Le test `test_v50_cognition_curriculum_integration.py` complète les parcours partagés :
+
+- trace de raisonnement et audit métacognitif, en rappelant que la confiance déclarée ne prouve pas la justesse ;
+- historique affectif borné et journal de décision avec évaluation du résultat ;
+- préférence conservée avec sa provenance explicite ;
+- évaluation de compétence et mise à jour des jalons du curriculum.
+
+Les scénarios sont synthétiques et isolés dans une base libSQL locale en mémoire. Aucun score de test ne modifie directement la maturité réelle d'un utilisateur ou les données de production.
+
+
+## 16. Sauvegarde, restauration et retour arrière locaux
+
+Le module `storage.backup` fournit des opérations ciblées sur des fichiers SQLite locaux :
+
+- sauvegarde cohérente via l'API SQLite Backup, contrôle `integrity_check` et empreinte SHA-256 ;
+- validation d'une sauvegarde avant toute modification de la cible ;
+- création et vérification d'une copie de retour arrière avant restauration ;
+- restauration par fichier temporaire validé, puis remplacement atomique ;
+- refus de sauvegarder ou restaurer un fichier sur lui-même.
+
+Le test `test_v50_backup_restore_rollback.py` crée des bases temporaires et vérifie le cycle sauvegarde → modification → restauration → retour arrière, ainsi que le refus d'un fichier corrompu sans altération de la base cible.
+
+**Limite importante :** ces fonctions sont destinées aux fichiers SQLite locaux. Elles ne constituent pas une sauvegarde native de Turso et ne sont pas branchées sur le serveur de production. Avant toute bascule distante, il faudra définir et tester séparément la méthode de sauvegarde/restauration prise en charge par Turso, avec vérification de cohérence et procédure de retour vers SQLite.
+
+
+## 17. Audit de schéma et répétition de migration isolée
+
+Le module `storage.schema_audit` inspecte en lecture seule les tables, colonnes, index, vues et déclencheurs exposés par `sqlite_master` et `PRAGMA table_info`. La comparaison signale les objets absents, les définitions SQL différentes et les colonnes divergentes. Elle ne crée, ne modifie et ne supprime aucun objet.
+
+Le test `test_v50_schema_migration_dry_run.py` poursuit deux contrôles distincts :
+
+- initialise les treize sous-systèmes sur SQLite et libSQL local, puis compare les schémas obtenus ;
+- copie un jeu de données entièrement synthétique depuis un fichier SQLite temporaire vers une base libSQL locale vide, puis vérifie les colonnes, les valeurs, un BLOB, une relation de clé étrangère, un index, une vue et un déclencheur.
+
+Cette répétition de migration est volontairement limitée à un petit schéma de démonstration. Elle valide le principe du transfert et les contrôles de cohérence, mais **ne migre pas la base réelle de Chappie** et ne prouve pas encore la compatibilité de chaque table historique. L'audit complet devra être exécuté sur un export cohérent et autorisé de la base de production, avec inventaire des tables, volumes, index, contraintes, séquences et données orphelines, avant toute décision de bascule.
+
+
+## 18. Inventaire réel en lecture seule
+
+La route authentifiée `GET /api/storage/schema-audit` est préparée pour comparer la base SQLite utilisée par le serveur et la base Turso configurée dans Render. Elle ne réalise que des lectures :
+
+- inventaire des tables, colonnes, index, vues et déclencheurs ;
+- comptage des lignes par table et total ;
+- clés étrangères et nombre d'anomalies détectées par `PRAGMA foreign_key_check` ;
+- comparaison des objets de schéma et des volumes entre SQLite et Turso.
+
+Aucun contenu de conversation, souvenir, journal ou autre donnée personnelle n'est renvoyé. Les jetons et chaînes de connexion ne sont jamais inclus dans la réponse. La route exige l'authentification Chappie et ferme les deux connexions après l'audit.
+
+L'exécution sur les bases hébergées n'a pas lieu depuis la CI : elle ne sera possible qu'après déploiement contrôlé de cette route sur Render, puis appel authentifié depuis l'interface ou le client Chappie. Cet audit est un diagnostic, pas une migration ; aucune écriture ni bascule de stockage n'est effectuée.

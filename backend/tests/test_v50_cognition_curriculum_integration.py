@@ -43,7 +43,7 @@ def test_reasoning_development_and_curriculum_share_libsql():
         assert evaluate_decision_doubt(0.2)["requires_doubt"] is True
         assert len(get_cognitive_traces(db, "owner")) == 1
         audit = run_metacognitive_audit(db, "owner")
-        assert audit["total_traces"] == 1
+        assert audit["trace_count"] == 1
 
         affect = record_affective_snapshot(
             db, "owner",

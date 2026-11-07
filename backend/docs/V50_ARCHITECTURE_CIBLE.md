@@ -279,3 +279,20 @@ Les numéros représentent des jalons de livraison et de validation, pas nécess
 **Choix retenu : monolithe modulaire, orchestrateur cognitif partagé, stockage derrière un contrat, événements versionnés et autonomie graduée.**
 
 Ce choix permet d'atteindre la cible V50 sans imposer prématurément une infrastructure complexe, tout en gardant une voie d'évolution vers un corps robotique et des services séparés si les besoins réels le justifient.
+
+
+## 12. Journal du chantier intégré V50
+
+### Lot V50-A — fondation du stockage (en cours)
+
+Branche de travail : `feature/chappie-v50-integrated-build`.
+
+- Une fabrique isolée `storage.connection_factory` sait ouvrir SQLite ou, sur sélection explicite, Turso via l'adaptateur libSQL.
+- Le défaut reste SQLite. Le mode Turso refuse de démarrer si l'URL ou le jeton manque.
+- La fabrique n'est pas encore utilisée par `server.db_connection()` : aucun changement du stockage de production.
+- Les tests couvrent le défaut SQLite, les opérations locales, le rejet d'un backend inconnu et les garde-fous de configuration.
+- Un test transversal exécute les modules de mémoire épisodique, autobiographique, spatiale et de modèle du monde sur une même base libSQL locale `:memory:`.
+
+**Critères avant raccordement au serveur :** tests transversaux verts, audit des opérations SQL et transactions utilisées par chaque module, comparaison de schéma en lecture seule, procédure de sauvegarde/restauration vérifiée, puis plan de retour arrière testé. Le déploiement Turso restera une décision distincte et explicitement approuvée.
+
+Ce journal décrit le code de la branche de chantier ; il ne certifie pas encore une utilisation de Turso en production.

@@ -201,12 +201,16 @@ def test_isolated_migration_dry_run_preserves_schema_data_and_relations(tmp_path
             "SELECT total FROM memory_counts WHERE person_id=7"
         ).fetchone()[0] == 1
 
+        # The source fixture's initial insert already fired the trigger once.
+        assert target.execute(
+            "SELECT COUNT(*) FROM migration_audit"
+        ).fetchone()[0] == 1
         target.execute(
             "INSERT INTO memories(id, person_id, content) VALUES (12, 7, 'second')"
         )
         assert target.execute(
             "SELECT COUNT(*) FROM migration_audit"
-        ).fetchone()[0] == 1
+        ).fetchone()[0] == 2
         assert target.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         source.close()

@@ -24,10 +24,16 @@ import random
 import re
 import sqlite3
 import time
+import tempfile
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 import httpx
 import websockets
@@ -37,7 +43,7 @@ from fastapi import (
     WebSocket, WebSocketDisconnect, Query, status
 )
 from fastapi.responses import (
-    FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+    FileResponse, HTMLResponse, JSONResponse, StreamingResponse, Response
 )
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -4856,3 +4862,84 @@ async def api_turso_backup(auth=Depends(require_auth)):
                 connection.close()
             except Exception:
                 pass
+
+
+@app.get("/api/storage/local-backup")
+async def api_storage_local_backup(auth=Depends(require_auth)):
+    """Create an encrypted, read-only snapshot of the active local SQLite database."""
+    _authenticated_user(auth)
+
+    password = os.getenv("BACKUP_ENCRYPTION_KEY", "")
+    if not password:
+        raise HTTPException(
+            status_code=503,
+            detail="BACKUP_ENCRYPTION_KEY n'est pas configurée sur Render.",
+        )
+    if not DB_PATH.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="La base SQLite active est introuvable sur cette instance.",
+        )
+
+    magic = b"CHAPPIE-BACKUP-V1"
+    try:
+        with tempfile.TemporaryDirectory(prefix="chappie-backup-") as temp_dir:
+            snapshot_path = Path(temp_dir) / "chappie-local-snapshot.sqlite3"
+            source = db_connection()
+            destination = sqlite3.connect(snapshot_path)
+            try:
+                source.backup(destination)
+                destination.commit()
+                integrity = destination.execute(
+                    "PRAGMA integrity_check"
+                ).fetchone()[0]
+                if integrity != "ok":
+                    raise RuntimeError("SQLite integrity check failed.")
+                fk_errors = destination.execute(
+                    "PRAGMA foreign_key_check"
+                ).fetchall()
+                if fk_errors:
+                    raise RuntimeError("SQLite foreign-key check failed.")
+            finally:
+                destination.close()
+                source.close()
+
+            plaintext = snapshot_path.read_bytes()
+
+        salt = secrets.token_bytes(16)
+        nonce = secrets.token_bytes(12)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=600_000,
+        )
+        key = kdf.derive(password.encode("utf-8"))
+        encrypted = magic + salt + nonce + AESGCM(key).encrypt(
+            nonce, plaintext, magic
+        )
+
+        filename = "chappie-render-sqlite-" + datetime.now(
+            timezone.utc
+        ).strftime("%Y%m%d-%H%M%S") + ".sqlite3.enc"
+        log.info(
+            "[LOCAL BACKUP] Encrypted SQLite snapshot ready (%s bytes).",
+            len(encrypted),
+        )
+        return Response(
+            content=encrypted,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("[LOCAL BACKUP] Encrypted SQLite snapshot failed.")
+        raise HTTPException(
+            status_code=503,
+            detail="La sauvegarde SQLite locale a échoué : " + type(exc).__name__,
+        )

@@ -12,7 +12,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from storage.libsql_adapter import adapt_libsql_connection
-from storage.schema_audit import compare_schemas, inspect_schema
+from storage.schema_audit import (\n    compare_schemas, inspect_schema, inspect_database,\n    compare_database_inventories,\n)
 from memory.episodic_memory import init_memory_tables
 from memory.autobiographical import init_autobiographical_tables
 from world.spatial_memory import init_spatial_tables
@@ -212,6 +212,37 @@ def test_isolated_migration_dry_run_preserves_schema_data_and_relations(tmp_path
             "SELECT COUNT(*) FROM migration_audit"
         ).fetchone()[0] == 2
         assert target.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        source.close()
+        target.close()
+
+
+
+def test_read_only_inventory_reports_counts_and_schema_differences(tmp_path):
+    source_path = tmp_path / "inventory-source.sqlite3"
+    _make_source_database(source_path)
+    source = sqlite3.connect(source_path)
+    target_native = libsql.connect(database=":memory:")
+    target = adapt_libsql_connection(target_native)
+    try:
+        _copy_fixture_to_empty_target(source, target)
+        source_inventory = inspect_database(source)
+        target_inventory = inspect_database(target)
+
+        assert source_inventory["table_count"] == 3
+        assert source_inventory["total_rows"] == 3
+        assert source_inventory["foreign_key_violations"] == 0
+        assert source_inventory["tables"]["memories"]["row_count"] == 1
+        assert source_inventory["tables"]["memories"]["foreign_keys"][0][
+            "referenced_table"
+        ] == "people"
+
+        comparison = compare_database_inventories(
+            source_inventory,
+            target_inventory,
+        )
+        assert comparison["compatible"], comparison
+        assert comparison["row_count_differences"] == {}
     finally:
         source.close()
         target.close()

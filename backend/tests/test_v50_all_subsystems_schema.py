@@ -58,12 +58,12 @@ def test_all_cognitive_subsystems_initialize_on_one_libsql_connection():
             ).fetchall()
         }
         required_tables = {
-            "memories",
+            "memories_v19",
             "autobiographical_events",
             "spatial_sessions",
             "world_entities",
-            "learning_competencies",
-            "vocabulary",
+            "cognitive_milestones",
+            "personal_vocabulary",
             "sensory_observations",
         }
         assert required_tables <= tables

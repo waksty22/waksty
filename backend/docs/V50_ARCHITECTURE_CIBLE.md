@@ -313,3 +313,15 @@ Le test `test_v50_causal_and_multimodal_integration.py` exerce deux parcours sur
 - observation causale, proposition d'hypothèse, refus d'une expérience sans approbation explicite, planification en simulation après approbation, puis évaluation du résultat.
 
 Les données sont synthétiques et la base est `:memory:`. Aucun capteur réel, aucune action physique, aucun service distant et aucune donnée de production ne sont sollicités.
+
+
+## 15. Raisonnement, décisions et développement cognitif
+
+Le test `test_v50_cognition_curriculum_integration.py` complète les parcours partagés :
+
+- trace de raisonnement et audit métacognitif, en rappelant que la confiance déclarée ne prouve pas la justesse ;
+- historique affectif borné et journal de décision avec évaluation du résultat ;
+- préférence conservée avec sa provenance explicite ;
+- évaluation de compétence et mise à jour des jalons du curriculum.
+
+Les scénarios sont synthétiques et isolés dans une base libSQL locale en mémoire. Aucun score de test ne modifie directement la maturité réelle d'un utilisateur ou les données de production.

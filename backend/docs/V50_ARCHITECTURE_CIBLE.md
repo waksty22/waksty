@@ -325,3 +325,18 @@ Le test `test_v50_cognition_curriculum_integration.py` complète les parcours pa
 - évaluation de compétence et mise à jour des jalons du curriculum.
 
 Les scénarios sont synthétiques et isolés dans une base libSQL locale en mémoire. Aucun score de test ne modifie directement la maturité réelle d'un utilisateur ou les données de production.
+
+
+## 16. Sauvegarde, restauration et retour arrière locaux
+
+Le module `storage.backup` fournit des opérations ciblées sur des fichiers SQLite locaux :
+
+- sauvegarde cohérente via l'API SQLite Backup, contrôle `integrity_check` et empreinte SHA-256 ;
+- validation d'une sauvegarde avant toute modification de la cible ;
+- création et vérification d'une copie de retour arrière avant restauration ;
+- restauration par fichier temporaire validé, puis remplacement atomique ;
+- refus de sauvegarder ou restaurer un fichier sur lui-même.
+
+Le test `test_v50_backup_restore_rollback.py` crée des bases temporaires et vérifie le cycle sauvegarde → modification → restauration → retour arrière, ainsi que le refus d'un fichier corrompu sans altération de la base cible.
+
+**Limite importante :** ces fonctions sont destinées aux fichiers SQLite locaux. Elles ne constituent pas une sauvegarde native de Turso et ne sont pas branchées sur le serveur de production. Avant toute bascule distante, il faudra définir et tester séparément la méthode de sauvegarde/restauration prise en charge par Turso, avec vérification de cohérence et procédure de retour vers SQLite.

@@ -12,7 +12,12 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from storage.libsql_adapter import adapt_libsql_connection
-from storage.schema_audit import (\n    compare_schemas, inspect_schema, inspect_database,\n    compare_database_inventories,\n)
+from storage.schema_audit import (
+    compare_schemas,
+    inspect_schema,
+    inspect_database,
+    compare_database_inventories,
+)
 from memory.episodic_memory import init_memory_tables
 from memory.autobiographical import init_autobiographical_tables
 from world.spatial_memory import init_spatial_tables

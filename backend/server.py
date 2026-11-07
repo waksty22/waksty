@@ -135,6 +135,7 @@ from cognition.shared_brain import (
     merge_live_transcript,
 )
 from storage.turso_compat import inspect_turso_driver
+from storage.schema_audit import inspect_database, compare_database_inventories
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
@@ -4701,6 +4702,64 @@ async def api_turso_diagnostics(auth=Depends(require_auth)):
                 connection.close()
             except Exception:
                 pass
+
+
+@app.get("/api/storage/schema-audit")
+async def api_storage_schema_audit(auth=Depends(require_auth)):
+    """Read-only comparison of production SQLite and configured Turso schemas.
+
+    Returns structural metadata and aggregate row counts only; never returns
+    conversation text, memory contents, credentials, or other user payloads.
+    """
+    _authenticated_user(auth)
+    remote_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    remote_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not remote_url or not remote_token:
+        raise HTTPException(
+            status_code=503,
+            detail="Turso n'est pas entièrement configuré.",
+        )
+
+    local_connection = None
+    remote_connection = None
+    try:
+        import libsql
+
+        local_connection = db_connection()
+        remote_connection = libsql.connect(
+            database=remote_url,
+            auth_token=remote_token,
+        )
+        local_inventory = inspect_database(local_connection)
+        remote_inventory = inspect_database(remote_connection)
+        comparison = compare_database_inventories(
+            local_inventory,
+            remote_inventory,
+        )
+        return {
+            "read_only": True,
+            "data_contents_exposed": False,
+            "remote_database_host": remote_url.split("://", 1)[-1].split("/", 1)[0],
+            "local": local_inventory,
+            "remote": remote_inventory,
+            "comparison": comparison,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("[STORAGE AUDIT] Échec de l'audit en lecture seule.")
+        raise HTTPException(
+            status_code=503,
+            detail="Audit impossible : " + type(exc).__name__,
+        )
+    finally:
+        for connection in (local_connection, remote_connection):
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
 
 
 @app.get("/api/turso/backup")

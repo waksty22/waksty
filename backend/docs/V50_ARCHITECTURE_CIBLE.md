@@ -352,3 +352,17 @@ Le test `test_v50_schema_migration_dry_run.py` poursuit deux contrôles distinct
 - copie un jeu de données entièrement synthétique depuis un fichier SQLite temporaire vers une base libSQL locale vide, puis vérifie les colonnes, les valeurs, un BLOB, une relation de clé étrangère, un index, une vue et un déclencheur.
 
 Cette répétition de migration est volontairement limitée à un petit schéma de démonstration. Elle valide le principe du transfert et les contrôles de cohérence, mais **ne migre pas la base réelle de Chappie** et ne prouve pas encore la compatibilité de chaque table historique. L'audit complet devra être exécuté sur un export cohérent et autorisé de la base de production, avec inventaire des tables, volumes, index, contraintes, séquences et données orphelines, avant toute décision de bascule.
+
+
+## 18. Inventaire réel en lecture seule
+
+La route authentifiée `GET /api/storage/schema-audit` est préparée pour comparer la base SQLite utilisée par le serveur et la base Turso configurée dans Render. Elle ne réalise que des lectures :
+
+- inventaire des tables, colonnes, index, vues et déclencheurs ;
+- comptage des lignes par table et total ;
+- clés étrangères et nombre d'anomalies détectées par `PRAGMA foreign_key_check` ;
+- comparaison des objets de schéma et des volumes entre SQLite et Turso.
+
+Aucun contenu de conversation, souvenir, journal ou autre donnée personnelle n'est renvoyé. Les jetons et chaînes de connexion ne sont jamais inclus dans la réponse. La route exige l'authentification Chappie et ferme les deux connexions après l'audit.
+
+L'exécution sur les bases hébergées n'a pas lieu depuis la CI : elle ne sera possible qu'après déploiement contrôlé de cette route sur Render, puis appel authentifié depuis l'interface ou le client Chappie. Cet audit est un diagnostic, pas une migration ; aucune écriture ni bascule de stockage n'est effectuée.

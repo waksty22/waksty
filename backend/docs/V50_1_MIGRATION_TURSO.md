@@ -35,7 +35,22 @@ Un exporteur logique portable est maintenant ajouté dans `storage.logical_backu
 
 Cet exporteur n'ouvre pas de connexion et ne lit aucun secret : il n'est pas raccordé au serveur, à une route HTTP ou au démarrage. Il n'a pas été exécuté sur la base de production.
 
-La méthode officielle documentée par Turso pour un dump CLI est `turso db shell <database> .dump > dump.sql`. Cette commande peut être lancée depuis un environnement local authentifié ; le fichier doit rester privé et ne doit pas être ajouté au dépôt Git.
+La documentation officielle Turso décrit le dump SQL par la CLI :
+
+```bash
+turso db shell chappie-db .dump > chappie-db-backup.sql
+sha256sum chappie-db-backup.sql
+```
+
+Pour vérifier la restauration sans toucher à la production, utiliser uniquement un fichier local neuf :
+
+```bash
+sqlite3 chappie-db-restore-test.sqlite < chappie-db-backup.sql
+sqlite3 chappie-db-restore-test.sqlite "PRAGMA integrity_check;"
+sqlite3 chappie-db-restore-test.sqlite ".tables"
+```
+
+Ne jamais exécuter la restauration contre `chappie-db` lui-même. Conserver le dump et son checksum dans un emplacement privé hors Render ; ne pas les ajouter au dépôt Git. La commande `.dump` est documentée dans le guide Turso de développement local.
 
 Avant toute écriture Turso, il faudra donc :
 1. obtenir un export/snapshot de la base `chappie-db` via un mécanisme Turso officiellement pris en charge ;
@@ -60,6 +75,7 @@ Tant que cette sauvegarde distante n'est pas démontrée restaurable, la migrati
 - Le mode simulation ne modifie ni schéma ni lignes.
 - L'export logique refuse l'écrasement, vérifie son SHA-256, restaure les données dans une SQLite isolée et compare les compteurs de lignes.
 - L'application additive crée une table et un index manquants et ajoute `skills.xp`.
+- Un test d'intégration lance les véritables initialisateurs de schéma de Chappie dans un fichier SQLite temporaire, reconstruit le schéma dans une cible mémoire vide et compare les inventaires.
 - Les lignes préexistantes restent identiques.
 - Une seconde exécution ne planifie aucune opération supplémentaire.
 - Une colonne inattendue bloque l'application.

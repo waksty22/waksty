@@ -127,3 +127,33 @@ def test_unknown_missing_column_blocks_apply():
     finally:
         source.close()
         target.close()
+
+
+
+def test_failed_apply_rolls_back_all_schema_changes():
+    target = sqlite3.connect(":memory:")
+    plan = {
+        "ready": True,
+        "planned_statement_count": 2,
+        "statements": [
+            {
+                "kind": "create_table",
+                "object": "temporary_table",
+                "sql": "CREATE TABLE temporary_table (id INTEGER PRIMARY KEY)",
+            },
+            {
+                "kind": "create_table",
+                "object": "broken_table",
+                "sql": "CREATE TABLE broken_table (",
+            },
+        ],
+    }
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            apply_migration_plan(target, plan, apply=True)
+        assert target.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='temporary_table'"
+        ).fetchone()[0] == 0
+    finally:
+        target.close()

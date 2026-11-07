@@ -296,3 +296,10 @@ Branche de travail : `feature/chappie-v50-integrated-build`.
 **Critères avant raccordement au serveur :** tests transversaux verts, audit des opérations SQL et transactions utilisées par chaque module, comparaison de schéma en lecture seule, procédure de sauvegarde/restauration vérifiée, puis plan de retour arrière testé. Le déploiement Turso restera une décision distincte et explicitement approuvée.
 
 Ce journal décrit le code de la branche de chantier ; il ne certifie pas encore une utilisation de Turso en production.
+
+
+### 13. Validation transversale des schémas
+
+Le chantier ajoute un test qui initialise, sur une seule connexion libSQL locale éphémère, les treize sous-systèmes actuellement initialisés par le serveur : mémoires épisodique, autobiographique et spatiale, modèle du monde, curriculum, langage, perception sensorielle, apprentissage des objets, causalité, imitation supervisée, fusion perceptive, raisonnement et développement cognitif.
+
+Ce contrôle valide la compatibilité de création des schémas et des index avec l'adaptateur. Il ne constitue pas une migration de la base distante et ne prouve pas encore que toutes les opérations métier de chaque module sont compatibles. La bascule de production reste interdite avant les tests fonctionnels, la comparaison de schéma, une sauvegarde restaurable et un plan de retour arrière.

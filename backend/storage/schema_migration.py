@@ -45,11 +45,39 @@ def _schema_objects(connection: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-def _table_columns(connection: Any, table_name: str) -> set[str]:
+def _table_columns(connection: Any, table_name: str) -> dict[str, tuple[Any, ...]]:
     rows = connection.execute(
         f"PRAGMA table_info({_quote_identifier(table_name)})"
     ).fetchall()
-    return {str(_row_value(row, "name", 1)) for row in rows}
+    return {
+        str(_row_value(row, "name", 1)): (
+            str(_row_value(row, "type", 2) or "").upper(),
+            int(_row_value(row, "notnull", 3)),
+            str(_row_value(row, "dflt_value", 4)),
+            int(_row_value(row, "pk", 5)),
+        )
+        for row in rows
+    }
+
+
+def _foreign_key_signature(connection: Any, table_name: str) -> list[tuple[Any, ...]]:
+    rows = connection.execute(
+        f"PRAGMA foreign_key_list({_quote_identifier(table_name)})"
+    ).fetchall()
+    return sorted(
+        (
+            str(_row_value(row, "table", 2)),
+            str(_row_value(row, "from", 3)),
+            str(_row_value(row, "to", 4)),
+            str(_row_value(row, "on_update", 5)),
+            str(_row_value(row, "on_delete", 6)),
+        )
+        for row in rows
+    )
+
+
+def _normalized_sql(value: Any) -> str:
+    return " ".join(str(value or "").split()).casefold()
 
 
 def build_migration_plan(
@@ -72,6 +100,16 @@ def build_migration_plan(
 
     statements: list[dict[str, str]] = []
     blockers: list[str] = []
+    # SQLite object names share one namespace. Never overwrite an object of
+    # another kind merely because its name matches a source object.
+    target_by_name = {item["name"]: item for item in target_objects.values()}
+    for item in source_objects.values():
+        conflict = target_by_name.get(item["name"])
+        if conflict and conflict["type"] != item["type"]:
+            blockers.append(
+                f"Conflit de type pour {item['name']} : "
+                f"{conflict['type']} côté cible, {item['type']} côté source."
+            )
     missing_tables = sorted(set(source_tables) - set(target_tables))
 
     for table_name in missing_tables:
@@ -88,7 +126,14 @@ def build_migration_plan(
     for table_name in sorted(set(source_tables) & set(target_tables)):
         source_columns = _table_columns(source, table_name)
         target_columns = _table_columns(target, table_name)
-        missing_columns = sorted(source_columns - target_columns)
+        for column_name in sorted(set(source_columns) & set(target_columns)):
+            if source_columns[column_name] != target_columns[column_name]:
+                blockers.append(
+                    f"{table_name}.{column_name}: définition différente entre source et cible."
+                )
+        if _foreign_key_signature(source, table_name) != _foreign_key_signature(target, table_name):
+            blockers.append(f"{table_name}: contraintes de clés étrangères différentes.")
+        missing_columns = sorted(set(source_columns) - set(target_columns))
         unexpected = [
             column for column in missing_columns
             if column not in allowed.get(table_name, {})
@@ -111,6 +156,12 @@ def build_migration_plan(
 
     for key, item in sorted(source_objects.items()):
         if key in target_objects:
+            existing = target_objects[key]
+            if item["type"] in {"index", "view", "trigger"}:
+                if _normalized_sql(item["sql"]) != _normalized_sql(existing["sql"]):
+                    blockers.append(
+                        f"{item['type']} {item['name']}: définition différente entre source et cible."
+                    )
             continue
         if item["type"] == "table":
             continue

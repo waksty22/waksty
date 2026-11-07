@@ -303,3 +303,13 @@ Ce journal décrit le code de la branche de chantier ; il ne certifie pas encore
 Le chantier ajoute un test qui initialise, sur une seule connexion libSQL locale éphémère, les treize sous-systèmes actuellement initialisés par le serveur : mémoires épisodique, autobiographique et spatiale, modèle du monde, curriculum, langage, perception sensorielle, apprentissage des objets, causalité, imitation supervisée, fusion perceptive, raisonnement et développement cognitif.
 
 Ce contrôle valide la compatibilité de création des schémas et des index avec l'adaptateur. Il ne constitue pas une migration de la base distante et ne prouve pas encore que toutes les opérations métier de chaque module sont compatibles. La bascule de production reste interdite avant les tests fonctionnels, la comparaison de schéma, une sauvegarde restaurable et un plan de retour arrière.
+
+
+## 14. Validation causale et multimodale sur stockage partagé
+
+Le test `test_v50_causal_and_multimodal_integration.py` exerce deux parcours sur une même connexion libSQL locale :
+
+- rapprochement temporel audio/vision, enregistré comme candidat à vérifier ; la proximité temporelle n'est jamais considérée comme une preuve d'identité ;
+- observation causale, proposition d'hypothèse, refus d'une expérience sans approbation explicite, planification en simulation après approbation, puis évaluation du résultat.
+
+Les données sont synthétiques et la base est `:memory:`. Aucun capteur réel, aucune action physique, aucun service distant et aucune donnée de production ne sont sollicités.

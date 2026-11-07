@@ -213,13 +213,21 @@ def apply_migration_plan(
         }
     if not plan.get("ready"):
         raise ValueError("Migration bloquée : le plan contient des incompatibilités.")
-    executed: list[str] = []
-    for statement in plan.get("statements", []):
-        target.execute(statement["sql"])
-        executed.append(statement["object"])
     commit = getattr(target, "commit", None)
-    if callable(commit):
+    rollback = getattr(target, "rollback", None)
+    if not callable(commit) or not callable(rollback):
+        raise TypeError("La connexion cible doit prendre en charge commit() et rollback().")
+
+    executed: list[str] = []
+    try:
+        target.execute("BEGIN")
+        for statement in plan.get("statements", []):
+            target.execute(statement["sql"])
+            executed.append(statement["object"])
         commit()
+    except Exception:
+        rollback()
+        raise
     return {
         "applied": True,
         "executed_count": len(executed),

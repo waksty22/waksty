@@ -29,13 +29,19 @@ La restauration vérifiée préserve également une copie de retour arrière ava
 
 **Limite Render :** le fichier SQLite du conteneur peut être éphémère sur une instance sans disque persistant. Une sauvegarde stockée uniquement dans le même conteneur n'est pas une sauvegarde durable. Il faudra exporter le fichier vers un stockage externe contrôlé et vérifier son SHA-256 avant toute opération.
 
-### Turso distant (non encore automatisé)
+### Turso distant (export logique préparé, non exécuté)
 
-Le helper actuel ne sauvegarde que les fichiers SQLite locaux. Il ne réalise pas d'export ni de snapshot distant Turso. Avant toute écriture Turso, il faudra donc :
+Un exporteur logique portable est maintenant ajouté dans `storage.logical_backup`. Il accepte une connexion déjà ouverte, lit les tables et les objets de schéma, encode les BLOB, produit un fichier JSON et son SHA-256, puis restaure le fichier dans une SQLite temporaire pour vérifier l'intégrité, les clés étrangères et les compteurs. Il refuse d'écraser un fichier de sauvegarde existant.
+
+Cet exporteur n'ouvre pas de connexion et ne lit aucun secret : il n'est pas raccordé au serveur, à une route HTTP ou au démarrage. Il n'a pas été exécuté sur la base de production.
+
+La méthode officielle documentée par Turso pour un dump CLI est `turso db shell <database> .dump > dump.sql`. Cette commande peut être lancée depuis un environnement local authentifié ; le fichier doit rester privé et ne doit pas être ajouté au dépôt Git.
+
+Avant toute écriture Turso, il faudra donc :
 1. obtenir un export/snapshot de la base `chappie-db` via un mécanisme Turso officiellement pris en charge ;
 2. conserver l'artefact hors du service Render ;
 3. calculer et archiver son SHA-256 ;
-4. vérifier que l'artefact est lisible/restaurable dans une base Turso de test isolée ;
+4. vérifier que l'artefact est lisible/restaurable dans une base de test isolée ;
 5. relever les compteurs de lignes et l'inventaire de schéma avant/après.
    
 Tant que cette sauvegarde distante n'est pas démontrée restaurable, la migration de production est bloquée. La base `chappie-memory` distincte n'est pas la cible.
@@ -52,6 +58,7 @@ Tant que cette sauvegarde distante n'est pas démontrée restaurable, la migrati
 ## Tests attendus
 
 - Le mode simulation ne modifie ni schéma ni lignes.
+- L'export logique refuse l'écrasement, vérifie son SHA-256, restaure les données dans une SQLite isolée et compare les compteurs de lignes.
 - L'application additive crée une table et un index manquants et ajoute `skills.xp`.
 - Les lignes préexistantes restent identiques.
 - Une seconde exécution ne planifie aucune opération supplémentaire.

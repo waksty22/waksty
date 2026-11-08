@@ -1790,7 +1790,13 @@ def get_identity_prompt(user_id: str) -> str:
 
     personal_goals_context = "\n".join(
         f"- {goal['title']} | état={goal['status']} | progression={goal['progress']:.0f}% "
-        f"| étapes={sum(1 for step in goal['steps'] if step['status'] == 'completed' and step['evidence'])}/{len(goal['steps'])}"
+        f"| étapes={sum(1 for step in goal['steps'] if step['status'] == 'completed' and step['evidence'])}/{len(goal['steps'])} "
+        f"| compétences évaluées : "
+        + (", ".join(
+            f"{assessment['test_name']} ({assessment['score']:.0f}/100, "
+            f"{'réussie' if assessment['passed'] else 'non réussie'})"
+            for assessment in goal.get('skill_assessments', [])[:5]
+        ) or "aucune")
         for goal in personal_goals_state["goals"]
     ) or "Aucun objectif personnel enregistré."
     personal_goal_suggestions_context = "\n".join(

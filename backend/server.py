@@ -64,6 +64,7 @@ from memory.autobiographical import (
     sync_autobiographical_events,
     list_autobiographical_events,
     search_autobiographical_events,
+    find_related_autobiographical_events,
     autobiographical_statistics,
 )
 from world.spatial_memory import (
@@ -1945,6 +1946,17 @@ TOOLS = [{
             },
         },
         {
+            "name": "find_related_autobiographical_events",
+            "description": "Comparer une expérience retrouvée avec d'anciens épisodes. Retourne uniquement des pistes lexicales basées sur des mots significatifs partagés. Ne jamais présenter ces pistes comme preuve que c'est le même objet, la même personne ou une relation de cause à effet.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "event_id": {"type": "INTEGER"},
+                },
+                "required": ["event_id"],
+            },
+        },
+        {
             "name": "get_shared_brain_state",
             "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
             "parameters": {
@@ -2003,6 +2015,18 @@ def execute_tool(
                 "events": events,
                 "grounded_in_source_messages": True,
                 "dialogue_links_are_context_not_confirmation": True,
+            }
+
+        if name == "find_related_autobiographical_events":
+            event_id = int(args.get("event_id", 0))
+            with db_connection() as autobiography_db:
+                related = find_related_autobiographical_events(
+                    autobiography_db, user_id, event_id, limit=5
+                )
+            return {
+                "related_experience_candidates": related,
+                "relation_is_confirmed": False,
+                "similarity_basis": "shared_meaningful_terms_only",
             }
 
         if name == "get_shared_brain_state":

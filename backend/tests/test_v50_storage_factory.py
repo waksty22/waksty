@@ -99,7 +99,10 @@ def test_application_connection_helper_opens_sqlite_only(tmp_path):
     db = open_sqlite_application_connection(settings)
     try:
         assert isinstance(db, sqlite3.Connection)
+        assert db.row_factory is sqlite3.Row
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        assert db.execute("PRAGMA busy_timeout").fetchone()[0] == 20000
+        assert db.execute("SELECT 1 AS value").fetchone()["value"] == 1
     finally:
         db.close()
 

@@ -105,6 +105,10 @@ from learning.causal_learning import (
     format_causal_learning_guidance, suggest_supervised_learning_agenda,
     format_supervised_learning_agenda,
 )
+from learning.personal_goals import (
+    suggest_personal_learning_goals, list_personal_learning_goals,
+    record_personal_goal_step,
+)
 from learning.supervised_learning import (
     init_supervised_learning_tables,
     record_demonstration,
@@ -1780,6 +1784,21 @@ def get_identity_prompt(user_id: str) -> str:
             learning_db, user_id, limit=5, max_chars=2200
         )
 
+    with db_connection() as goals_db:
+        personal_goals_state = list_personal_learning_goals(goals_db, user_id, limit=8)
+        personal_goal_suggestions = suggest_personal_learning_goals(goals_db, user_id, limit=5)
+
+    personal_goals_context = "\n".join(
+        f"- {goal['title']} | état={goal['status']} | progression={goal['progress']:.0f}% "
+        f"| étapes={sum(1 for step in goal['steps'] if step['status'] == 'completed' and step['evidence'])}/{len(goal['steps'])}"
+        for goal in personal_goals_state["goals"]
+    ) or "Aucun objectif personnel enregistré."
+    personal_goal_suggestions_context = "\n".join(
+        f"- Proposition (non adoptée) : {item['title']} | raison : {item['reason']} "
+        f"| critère : {item['criterion']}"
+        for item in personal_goal_suggestions["proposals"]
+    ) or "Aucune proposition d'objectif issue des données disponibles."
+
     imitation_context = "\\n".join(
         f"- {item['behavior']} | statut : {item['status']} "
         f"| source : {item['source_type']} | preuve : {item['evidence'][:180]}"
@@ -1895,6 +1914,13 @@ Compétences :
 Objectifs actifs :
 {goal_text}
 
+=== V50.10 — OBJECTIFS PERSONNELS D'APPRENTISSAGE ===
+Les propositions suivantes sont dérivées de ton historique, mais ne sont pas encore des objectifs persistés. Tu peux les expliquer et demander au Créateur s'il souhaite les adopter. Tu ne crées jamais un objectif toi-même. Un objectif adopté reste en cours jusqu'à ce que chaque étape ait une preuve enregistrée. N'invente pas de progrès, ne complète pas une étape sans preuve et ne confonds pas une proposition avec un engagement.
+Objectifs personnels persistés :
+{personal_goals_context}
+Propositions en attente de décision :
+{personal_goal_suggestions_context}
+
 Résumé des échanges (journal de conversation, ne prouve pas la compréhension) :
 {summary}
 
@@ -1979,6 +2005,16 @@ TOOLS = [{
                 "type": "OBJECT",
                 "properties": {},
             },
+        },
+        {
+            "name": "suggest_personal_learning_goals",
+            "description": "Proposer des objectifs personnels mesurables à partir des pistes d'apprentissage de cet utilisateur. Lecture seule : ne crée aucun objectif et attend l'adoption explicite du Créateur.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
+        {
+            "name": "review_personal_learning_goals",
+            "description": "Consulter les objectifs personnels persistés, leurs étapes et les preuves enregistrées. Lecture seule ; ne modifie aucune progression.",
+            "parameters": {"type": "OBJECT", "properties": {}},
         },
         {
             "name": "review_causal_learning",
@@ -2066,6 +2102,14 @@ def execute_tool(
                 return suggest_supervised_learning_agenda(
                     agenda_db, user_id, limit=5
                 )
+
+        if name == "suggest_personal_learning_goals":
+            with db_connection() as goals_db:
+                return suggest_personal_learning_goals(goals_db, user_id, limit=5)
+
+        if name == "review_personal_learning_goals":
+            with db_connection() as goals_db:
+                return list_personal_learning_goals(goals_db, user_id, limit=30)
 
         if name == "review_causal_learning":
             with db_connection() as causal_db:
@@ -3611,11 +3655,7 @@ async def api_create_goal(
     if len(steps) > 50:  
         raise HTTPException(status_code=400, detail="Trop d'étapes.")  
 
-    result = await create_goal(  
-        user_id=user_id,  
-        title=title,  
-        steps=steps,  
-    )  
+    result = create_goal(\n        user_id=user_id,\n        title=title,\n        steps=steps,\n    )  
 
     return {  
         "success": True,  
@@ -4211,6 +4251,33 @@ async def api_supervised_learning_agenda(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     with db_connection() as db:
         return suggest_supervised_learning_agenda(db, user_id, limit=5)
+
+
+@app.get("/api/learning/goals")
+async def api_personal_learning_goals(auth=Depends(require_auth)):
+    """Return this user's persisted goals and unapproved proposals, read-only."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {
+            "persisted": list_personal_learning_goals(db, user_id, limit=30),
+            "suggestions": suggest_personal_learning_goals(db, user_id, limit=5),
+        }
+
+
+@app.post("/api/learning/goals/steps")
+async def api_record_personal_goal_step(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_personal_goal_step(
+                db, user_id, int(data.get("goal_id", 0)),
+                int(data.get("step_id", 0)), data.get("evidence", ""),
+                data.get("completed", True),
+            )
+        return {"ok": True, "result": result}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.post("/api/learning/causal/observations")

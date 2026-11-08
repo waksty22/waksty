@@ -1983,6 +1983,15 @@ TOOLS = [{
             },
         },
         {
+            "name": "retrieve_acquired_knowledge",
+            "description": "Rechercher les souvenirs, expériences autobiographiques et évaluations de compétences avec leur provenance et leur statut. Ne transforme jamais une observation, un enseignement ou une expérience en connaissance acquise.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"query": {"type": "STRING"}},
+                "required": ["query"],
+            },
+        },
+        {
             "name": "search_autobiographical_events",
             "description": "Retrouver des épisodes de conversations passées par plusieurs mots-clés. À utiliser lorsque l'utilisateur fait référence à un événement, une décision ou une discussion antérieure. Les réponses associées de Chappie sont explicitement marquées comme contexte du même dialogue, pas comme preuve.",
             "parameters": {
@@ -2077,6 +2086,17 @@ def execute_tool(
                     10,  
                 )  
             }  
+
+        if name == "retrieve_acquired_knowledge":
+            query = str(args.get("query", ""))[:200]
+            with db_connection() as knowledge_db:
+                result = retrieve_acquired_knowledge(
+                    knowledge_db, user_id, query=query, limit=10
+                )
+            result["formatted_context"] = format_acquired_knowledge_context(
+                result, max_chars=5000
+            )
+            return result
 
         if name == "search_autobiographical_events":
             query = str(args.get("query", ""))[:200]

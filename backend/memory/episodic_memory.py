@@ -477,21 +477,11 @@ def search_episodic_memories(
         )
         rows = cursor.fetchall()
     else:
-        terms = _memory_search_terms(query)
-        if not terms:
-            terms = [query.casefold()]
-        predicates = []
-        params: list[Any] = [user_id]
-        for term in terms:
-            predicates.append(
-                "(instr(lower(content), lower(?)) > 0 "
-                "OR instr(lower(category), lower(?)) > 0 "
-                "OR instr(lower(tags), lower(?)) > 0)"
-            )
-            params.extend((term, term, term))
+        # Load a bounded user-scoped candidate pool, then normalize accents
+        # in Python. SQLite/libSQL lower() is not reliably Unicode-aware.
         cursor = db.execute(
-            columns + " AND (" + " OR ".join(predicates) + ") LIMIT 250",
-            tuple(params),
+            columns + " ORDER BY importance DESC, updated_at DESC LIMIT 2000",
+            (user_id,),
         )
         rows = cursor.fetchall()
 

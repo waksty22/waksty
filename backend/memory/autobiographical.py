@@ -273,6 +273,82 @@ def search_autobiographical_events(
     return selected
 
 
+
+def find_related_autobiographical_events(
+    db: sqlite3.Connection,
+    user_id: str,
+    event_id: int,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Suggest past episodes with shared meaningful terms, never assert causality.
+
+    Results are lexical candidates only. A shared word is not proof that two
+    episodes concern the same object, person, or cause. No rows are written.
+    """
+    event_id = max(0, int(event_id))
+    limit = max(1, min(int(limit), 10))
+    source = db.execute(
+        """
+        SELECT id, content, happened_at
+        FROM autobiographical_events
+        WHERE user_id=? AND id=?
+        """,
+        (user_id, event_id),
+    ).fetchone()
+    if source is None:
+        return []
+
+    def terms(value: str) -> set[str]:
+        return {
+            token for token in _normalize_search_text(value).split()
+            if len(token) >= 3 and token not in _SEARCH_STOPWORDS
+        }
+
+    source_terms = terms(source["content"])
+    if not source_terms:
+        return []
+
+    rows = db.execute(
+        """
+        SELECT id, source_conversation_id, actor, event_type, content,
+               happened_at, importance
+        FROM autobiographical_events
+        WHERE user_id=? AND id<>?
+        ORDER BY id DESC
+        LIMIT 2000
+        """,
+        (user_id, event_id),
+    ).fetchall()
+
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        candidate_terms = terms(item.get("content", ""))
+        common = sorted(source_terms & candidate_terms)
+        # Require at least two meaningful shared terms to reduce weak matches.
+        if len(common) < 2:
+            continue
+        union = source_terms | candidate_terms
+        score = len(common) / max(1, len(union))
+        item["shared_terms"] = common[:12]
+        item["lexical_similarity"] = round(score, 4)
+        item["relation_status"] = "candidate_only"
+        item["interpretation_warning"] = (
+            "Chevauchement lexical uniquement : identité, causalité et "
+            "équivalence entre expériences non confirmées."
+        )
+        candidates.append(item)
+
+    candidates.sort(
+        key=lambda item: (
+            item["lexical_similarity"],
+            str(item.get("happened_at") or ""),
+            int(item.get("id") or 0),
+        ),
+        reverse=True,
+    )
+    return candidates[:limit]
+
 def autobiographical_statistics(
     db: sqlite3.Connection,
     user_id: str,

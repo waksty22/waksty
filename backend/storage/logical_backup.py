@@ -107,9 +107,7 @@ def export_logical_backup(connection: Any, destination: str | Path) -> dict[str,
     data_fd, data_temp_name = tempfile.mkstemp(
         prefix=destination.name + ".", suffix=".tmp", dir=destination.parent
     )
-    checksum_fd, checksum_temp_name = tempfile.mkstemp(
-        prefix=checksum_path.name + ".", suffix=".tmp", dir=destination.parent
-    )
+    checksum_temp_name = None
     published_data = False
     published_checksum = False
     try:
@@ -124,6 +122,9 @@ def export_logical_backup(connection: Any, destination: str | Path) -> dict[str,
         os.link(data_temp_name, destination)
         published_data = True
 
+        checksum_fd, checksum_temp_name = tempfile.mkstemp(
+            prefix=checksum_path.name + ".", suffix=".tmp", dir=destination.parent
+        )
         with os.fdopen(checksum_fd, "w", encoding="ascii") as handle:
             handle.write(f"{digest}  {destination.name}\n")
             handle.flush()
@@ -142,7 +143,8 @@ def export_logical_backup(connection: Any, destination: str | Path) -> dict[str,
         raise
     finally:
         Path(data_temp_name).unlink(missing_ok=True)
-        Path(checksum_temp_name).unlink(missing_ok=True)
+        if checksum_temp_name is not None:
+            Path(checksum_temp_name).unlink(missing_ok=True)
 
     return {
         "path": str(destination),

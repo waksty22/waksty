@@ -309,3 +309,51 @@ def list_causal_learning(db: sqlite3.Connection, user_id: str) -> dict[str, list
         "SELECT * FROM causal_experiments WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)
     ).fetchall()]
     return {"observations": observations, "hypotheses": hypotheses, "experiments": experiments}
+
+
+def format_causal_learning_guidance(
+    db: sqlite3.Connection,
+    user_id: str,
+    limit: int = 8,
+    max_chars: int = 5000,
+) -> str:
+    """Build a compact, user-scoped correction context for every conversation.
+
+    This is a read-only projection of the existing experiment history. It
+    includes recent evidence and explicit uncertainty labels so the language
+    model can use corrections without promoting them to universal facts.
+    """
+    review = review_causal_learning(db, user_id, limit=max(1, min(limit, 12)))
+    lines = [
+        "BILAN DES APPRENTISSAGES CAUSAUX — historique utilisateur, données non absolues.",
+        "Consulte ces corrections spontanément lorsqu'elles sont pertinentes pour la question.",
+        "Une contradiction affaiblit uniquement l'hypothèse concernée ; elle ne prouve pas automatiquement son contraire.",
+        "Des résultats favorables et contradictoires ensemble doivent rester présentés comme mixtes.",
+        "Un résultat non concluant ne confirme et ne réfute rien. Ne prétends pas avoir vérifié une expérience non enregistrée.",
+    ]
+    for item in review["hypotheses"]:
+        history = item.get("evaluation_history", [])
+        if not history:
+            continue
+        counts = item.get("evidence_counts", {})
+        lines.append(
+            f"Hypothèse #{item['id']} : {str(item['statement'])[:240]} "
+            f"| bilan={item['evidence_assessment']} "
+            f"| étayées={counts.get('supported', 0)}, "
+            f"contredites={counts.get('contradicted', 0)}, "
+            f"non concluantes={counts.get('inconclusive', 0)}."
+        )
+        for evidence in history[-3:]:
+            if evidence.get("status") != "completed":
+                continue
+            lines.append(
+                f"  - Test #{evidence['id']} : {evidence['evaluation']} ; "
+                f"résultat rapporté : {str(evidence.get('result', ''))[:180]}"
+            )
+    if len(lines) == 5:
+        lines.append("Aucune expérience évaluée enregistrée pour cet utilisateur.")
+    result = "\\n".join(lines)
+    if len(result) <= max_chars:
+        return result
+    clipped = result[:max_chars]
+    return clipped.rsplit("\\n", 1)[0] + "\\n[Contexte de correction tronqué ; historique conservé en base.]"

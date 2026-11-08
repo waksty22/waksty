@@ -154,6 +154,7 @@ from storage.turso_compat import inspect_turso_driver
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
+from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
@@ -584,6 +585,18 @@ async def system_diagnostics(_: str = Depends(require_auth)):
         "read_only": True,
         **collect_runtime_snapshot(),
     }
+
+@app.get("/api/system/persistence-inventory")
+def system_persistence_inventory(_: str = Depends(require_auth)):
+    """Authenticated read-only inventory of the active SQLite database."""
+    try:
+        return inspect_sqlite_database(DB_PATH)
+    except (OSError, sqlite3.Error, ValueError):
+        log.exception("Authenticated persistence inventory failed")
+        raise HTTPException(
+            503,
+            "Inventaire indisponible. Aucune donnée n'a été modifiée.",
+        )
 
 @app.middleware("http")
 async def body_size_guard(request: Request, call_next):

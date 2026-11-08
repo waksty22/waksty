@@ -1943,6 +1943,24 @@ Sélectionne une catégorie pour consulter les données.
           </p>
         </div>
 
+        <div class="panel">
+          <h3>🛡️ Inventaire sécurisé de la mémoire</h3>
+          <p class="muted" style="margin-bottom:12px">
+            Vérifie la base SQLite réellement utilisée par Chappie : volumes par table,
+            intégrité et empreintes. Lecture seule, authentification API existante,
+            aucun texte de souvenir ou de conversation exposé.
+          </p>
+          <div class="row-btns">
+            <button type="button" onclick="runPersistenceInventory()">
+              🔍 Lancer l'inventaire
+            </button>
+          </div>
+          <p id="persistenceInventoryStatus" class="status" role="status" aria-live="polite">
+            En attente de lancement.
+          </p>
+          <pre id="persistenceInventoryOutput" class="output" style="min-height:60px">Aucun rapport pour le moment.</pre>
+        </div>
+
         <div class="panel danger-zone">
           <h3>⚠️ Zone de réinitialisation</h3>
 
@@ -2127,5 +2145,41 @@ Sélectionne une catégorie pour consulter les données.
   <!-- Chargement du fichier chef d'orchestre en mode module (architecture modulaire) -->
   <script type="module" src="/static/js/app.js" defer></script>
 
+<script type="module">
+  import { apiCall } from "./js/api.js";
+
+  window.runPersistenceInventory = async function () {
+    const button = document.querySelector('button[onclick="runPersistenceInventory()"]');
+    const status = document.getElementById("persistenceInventoryStatus");
+    const output = document.getElementById("persistenceInventoryOutput");
+    if (button) button.disabled = true;
+    status.textContent = "Inventaire en lecture seule en cours…";
+    output.textContent = "Analyse de la base active…";
+    try {
+      const report = await apiCall("/api/system/persistence-inventory");
+      const safeReport = {
+        audit: report.audit,
+        read_only: report.read_only,
+        database_contents_exposed: report.database_contents_exposed,
+        database_name: report.database_name,
+        database_size_bytes: report.database_size_bytes,
+        integrity_check: report.integrity_check,
+        schema_object_count: report.schema_object_count,
+        schema_sha256: report.schema_sha256,
+        total_rows: report.total_rows,
+        tables: report.tables
+      };
+      output.textContent = JSON.stringify(safeReport, null, 2);
+      status.textContent = report.integrity_check?.ok
+        ? "Inventaire terminé — intégrité SQLite OK. Aucune donnée modifiée."
+        : "Inventaire terminé — intégrité à examiner.";
+    } catch (error) {
+      status.textContent = "Échec : " + (error?.message || "erreur inconnue");
+      output.textContent = "Aucun contenu de la base n'a été affiché.";
+    } finally {
+      if (button) button.disabled = false;
+    }
+  };
+</script>
 </body>
 </html>

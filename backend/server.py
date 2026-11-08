@@ -26,7 +26,7 @@ import sqlite3
 import time
 import tempfile
 import secrets
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
@@ -1065,7 +1065,10 @@ def update_skill(
         "updated": True,  
     }
 
-def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
+def analyze_user_intent(
+    user_id: str, message: str,
+    db: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
     msg = message.casefold()
 
     intent = "discussion libre"  
@@ -1103,7 +1106,8 @@ def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
 
     now = utc_now()  
 
-    with db_connection() as db:  
+    owns_connection = db is None
+    with (db_connection() if owns_connection else nullcontext(db)) as db:  
         db.execute(  
             """  
             INSERT INTO user_intentions(  
@@ -1118,7 +1122,8 @@ def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
             """,  
             (user_id, intent, confidence, details, now),  
         )  
-        db.commit()  
+        if owns_connection:
+            db.commit()  
 
     return {  
         "current_intent": intent,  
@@ -1130,10 +1135,11 @@ def update_emotions_once(
     user_id: str,
     message: str,
     event_id: Optional[str] = None,
+    db: Optional[sqlite3.Connection] = None,
 ) -> dict[str, float]:
 
-    em = get_emotions(user_id)  
-    analyze_user_intent(user_id, message)  
+    em = get_emotions(user_id)
+    analyze_user_intent(user_id, message, db=db)  
 
     msg = message.casefold()  
 
@@ -1265,7 +1271,8 @@ def update_emotions_once(
 
     now = utc_now()  
 
-    with db_connection() as db:
+    owns_connection = db is None
+    with (db_connection() if owns_connection else nullcontext(db)) as db:
         if event_id and not claim_cognitive_event(
             db, user_id, event_id, "emotion_state_update"
         ):
@@ -1310,7 +1317,8 @@ def update_emotions_once(
             (user_id, event, valence, arousal, now),  
         )  
 
-        db.commit()  
+        if owns_connection:
+            db.commit()
 
     return vals
 
@@ -1585,6 +1593,7 @@ def save_conversation_turn(
     assistant_text: str,
     source: str = "conversation",
     turn_id: Optional[str] = None,
+    db: Optional[sqlite3.Connection] = None,
 ) -> bool:
     """Persist one complete turn; a supplied turn_id makes replays idempotent."""
     user_id = valid_user(user_id)
@@ -1595,7 +1604,8 @@ def save_conversation_turn(
 
     turn_id = str(turn_id).strip()[:128] if turn_id is not None else ""
     now = utc_now()
-    with db_connection() as db:
+    owns_connection = db is None
+    with (db_connection() if owns_connection else nullcontext(db)) as db:
         # Lazy, additive schema change: safe for existing SQLite installations.
         db.execute("""
             CREATE TABLE IF NOT EXISTS conversation_turn_receipts (
@@ -1629,8 +1639,17 @@ def save_conversation_turn(
             "INSERT INTO journal(user_id, entry, kind, created_at) VALUES(?,?,?,?)",
             (user_id, f"Tour enregistré dans la mémoire commune (source : {source}).", source[:40], now),
         )
-        db.commit()
+        if owns_connection:
+            db.commit()
 
+    if owns_connection:
+        finalize_conversation_turn(user_id)
+    return True
+
+
+def finalize_conversation_turn(user_id: str) -> None:
+    """Run post-commit autobiographical sync and summary consolidation."""
+    user_id = valid_user(user_id)
     try:
         with db_connection() as db:
             sync_autobiographical_events(db, user_id)
@@ -1666,11 +1685,8 @@ def save_conversation_turn(
         if latest - through >= 10:  
             consolidate_conversation(user_id)  
 
-    except Exception:  
-        log.exception(  
-            "Échec de consolidation après enregistrement d'un tour"  
-        )
-    return True
+    except Exception:
+        log.exception("Échec de consolidation après enregistrement d'un tour")
 
 
 def get_identity_prompt(user_id: str, query: str = "") -> str:

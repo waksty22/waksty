@@ -24,6 +24,7 @@ on:
       - feature/chappie-v50-12-knowledge-acquisition
       - feature/chappie-v50-13-knowledge-dashboard
       - feature/chappie-v50-14-contextual-knowledge-recall
+      - v50.48-readonly-data-inventory
   pull_request:
     branches:
       - main
@@ -41,7 +42,7 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pytest libsql cryptography fastapi uvicorn python-dotenv pydantic httpx websockets google-genai edge-tts
       - name: Check Python syntax
-        run: python -m compileall -q backend
+        run: python -m compileall -q backend scripts
       - name: Check browser JavaScript syntax
         run: |
           cp backend/static/js/app.js /tmp/chappie-app.mjs

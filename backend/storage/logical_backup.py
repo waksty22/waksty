@@ -54,22 +54,32 @@ def export_logical_backup(connection: Any, destination: str | Path) -> dict[str,
         ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1
                            WHEN 'view' THEN 2 ELSE 3 END, name
     """
-    _, object_rows = _query_rows(connection, objects_sql)
-    objects = [
-        {"type": str(row[0]), "name": str(row[1]), "table": str(row[2]), "sql": row[3]}
-        for row in object_rows
-    ]
-    tables = []
-    total_rows = 0
-    for obj in objects:
-        if obj["type"] != "table":
-            continue
-        table_name = obj["name"]
-        escaped = '"' + table_name.replace('"', '""') + '"'
-        columns, rows = _query_rows(connection, f"SELECT * FROM {escaped}")
-        encoded_rows = [[_value(value) for value in row] for row in rows]
-        tables.append({"name": table_name, "columns": columns, "rows": encoded_rows})
-        total_rows += len(encoded_rows)
+    # A savepoint pins one read snapshot for the entire multi-table export.
+    # It nests safely inside a caller transaction and never writes user data.
+    snapshot = "chappie_logical_backup_snapshot"
+    connection.execute(f"SAVEPOINT {snapshot}")
+    try:
+        _, object_rows = _query_rows(connection, objects_sql)
+        objects = [
+            {"type": str(row[0]), "name": str(row[1]), "table": str(row[2]), "sql": row[3]}
+            for row in object_rows
+        ]
+        tables = []
+        total_rows = 0
+        for obj in objects:
+            if obj["type"] != "table":
+                continue
+            table_name = obj["name"]
+            escaped = '"' + table_name.replace('"', '""') + '"'
+            columns, rows = _query_rows(connection, f"SELECT * FROM {escaped}")
+            encoded_rows = [[_value(value) for value in row] for row in rows]
+            tables.append({"name": table_name, "columns": columns, "rows": encoded_rows})
+            total_rows += len(encoded_rows)
+    except Exception:
+        connection.execute(f"ROLLBACK TO SAVEPOINT {snapshot}")
+        raise
+    finally:
+        connection.execute(f"RELEASE SAVEPOINT {snapshot}")
 
     payload = {
         "format": "chappie-turso-logical-backup",
@@ -213,9 +223,30 @@ def export_encrypted_logical_backup(
             if temporary.exists():
                 temporary.unlink()
     digest = hashlib.sha256(encrypted).hexdigest()
-    destination.with_suffix(destination.suffix + ".sha256").write_text(
-        f"{digest}  {destination.name}\\n", encoding="ascii"
-    )
+    checksum_path = destination.with_suffix(destination.suffix + ".sha256")
+    if checksum_path.exists():
+        destination.unlink(missing_ok=True)
+        raise FileExistsError(f"Refusing to overwrite existing checksum: {checksum_path}")
+    checksum_temporary = checksum_path.with_name("." + checksum_path.name + ".tmp")
+    try:
+        with checksum_temporary.open("x", encoding="ascii") as handle:
+            handle.write(f"{digest}  {destination.name}\\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(checksum_temporary, checksum_path)
+        # Verify the exact ciphertext artifact on disk, including checksum,
+        # AES-GCM authentication, decryption, and logical restore integrity.
+        verification = verify_encrypted_logical_backup(destination, encryption_key)
+        if not verification.get("valid"):
+            raise ValueError(
+                "Encrypted backup failed final on-disk verification: "
+                + str(verification.get("reason", "unknown"))
+            )
+    except Exception:
+        destination.unlink(missing_ok=True)
+        checksum_path.unlink(missing_ok=True)
+        checksum_temporary.unlink(missing_ok=True)
+        raise
     return {
         "path": str(destination),
         "sha256": digest,
@@ -223,6 +254,11 @@ def export_encrypted_logical_backup(
         "verified": True,
         "encrypted": True,
         "encryption": "AES-256-GCM/PBKDF2-SHA256-600000",
+        "verification": {
+            "checksum": True,
+            "decryption": True,
+            "restore_integrity": True,
+        },
         "table_count": result["table_count"],
         "total_rows": result["total_rows"],
     }

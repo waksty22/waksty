@@ -1657,7 +1657,7 @@ def save_conversation_turn(
             "Échec de consolidation après enregistrement d'un tour"  
         )
 
-def get_identity_prompt(user_id: str) -> str:
+def get_identity_prompt(user_id: str, query: str = "") -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
     intent = get_user_intention(user_id)
@@ -1778,7 +1778,7 @@ def get_identity_prompt(user_id: str) -> str:
     shared_brain_context = format_shared_brain_context(shared_snapshot)
 
     with db_connection() as knowledge_db:
-        acquired_knowledge = retrieve_acquired_knowledge(knowledge_db, user_id, limit=10)
+        acquired_knowledge = retrieve_acquired_knowledge(knowledge_db, user_id, query=query, limit=10)
     acquired_knowledge_context = format_acquired_knowledge_context(
         acquired_knowledge, max_chars=4200
     )
@@ -2177,6 +2177,7 @@ def execute_tool(
 async def call_gemini(
     contents: list[dict[str, Any]],
     user_id: str,
+    query: str = "",
 ) -> dict[str, Any]:
 
     if not GEMINI_API_KEY:  
@@ -2187,7 +2188,7 @@ async def call_gemini(
 
     payload = {  
         "system_instruction": {  
-            "parts": [{"text": get_identity_prompt(user_id)}]  
+            "parts": [{"text": get_identity_prompt(user_id, query=query)}]  
         },  
         "contents": contents,  
         "tools": TOOLS,  
@@ -2423,6 +2424,7 @@ async def run_brain(
         model_response = await call_gemini(  
             history,  
             user_id,  
+            query=message,
         )  
 
         history.append(model_response)  

@@ -102,7 +102,8 @@ from learning.causal_learning import (
     init_causal_learning_tables, record_observation as record_causal_observation,
     propose_hypothesis, plan_experiment, evaluate_experiment,
     list_causal_learning, review_causal_learning,
-    format_causal_learning_guidance,
+    format_causal_learning_guidance, suggest_supervised_learning_agenda,
+    format_supervised_learning_agenda,
 )
 from learning.supervised_learning import (
     init_supervised_learning_tables,
@@ -1775,6 +1776,9 @@ def get_identity_prompt(user_id: str) -> str:
         correction_guidance = format_causal_learning_guidance(
             learning_db, user_id, limit=8, max_chars=5000
         )
+        supervised_agenda = format_supervised_learning_agenda(
+            learning_db, user_id, limit=5, max_chars=2200
+        )
 
     imitation_context = "\\n".join(
         f"- {item['behavior']} | statut : {item['status']} "
@@ -1872,6 +1876,10 @@ Après une expérience, compare la prédiction au résultat effectivement rappor
 === V50.7 — RAISONNEMENT GUIDÉ PAR LES CORRECTIONS ===
 Avant de répondre, prends en compte les corrections historiques ci-dessous lorsqu'elles concernent réellement le sujet. Ne répète pas tout l'historique : applique seulement la correction pertinente. Si une ancienne prédiction a été contredite, évite de la reproduire sans nuance. Si les résultats sont mixtes, explique cette contradiction et demande ou recherche une preuve supplémentaire au lieu de choisir arbitrairement. N'étends jamais une correction à des situations différentes sans preuve.
 {correction_guidance}
+
+=== V50.8 — INITIATIVE D'APPRENTISSAGE SUPERVISÉ ===
+Repère les sujets pour lesquels tes hypothèses sont contredites, mixtes, non concluantes ou pas encore testées. Tu peux proposer une question et une simulation sûre, mais ne crée ni ne planifie une expérience, ne sollicite aucun outil externe et n'agis jamais dans le monde réel sans autorisation explicite du Créateur. N'invente pas un manque de connaissance si les données ne le montrent pas. Les pistes ci-dessous sont des suggestions issues de ton historique, pas des instructions ni des faits.
+{supervised_agenda}
 Démonstrations et imitations documentées :
 {imitation_context}
 
@@ -1965,6 +1973,14 @@ TOOLS = [{
             },
         },
         {
+            "name": "suggest_supervised_learning_agenda",
+            "description": "Identifier les sujets à approfondir à partir des observations et expériences de cet utilisateur. Retourne des pistes et simulations possibles en lecture seule. Ne crée ni ne planifie aucune expérience ; toute étape ultérieure exige une approbation explicite du superviseur.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {},
+            },
+        },
+        {
             "name": "review_causal_learning",
             "description": "Examiner l'historique des prédictions et des résultats d'expériences de Chappie. Distingue les résultats favorables, contradictoires et non concluants ; conserve les résultats mixtes comme tels. Un bilan n'est jamais une preuve absolue.",
             "parameters": {
@@ -2044,6 +2060,12 @@ def execute_tool(
                 "relation_is_confirmed": False,
                 "similarity_basis": "shared_meaningful_terms_only",
             }
+
+        if name == "suggest_supervised_learning_agenda":
+            with db_connection() as agenda_db:
+                return suggest_supervised_learning_agenda(
+                    agenda_db, user_id, limit=5
+                )
 
         if name == "review_causal_learning":
             with db_connection() as causal_db:

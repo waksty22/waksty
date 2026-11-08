@@ -11,7 +11,7 @@ L'audit de production du 7 novembre 2026 a relevé 41 tables / 84 objets dans SQ
 - Construit un plan depuis le schéma SQLite vers le schéma Turso.
 - Ne lit aucun contenu métier de ligne pour construire le plan.
 - Prévoit les tables manquantes, les index manquants et l'ajout explicitement autorisé de `skills.xp REAL NOT NULL DEFAULT 0.0`.
-- Bloque les colonnes manquantes non prévues et les objets non pris en charge.
+- Bloque les colonnes manquantes non prévues, les dérives de clés étrangères, contraintes CHECK/UNIQUE, index, vues, triggers et les objets non pris en charge.
 - N'inclut aucune copie, fusion, mise à jour ou suppression de données.
 - N'exécute rien par défaut : `apply_migration_plan(...)` reste en mode simulation sauf si un appelant fournit explicitement `apply=True`.
 

@@ -221,6 +221,83 @@ def evaluate_experiment(
             "status": hypothesis_status}
 
 
+
+def review_causal_learning(
+    db: sqlite3.Connection,
+    user_id: str,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Return an append-only view of experiment outcomes for each hypothesis.
+
+    Completed experiments remain the evidence trail. The aggregate assessment
+    is descriptive only: mixed results stay mixed, and the current confidence
+    field is explicitly not presented as a calibrated probability. This
+    function is read-only and never rewrites hypotheses or experiment records.
+    """
+    limit = max(1, min(int(limit), 50))
+    hypotheses = db.execute(
+        """
+        SELECT id, observation_id, statement, predicted_effect,
+               confidence, status, evidence_count, created_at, updated_at
+        FROM causal_hypotheses
+        WHERE user_id=?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (user_id, limit),
+    ).fetchall()
+
+    reviewed: list[dict[str, Any]] = []
+    for hypothesis_row in hypotheses:
+        hypothesis = dict(hypothesis_row)
+        experiments = db.execute(
+            """
+            SELECT id, environment, procedure, prediction, status, result,
+                   evaluation, created_at, completed_at
+            FROM causal_experiments
+            WHERE user_id=? AND hypothesis_id=?
+            ORDER BY id ASC
+            LIMIT 200
+            """,
+            (user_id, int(hypothesis["id"])),
+        ).fetchall()
+        history = [dict(row) for row in experiments]
+        counts = {
+            key: sum(1 for item in history
+                     if item["status"] == "completed" and item["evaluation"] == key)
+            for key in ALLOWED_RESULTS
+        }
+        if counts["supported"] and counts["contradicted"]:
+            assessment = "mixed_evidence"
+        elif counts["contradicted"]:
+            assessment = "challenged_by_recorded_tests"
+        elif counts["supported"]:
+            assessment = "supported_by_recorded_tests"
+        elif counts["inconclusive"]:
+            assessment = "inconclusive"
+        elif any(item["status"] == "planned" for item in history):
+            assessment = "awaiting_evaluation"
+        else:
+            assessment = "not_tested"
+
+        hypothesis["evaluation_history"] = history
+        hypothesis["evidence_counts"] = counts
+        hypothesis["evidence_assessment"] = assessment
+        hypothesis["confidence_note"] = (
+            "Score interne ajusté par les évaluations successives ; "
+            "ce n'est pas une probabilité calibrée ni une certitude."
+        )
+        reviewed.append(hypothesis)
+
+    return {
+        "hypotheses": reviewed,
+        "read_only": True,
+        "history_is_preserved": True,
+        "mixed_evidence_remains_mixed": True,
+        "assessment_is_not_proof": True,
+    }
+
+
 def list_causal_learning(db: sqlite3.Connection, user_id: str) -> dict[str, list[dict[str, Any]]]:
     observations = [dict(r) for r in db.execute(
         "SELECT * FROM causal_observations WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)

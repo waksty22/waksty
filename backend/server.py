@@ -67,6 +67,12 @@ from memory.autobiographical import (
     find_related_autobiographical_events,
     autobiographical_statistics,
 )
+from memory.conversation_outbox import (
+    init_conversation_finalization_outbox,
+    enqueue_conversation_finalization,
+    list_pending_conversation_finalizations,
+    mark_conversation_finalization,
+)
 from world.spatial_memory import (
     init_spatial_tables, start_location_session, stop_location_session,
     record_location, record_place_observation, confirm_place_identity, get_map_state,
@@ -542,6 +548,11 @@ async def lifespan(app: FastAPI):
         collect_runtime_snapshot(),
     )
     init_db()
+    with db_connection() as outbox_db:
+        init_conversation_finalization_outbox(outbox_db)
+        outbox_db.commit()
+    recovery_report = recover_pending_conversation_finalizations()
+    log.info("[V50.40] Reprise de finalisation au démarrage : %s", recovery_report)
     log.info(
         "V36.2 runtime phase=after_init_db elapsed_seconds=%.2f %s",
         time.monotonic() - startup_started,
@@ -1649,6 +1660,11 @@ def save_conversation_turn(
             "INSERT INTO journal(user_id, entry, kind, created_at) VALUES(?,?,?,?)",
             (user_id, f"Tour enregistré dans la mémoire commune (source : {source}).", source[:40], now),
         )
+        through_id = int(db.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM conversations WHERE user_id=?",
+            (user_id,),
+        ).fetchone()[0])
+        enqueue_conversation_finalization(db, user_id, through_id)
         if owns_connection:
             db.commit()
 
@@ -1658,45 +1674,71 @@ def save_conversation_turn(
 
 
 def finalize_conversation_turn(user_id: str) -> None:
-    """Run post-commit autobiographical sync and summary consolidation."""
+    """Retry pending post-commit work; the outbox survives process restarts."""
     user_id = valid_user(user_id)
+    with db_connection() as db:
+        pending = [
+            job for job in list_pending_conversation_finalizations(db, limit=500)
+            if job["user_id"] == user_id
+        ]
+    if not pending:
+        return
+
     try:
+        # The sync operation is idempotent and can safely be repeated if the
+        # process crashes after sync but before the outbox status is updated.
         with db_connection() as db:
             sync_autobiographical_events(db, user_id)
 
         with db_connection() as db:
-            latest = int(
-                db.execute(  
-                    """  
-                    SELECT COALESCE(MAX(id),0)  
-                    FROM conversations  
-                    WHERE user_id=?  
-                    """,  
-                    (user_id,),  
-                ).fetchone()[0]  
-            )  
+            latest = int(db.execute(
+                "SELECT COALESCE(MAX(id),0) FROM conversations WHERE user_id=?",
+                (user_id,),
+            ).fetchone()[0])
+            summary_row = db.execute(
+                """SELECT through_conversation_id FROM conversation_summaries
+                   WHERE user_id=? ORDER BY id DESC LIMIT 1""",
+                (user_id,),
+            ).fetchone()
+            through = int(summary_row["through_conversation_id"]) if summary_row else 0
 
-            summary_row = db.execute(  
-                """  
-                SELECT through_conversation_id  
-                FROM conversation_summaries  
-                WHERE user_id=?  
-                ORDER BY id DESC  
-                LIMIT 1  
-                """,  
-                (user_id,),  
-            ).fetchone()  
+        if latest - through >= 10:
+            consolidate_conversation(user_id)
 
-            through = (  
-                int(summary_row["through_conversation_id"])  
-                if summary_row else 0  
-            )  
+        with db_connection() as db:
+            for job in pending:
+                mark_conversation_finalization(db, job["id"])
+            db.commit()
+    except Exception as exc:
+        log.exception("[V50.40] Échec de finalisation; le travail reste en attente")
+        try:
+            with db_connection() as db:
+                for job in pending:
+                    mark_conversation_finalization(db, job["id"], error=str(exc))
+                db.commit()
+        except Exception:
+            log.exception("[V50.40] Impossible de mettre à jour les tentatives de l'outbox")
 
-        if latest - through >= 10:  
-            consolidate_conversation(user_id)  
 
-    except Exception:
-        log.exception("Échec de consolidation après enregistrement d'un tour")
+def recover_pending_conversation_finalizations() -> dict[str, int]:
+    """Recover pending jobs on startup without touching unrelated users."""
+    processed_users = 0
+    failed_users = 0
+    with db_connection() as db:
+        jobs = list_pending_conversation_finalizations(db, limit=500)
+    user_ids = sorted({str(job["user_id"]) for job in jobs})
+    for user_id in user_ids:
+        before = sum(1 for job in jobs if job["user_id"] == user_id)
+        finalize_conversation_turn(user_id)
+        with db_connection() as db:
+            remaining = sum(
+                1 for job in list_pending_conversation_finalizations(db, limit=500)
+                if job["user_id"] == user_id
+            )
+        processed_users += 1
+        if remaining >= before:
+            failed_users += 1
+    return {"users_checked": processed_users, "users_with_pending_failures": failed_users}
 
 
 def get_identity_prompt(user_id: str, query: str = "") -> str:

@@ -61,5 +61,14 @@ jobs:
           Path("/tmp/chappie-inline.mjs").write_text("\n".join(scripts), encoding="utf-8")
           PY
           node --check /tmp/chappie-inline.mjs
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("backend/static/index.html").read_text(encoding="utf-8")
+          modules = re.findall(r'<script type="module">(.*?)</script>', html, flags=re.S)
+          for index, script in enumerate(modules):
+              Path(f"/tmp/chappie-module-{index}.mjs").write_text(script, encoding="utf-8")
+          PY
+          for module in /tmp/chappie-module-*.mjs; do node --check "$module"; done
       - name: Test complete backend test suite
         run: python -m pytest backend/tests -q

@@ -162,24 +162,70 @@ def test_empty_interrupted_turn_is_not_persisted(isolated_memory):
     assert journal_count == 0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known V50.33 gap: save_conversation_turn has no stable turn ID; "
-        "replaying a completed Live turn currently inserts duplicates."
-    ),
-)
-def test_replaying_same_turn_is_idempotent_future_contract(isolated_memory):
+def test_replaying_same_turn_is_idempotent(isolated_memory):
     _, connect = isolated_memory
 
-    for _ in range(2):
-        server.save_conversation_turn(
-            "creator", "Même tour.", "Même réponse.", source="gemini_live"
-        )
+    first = server.save_conversation_turn(
+        "creator", "Même tour.", "Même réponse.",
+        source="gemini_live", turn_id="live-turn-001",
+    )
+    replay = server.save_conversation_turn(
+        "creator", "Même tour.", "Même réponse.",
+        source="gemini_live", turn_id="live-turn-001",
+    )
 
+    assert first is True
+    assert replay is False
     with connect() as db:
         count = db.execute(
             "SELECT COUNT(*) FROM conversations "
             "WHERE user_id='creator' AND content IN ('Même tour.', 'Même réponse.')"
         ).fetchone()[0]
+        receipts = db.execute(
+            "SELECT COUNT(*) FROM conversation_turn_receipts "
+            "WHERE user_id='creator' AND turn_id='live-turn-001'"
+        ).fetchone()[0]
+        journal_count = db.execute(
+            "SELECT COUNT(*) FROM journal WHERE user_id='creator'"
+        ).fetchone()[0]
     assert count == 2
+    assert receipts == 1
+    assert journal_count == 1
+
+
+def test_same_turn_id_is_scoped_per_user(isolated_memory):
+    _, connect = isolated_memory
+
+    server.save_conversation_turn(
+        "creator", "Message A.", "Réponse A.",
+        source="conversation", turn_id="request-12345678",
+    )
+    server.save_conversation_turn(
+        "another-user", "Message B.", "Réponse B.",
+        source="conversation", turn_id="request-12345678",
+    )
+
+    with connect() as db:
+        rows = db.execute(
+            "SELECT user_id, COUNT(*) AS total FROM conversations "
+            "GROUP BY user_id ORDER BY user_id"
+        ).fetchall()
+    assert [(row["user_id"], row["total"]) for row in rows] == [
+        ("another-user", 2), ("creator", 2)
+    ]
+
+
+def test_distinct_turn_ids_preserve_identical_messages(isolated_memory):
+    _, connect = isolated_memory
+
+    for turn_id in ("live-turn-0001", "live-turn-0002"):
+        server.save_conversation_turn(
+            "creator", "Encore le même texte.", "Même réponse.",
+            source="gemini_live", turn_id=turn_id,
+        )
+
+    with connect() as db:
+        count = db.execute(
+            "SELECT COUNT(*) FROM conversations WHERE user_id='creator'"
+        ).fetchone()[0]
+    assert count == 4

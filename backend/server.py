@@ -4830,14 +4830,23 @@ async def websocket_endpoint(
                             })
 
                         if live_turn_state["user"] or assistant_text:
+                            completed_user_text = live_turn_state["user"].strip()
                             try:
-                                completed_user_text = live_turn_state["user"].strip()
-                                if completed_user_text:
-                                    live_emotions = update_emotions_once(
-                                        user_id, completed_user_text,
-                                        event_id=live_turn_state["turn_id"],
+                                with db_connection() as cognitive_db:
+                                    saved = save_conversation_turn(
+                                        user_id,
+                                        completed_user_text,
+                                        assistant_text if lexical_gate_passed else "",
+                                        source="gemini_live",
+                                        turn_id=live_turn_state["turn_id"],
+                                        db=cognitive_db,
                                     )
-                                    with db_connection() as cognitive_db:
+                                    if saved and completed_user_text:
+                                        live_emotions = update_emotions_once(
+                                            user_id, completed_user_text,
+                                            event_id=live_turn_state["turn_id"],
+                                            db=cognitive_db,
+                                        )
                                         record_affective_snapshot(
                                             cognitive_db, user_id, live_emotions,
                                             source="gemini_live",
@@ -4866,31 +4875,23 @@ async def websocket_endpoint(
                                             evidence="Enseignement explicite via Gemini Live",
                                             event_id=live_turn_state["turn_id"],
                                         )
-                                        cognitive_db.commit()
                                         if taught:
                                             log.info(
                                                 "[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live",
                                                 len(taught),
                                             )
+                                    cognitive_db.commit()
+                                if saved:
+                                    finalize_conversation_turn(user_id)
+                                    log.info(
+                                        "[V34] Tour Live enregistré atomiquement "
+                                        "(utilisateur=%s, user_chars=%s, assistant_chars=%s, audio_chunks=%s)",
+                                        user_id, len(live_turn_state["user"]),
+                                        len(assistant_text) if lexical_gate_passed else 0,
+                                        len(live_turn_state["audio"]) if lexical_gate_passed else 0,
+                                    )
                             except Exception:
-                                log.exception("[GEMINI LIVE] Échec mémorisation cognitive du tour terminé")
-                            try:
-                                save_conversation_turn(
-                                    user_id,
-                                    live_turn_state["user"],
-                                    assistant_text if lexical_gate_passed else "",
-                                    source="gemini_live",
-                                    turn_id=live_turn_state["turn_id"],
-                                )
-                                log.info(
-                                    "[V34] Tour Live enregistré dans le cerveau commun "
-                                    "(utilisateur=%s, user_chars=%s, assistant_chars=%s, audio_chunks=%s)",
-                                    user_id, len(live_turn_state["user"]),
-                                    len(assistant_text) if lexical_gate_passed else 0,
-                                    len(live_turn_state["audio"]) if lexical_gate_passed else 0,
-                                )
-                            except Exception:
-                                log.exception("[V34] Échec d'enregistrement du tour Live")
+                                log.exception("[GEMINI LIVE] Échec de la transaction du tour complet")
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []

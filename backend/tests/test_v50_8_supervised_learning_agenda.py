@@ -111,5 +111,5 @@ def test_agenda_context_is_bounded_and_states_supervision_requirement():
     context = format_supervised_learning_agenda(db, "creator", max_chars=900)
     assert len(context) <= 900
     assert "approbation explicite" in context
-    assert "ne planifies aucune expérience" in context or "ne crée ni ne planifie" in context
+    assert "Tu ne crées, ne planifies et n'exécutes aucune expérience" in context
     db.close()

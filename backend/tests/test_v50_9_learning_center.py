@@ -16,7 +16,7 @@ def test_dashboard_has_supervised_learning_center_and_refresh():
     assert 'id="learningAgendaTitle"' in HTML
     assert 'id="learningAgendaList"' in HTML
     assert 'onclick="loadSupervisedAgenda()"' in HTML
-    assert "aucune expérience créée" in HTML.lower()
+    assert "préparer une piste ne lance rien" in HTML.lower()
 
 
 def test_agenda_actions_only_prefill_existing_supervised_forms():

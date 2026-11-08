@@ -2517,7 +2517,7 @@ async def run_brain(
         message,
         reply,
         source="conversation",
-        turn_id=turn_id,
+        turn_id=cognitive_event_id,
     )  
 
     return {  

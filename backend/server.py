@@ -142,6 +142,9 @@ from cognition.development import (
 from cognition.engine import cognitive_engine
 from cognition.catalog import COGNITIVE_CATALOG
 from cognition.skill_evidence import build_validated_skill_data
+from memory.knowledge_acquisition import (
+    retrieve_acquired_knowledge, format_acquired_knowledge_context,
+)
 from cognition.shared_brain import (
     get_shared_brain_snapshot,
     format_shared_brain_context,
@@ -1774,6 +1777,12 @@ def get_identity_prompt(user_id: str) -> str:
         shared_snapshot = get_shared_brain_snapshot(shared_db, user_id, limit=8)
     shared_brain_context = format_shared_brain_context(shared_snapshot)
 
+    with db_connection() as knowledge_db:
+        acquired_knowledge = retrieve_acquired_knowledge(knowledge_db, user_id, limit=10)
+    acquired_knowledge_context = format_acquired_knowledge_context(
+        acquired_knowledge, max_chars=4200
+    )
+
     with db_connection() as learning_db:
         imitation_state = list_imitation_learning(learning_db, user_id, limit=6)
         causal_state = list_causal_learning(learning_db, user_id)
@@ -1891,6 +1900,10 @@ Préférences documentées :
 Tous les systèmes persistés ci-dessous appartiennent au même historique cognitif. Utilise ces données avec leur provenance et leur statut. Une donnée présente dans le contexte n'est pas automatiquement comprise ni maîtrisée.
 {shared_brain_context}
 
+=== V50.12 — CONNAISSANCES ET EXPÉRIENCES RÉUTILISABLES ===
+Les éléments ci-dessous relient souvenirs, épisodes et évaluations de compétences sans effacer leur provenance. Une observation n'est pas une compréhension, un enseignement n'est pas une maîtrise indépendante, et une expérience n'est pas une preuve d'apprentissage. Seules les évaluations de compétences supervisées réussies valident la compétence correspondante. Si le statut est incertain, exprime cette incertitude et demande une vérification.
+{acquired_knowledge_context}
+
 === V27 — APPRENTISSAGE PAR IMITATION ET EXPÉRIENCE SUPERVISÉE ===
 Tu distingues strictement : comportement observé, comportement tenté, pratique documentée et imitation validée.
 Une démonstration ne prouve pas que tu sais refaire le geste. Une tentative ne prouve pas sa réussite. N'affirme jamais maîtriser un comportement dont le statut n'est pas « validated ».
@@ -1979,6 +1992,15 @@ TOOLS = [{
                 "properties": {
                     "query": {"type": "STRING"},
                 },
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "retrieve_acquired_knowledge",
+            "description": "Rechercher les souvenirs, expériences autobiographiques et évaluations de compétences avec leur provenance et leur statut. Ne transforme jamais une observation, un enseignement ou une expérience en connaissance acquise.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"query": {"type": "STRING"}},
                 "required": ["query"],
             },
         },
@@ -2077,6 +2099,17 @@ def execute_tool(
                     10,  
                 )  
             }  
+
+        if name == "retrieve_acquired_knowledge":
+            query = str(args.get("query", ""))[:200]
+            with db_connection() as knowledge_db:
+                result = retrieve_acquired_knowledge(
+                    knowledge_db, user_id, query=query, limit=10
+                )
+            result["formatted_context"] = format_acquired_knowledge_context(
+                result, max_chars=5000
+            )
+            return result
 
         if name == "search_autobiographical_events":
             query = str(args.get("query", ""))[:200]

@@ -64,6 +64,7 @@ from memory.autobiographical import (
     sync_autobiographical_events,
     list_autobiographical_events,
     search_autobiographical_events,
+    find_related_autobiographical_events,
     autobiographical_statistics,
 )
 from world.spatial_memory import (
@@ -100,7 +101,13 @@ from learning.object_learning import (
 from learning.causal_learning import (
     init_causal_learning_tables, record_observation as record_causal_observation,
     propose_hypothesis, plan_experiment, evaluate_experiment,
-    list_causal_learning,
+    list_causal_learning, review_causal_learning,
+    format_causal_learning_guidance, suggest_supervised_learning_agenda,
+    format_supervised_learning_agenda,
+)
+from learning.personal_goals import (
+    suggest_personal_learning_goals, list_personal_learning_goals,
+    record_personal_goal_step,
 )
 from learning.supervised_learning import (
     init_supervised_learning_tables,
@@ -135,6 +142,9 @@ from cognition.development import (
 from cognition.engine import cognitive_engine
 from cognition.catalog import COGNITIVE_CATALOG
 from cognition.skill_evidence import build_validated_skill_data
+from memory.knowledge_acquisition import (
+    retrieve_acquired_knowledge, format_acquired_knowledge_context,
+)
 from cognition.shared_brain import (
     get_shared_brain_snapshot,
     format_shared_brain_context,
@@ -1647,7 +1657,7 @@ def save_conversation_turn(
             "Échec de consolidation après enregistrement d'un tour"  
         )
 
-def get_identity_prompt(user_id: str) -> str:
+def get_identity_prompt(user_id: str, query: str = "") -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
     intent = get_user_intention(user_id)
@@ -1767,9 +1777,42 @@ def get_identity_prompt(user_id: str) -> str:
         shared_snapshot = get_shared_brain_snapshot(shared_db, user_id, limit=8)
     shared_brain_context = format_shared_brain_context(shared_snapshot)
 
+    with db_connection() as knowledge_db:
+        acquired_knowledge = retrieve_acquired_knowledge(knowledge_db, user_id, query=query, limit=10)
+    acquired_knowledge_context = format_acquired_knowledge_context(
+        acquired_knowledge, max_chars=4200
+    )
+
     with db_connection() as learning_db:
         imitation_state = list_imitation_learning(learning_db, user_id, limit=6)
         causal_state = list_causal_learning(learning_db, user_id)
+        correction_guidance = format_causal_learning_guidance(
+            learning_db, user_id, limit=8, max_chars=5000
+        )
+        supervised_agenda = format_supervised_learning_agenda(
+            learning_db, user_id, limit=5, max_chars=2200
+        )
+
+    with db_connection() as goals_db:
+        personal_goals_state = list_personal_learning_goals(goals_db, user_id, limit=8)
+        personal_goal_suggestions = suggest_personal_learning_goals(goals_db, user_id, limit=5)
+
+    personal_goals_context = "\n".join(
+        f"- {goal['title']} | état={goal['status']} | progression={goal['progress']:.0f}% "
+        f"| étapes={sum(1 for step in goal['steps'] if step['status'] == 'completed' and step['evidence'])}/{len(goal['steps'])} "
+        f"| compétences évaluées : "
+        + (", ".join(
+            f"{assessment['test_name']} ({assessment['score']:.0f}/100, "
+            f"{'réussie' if assessment['passed'] else 'non réussie'})"
+            for assessment in goal.get('skill_assessments', [])[:5]
+        ) or "aucune")
+        for goal in personal_goals_state["goals"]
+    ) or "Aucun objectif personnel enregistré."
+    personal_goal_suggestions_context = "\n".join(
+        f"- Proposition (non adoptée) : {item['title']} | raison : {item['reason']} "
+        f"| critère : {item['criterion']}"
+        for item in personal_goal_suggestions["proposals"]
+    ) or "Aucune proposition d'objectif issue des données disponibles."
 
     imitation_context = "\\n".join(
         f"- {item['behavior']} | statut : {item['status']} "
@@ -1857,12 +1900,24 @@ Préférences documentées :
 Tous les systèmes persistés ci-dessous appartiennent au même historique cognitif. Utilise ces données avec leur provenance et leur statut. Une donnée présente dans le contexte n'est pas automatiquement comprise ni maîtrisée.
 {shared_brain_context}
 
+=== V50.12 — CONNAISSANCES ET EXPÉRIENCES RÉUTILISABLES ===
+Les éléments ci-dessous relient souvenirs, épisodes et évaluations de compétences sans effacer leur provenance. Une observation n'est pas une compréhension, un enseignement n'est pas une maîtrise indépendante, et une expérience n'est pas une preuve d'apprentissage. Seules les évaluations de compétences supervisées réussies valident la compétence correspondante. Si le statut est incertain, exprime cette incertitude et demande une vérification.
+{acquired_knowledge_context}
+
 === V27 — APPRENTISSAGE PAR IMITATION ET EXPÉRIENCE SUPERVISÉE ===
 Tu distingues strictement : comportement observé, comportement tenté, pratique documentée et imitation validée.
 Une démonstration ne prouve pas que tu sais refaire le geste. Une tentative ne prouve pas sa réussite. N'affirme jamais maîtriser un comportement dont le statut n'est pas « validated ».
 Quand tu veux apprendre un comportement, décris ce que tu as observé, demande une démonstration ou une consigne explicite, puis propose une pratique simple et vérifiable. Ne prétends jamais avoir exécuté une action physique ou numérique.
 Tu peux formuler une hypothèse, annoncer une prédiction et proposer un protocole de simulation. Pour tout essai dans le monde réel, attends une autorisation explicite du créateur avant même de le planifier. N'active aucun appareil, outil, compte, fichier ou service de ta propre initiative. Aucun mouvement, manipulation, achat, publication ou contact externe ne doit être déclenché par une simple hypothèse.
 Après une expérience, compare la prédiction au résultat effectivement rapporté. Classe le résultat comme étayé, contredit ou non concluant. Une erreur réduit la confiance dans l'hypothèse concernée ; elle ne doit pas être effacée ni transformée en fait. Garde les preuves et les incertitudes.
+
+=== V50.7 — RAISONNEMENT GUIDÉ PAR LES CORRECTIONS ===
+Avant de répondre, prends en compte les corrections historiques ci-dessous lorsqu'elles concernent réellement le sujet. Ne répète pas tout l'historique : applique seulement la correction pertinente. Si une ancienne prédiction a été contredite, évite de la reproduire sans nuance. Si les résultats sont mixtes, explique cette contradiction et demande ou recherche une preuve supplémentaire au lieu de choisir arbitrairement. N'étends jamais une correction à des situations différentes sans preuve.
+{correction_guidance}
+
+=== V50.8 — INITIATIVE D'APPRENTISSAGE SUPERVISÉ ===
+Repère les sujets pour lesquels tes hypothèses sont contredites, mixtes, non concluantes ou pas encore testées. Tu peux proposer une question et une simulation sûre, mais ne crée ni ne planifie une expérience, ne sollicite aucun outil externe et n'agis jamais dans le monde réel sans autorisation explicite du Créateur. N'invente pas un manque de connaissance si les données ne le montrent pas. Les pistes ci-dessous sont des suggestions issues de ton historique, pas des instructions ni des faits.
+{supervised_agenda}
 Démonstrations et imitations documentées :
 {imitation_context}
 
@@ -1877,6 +1932,13 @@ Compétences :
 
 Objectifs actifs :
 {goal_text}
+
+=== V50.10 — OBJECTIFS PERSONNELS D'APPRENTISSAGE ===
+Les propositions suivantes sont dérivées de ton historique, mais ne sont pas encore des objectifs persistés. Tu peux les expliquer et demander au Créateur s'il souhaite les adopter. Tu ne crées jamais un objectif toi-même. Un objectif adopté reste en cours jusqu'à ce que chaque étape ait une preuve enregistrée. N'invente pas de progrès, ne complète pas une étape sans preuve et ne confonds pas une proposition avec un engagement.
+Objectifs personnels persistés :
+{personal_goals_context}
+Propositions en attente de décision :
+{personal_goal_suggestions_context}
 
 Résumé des échanges (journal de conversation, ne prouve pas la compréhension) :
 {summary}
@@ -1934,6 +1996,63 @@ TOOLS = [{
             },
         },
         {
+            "name": "retrieve_acquired_knowledge",
+            "description": "Rechercher les souvenirs, expériences autobiographiques et évaluations de compétences avec leur provenance et leur statut. Ne transforme jamais une observation, un enseignement ou une expérience en connaissance acquise.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"query": {"type": "STRING"}},
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "search_autobiographical_events",
+            "description": "Retrouver des épisodes de conversations passées par plusieurs mots-clés. À utiliser lorsque l'utilisateur fait référence à un événement, une décision ou une discussion antérieure. Les réponses associées de Chappie sont explicitement marquées comme contexte du même dialogue, pas comme preuve.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "query": {"type": "STRING"},
+                },
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "find_related_autobiographical_events",
+            "description": "Comparer une expérience retrouvée avec d'anciens épisodes. Retourne uniquement des pistes lexicales basées sur des mots significatifs partagés. Ne jamais présenter ces pistes comme preuve que c'est le même objet, la même personne ou une relation de cause à effet.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "event_id": {"type": "INTEGER"},
+                },
+                "required": ["event_id"],
+            },
+        },
+        {
+            "name": "suggest_supervised_learning_agenda",
+            "description": "Identifier les sujets à approfondir à partir des observations et expériences de cet utilisateur. Retourne des pistes et simulations possibles en lecture seule. Ne crée ni ne planifie aucune expérience ; toute étape ultérieure exige une approbation explicite du superviseur.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {},
+            },
+        },
+        {
+            "name": "suggest_personal_learning_goals",
+            "description": "Proposer des objectifs personnels mesurables à partir des pistes d'apprentissage de cet utilisateur. Lecture seule : ne crée aucun objectif et attend l'adoption explicite du Créateur.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
+        {
+            "name": "review_personal_learning_goals",
+            "description": "Consulter les objectifs personnels persistés, leurs étapes et les preuves enregistrées. Lecture seule ; ne modifie aucune progression.",
+            "parameters": {"type": "OBJECT", "properties": {}},
+        },
+        {
+            "name": "review_causal_learning",
+            "description": "Examiner l'historique des prédictions et des résultats d'expériences de Chappie. Distingue les résultats favorables, contradictoires et non concluants ; conserve les résultats mixtes comme tels. Un bilan n'est jamais une preuve absolue.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {},
+            },
+        },
+        {
             "name": "get_shared_brain_state",
             "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
             "parameters": {
@@ -1981,6 +2100,60 @@ def execute_tool(
                 )  
             }  
 
+        if name == "retrieve_acquired_knowledge":
+            query = str(args.get("query", ""))[:200]
+            with db_connection() as knowledge_db:
+                result = retrieve_acquired_knowledge(
+                    knowledge_db, user_id, query=query, limit=10
+                )
+            result["formatted_context"] = format_acquired_knowledge_context(
+                result, max_chars=5000
+            )
+            return result
+
+        if name == "search_autobiographical_events":
+            query = str(args.get("query", ""))[:200]
+            with db_connection() as autobiography_db:
+                sync_autobiographical_events(autobiography_db, user_id)
+                events = search_autobiographical_events(
+                    autobiography_db, user_id, query, limit=8
+                )
+            return {
+                "events": events,
+                "grounded_in_source_messages": True,
+                "dialogue_links_are_context_not_confirmation": True,
+            }
+
+        if name == "find_related_autobiographical_events":
+            event_id = int(args.get("event_id", 0))
+            with db_connection() as autobiography_db:
+                related = find_related_autobiographical_events(
+                    autobiography_db, user_id, event_id, limit=5
+                )
+            return {
+                "related_experience_candidates": related,
+                "relation_is_confirmed": False,
+                "similarity_basis": "shared_meaningful_terms_only",
+            }
+
+        if name == "suggest_supervised_learning_agenda":
+            with db_connection() as agenda_db:
+                return suggest_supervised_learning_agenda(
+                    agenda_db, user_id, limit=5
+                )
+
+        if name == "suggest_personal_learning_goals":
+            with db_connection() as goals_db:
+                return suggest_personal_learning_goals(goals_db, user_id, limit=5)
+
+        if name == "review_personal_learning_goals":
+            with db_connection() as goals_db:
+                return list_personal_learning_goals(goals_db, user_id, limit=30)
+
+        if name == "review_causal_learning":
+            with db_connection() as causal_db:
+                return review_causal_learning(causal_db, user_id, limit=50)
+
         if name == "get_shared_brain_state":
             with db_connection() as brain_db:
                 return get_shared_brain_snapshot(brain_db, user_id, limit=8)
@@ -2004,6 +2177,7 @@ def execute_tool(
 async def call_gemini(
     contents: list[dict[str, Any]],
     user_id: str,
+    query: str = "",
 ) -> dict[str, Any]:
 
     if not GEMINI_API_KEY:  
@@ -2014,7 +2188,7 @@ async def call_gemini(
 
     payload = {  
         "system_instruction": {  
-            "parts": [{"text": get_identity_prompt(user_id)}]  
+            "parts": [{"text": get_identity_prompt(user_id, query=query)}]  
         },  
         "contents": contents,  
         "tools": TOOLS,  
@@ -2250,6 +2424,7 @@ async def run_brain(
         model_response = await call_gemini(  
             history,  
             user_id,  
+            query=message,
         )  
 
         history.append(model_response)  
@@ -3043,11 +3218,34 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
     if not math.isfinite(score) or not 0 <= score <= 100:
         raise HTTPException(status_code=422, detail="Le score doit être compris entre 0 et 100.")
     test_name = system_key + ":" + branch_key
+    goal_id = data.get("goal_id")
+    goal_step_id = data.get("goal_step_id")
+    if (goal_id is None) != (goal_step_id is None):
+        raise HTTPException(status_code=422, detail="Pour relier une évaluation à un objectif, indique aussi l'étape concernée.")
+    if goal_id is not None:
+        try:
+            goal_id = int(goal_id)
+            goal_step_id = int(goal_step_id)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="Identifiants d'objectif ou d'étape invalides.")
+        with db_connection() as db:
+            linked_step = db.execute(
+                """SELECT s.id FROM goals g
+                   JOIN goal_steps s ON s.goal_id=g.id
+                   WHERE g.id=? AND g.user_id=? AND s.id=?
+                     AND s.status='completed' AND length(trim(s.evidence))>0""",
+                (goal_id, user_id, goal_step_id),
+            ).fetchone()
+        if linked_step is None:
+            raise HTTPException(status_code=403, detail="L'étape doit appartenir à ton objectif et comporter une preuve déjà enregistrée.")
     details = {
         "source": "supervised_assessment",
         "supervisor_approved": True,
         "evidence": evidence,
     }
+    if goal_id is not None:
+        details["goal_id"] = goal_id
+        details["goal_step_id"] = goal_step_id
     try:
         with db_connection() as db:
             prior = db.execute(
@@ -3521,10 +3719,10 @@ async def api_create_goal(
     if len(steps) > 50:  
         raise HTTPException(status_code=400, detail="Trop d'étapes.")  
 
-    result = await create_goal(  
-        user_id=user_id,  
-        title=title,  
-        steps=steps,  
+    result = create_goal(
+        user_id=user_id,
+        title=title,
+        steps=steps,
     )  
 
     return {  
@@ -4112,6 +4310,51 @@ async def api_list_causal_learning(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     with db_connection() as db:
         return list_causal_learning(db, user_id)
+
+
+
+@app.get("/api/learning/knowledge")
+async def api_acquired_knowledge(query: str = "", limit: int = 12, auth=Depends(require_auth)):
+    """Read-only, user-scoped view of memories, experiences and skill assessments."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        result = retrieve_acquired_knowledge(db, user_id, query=query, limit=limit)
+    return result
+
+
+@app.get("/api/learning/supervised-agenda")
+async def api_supervised_learning_agenda(auth=Depends(require_auth)):
+    """Return this user's learning suggestions without creating any records."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return suggest_supervised_learning_agenda(db, user_id, limit=5)
+
+
+@app.get("/api/learning/goals")
+async def api_personal_learning_goals(auth=Depends(require_auth)):
+    """Return this user's persisted goals and unapproved proposals, read-only."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return {
+            "persisted": list_personal_learning_goals(db, user_id, limit=30),
+            "suggestions": suggest_personal_learning_goals(db, user_id, limit=5),
+        }
+
+
+@app.post("/api/learning/goals/steps")
+async def api_record_personal_goal_step(request: Request, auth=Depends(require_auth)):
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = record_personal_goal_step(
+                db, user_id, int(data.get("goal_id", 0)),
+                int(data.get("step_id", 0)), data.get("evidence", ""),
+                data.get("completed", True),
+            )
+        return {"ok": True, "result": result}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.post("/api/learning/causal/observations")

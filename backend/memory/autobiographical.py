@@ -6,7 +6,9 @@ Chaque entrée conserve son identifiant source dans la table conversations.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
+import unicodedata
 from typing import Any
 
 
@@ -148,31 +150,204 @@ def list_autobiographical_events(
     return [dict(row) for row in rows]
 
 
+def _normalize_search_text(value: str) -> str:
+    value = str(value or "").casefold().replace("œ", "oe").replace("æ", "ae")
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    return " ".join(re.findall(r"[a-z0-9]+", value))
+
+
+_SEARCH_STOPWORDS = {
+    "alors", "avec", "avoir", "bien", "cela", "cette", "comme", "dans",
+    "depuis", "des", "donc", "elle", "elles", "est", "etre", "fait",
+    "faire", "fois", "ici", "leur", "leurs", "mais", "meme", "mon",
+    "nous", "notre", "pour", "quand", "quel", "quelle", "quelles",
+    "quels", "qui", "quoi", "sans", "ses", "son", "sont", "sous",
+    "sur", "tous", "tout", "tres", "une", "vers", "vous", "votre",
+    "dans", "les", "des", "aux", "par", "pas", "plus", "que", "qui",
+    "une", "un", "le", "la", "de", "du", "et", "ou", "en", "a",
+}
+
+
 def search_autobiographical_events(
     db: sqlite3.Connection,
     user_id: str,
     query: str,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
+    """Retrieve source-grounded episodes by multi-term relevance.
+
+    Matching remains strictly scoped to user_id. Linked assistant replies are
+    included only when a matching user episode has an explicit same-turn link;
+    the link is labeled as dialogue context, never as semantic confirmation.
+    """
     query = str(query or "").strip()[:200]
     if not query:
         return []
     limit = max(1, min(int(limit), 30))
-    # Échappement des jokers LIKE : recherche littérale, sans interprétation.
-    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    normalized_query = _normalize_search_text(query)
+    tokens = [
+        token for token in normalized_query.split()
+        if len(token) >= 2 and token not in _SEARCH_STOPWORDS
+    ]
+    if not tokens:
+        return []
+
+    # Bound the candidate scan to recent source episodes for predictable cost.
     rows = db.execute(
         """
         SELECT id, source_conversation_id, actor, event_type, content,
                happened_at, importance
         FROM autobiographical_events
-        WHERE user_id=? AND content LIKE ? ESCAPE '\\' COLLATE NOCASE
-        ORDER BY importance DESC, id DESC
-        LIMIT ?
+        WHERE user_id=?
+        ORDER BY id DESC
+        LIMIT 2000
         """,
-        (user_id, f"%{escaped}%", limit),
+        (user_id,),
     ).fetchall()
-    return [dict(row) for row in rows]
 
+    ranked: list[tuple[float, dict[str, Any]]] = []
+    for row in rows:
+        item = dict(row)
+        normalized_content = _normalize_search_text(item.get("content", ""))
+        if not normalized_content:
+            continue
+        present = sum(1 for token in set(tokens) if token in normalized_content)
+        if not present:
+            continue
+        coverage = present / max(1, len(set(tokens)))
+        phrase_bonus = 0.35 if normalized_query and normalized_query in normalized_content else 0.0
+        importance = max(1, min(5, int(item.get("importance") or 1)))
+        # Relevance dominates importance: an unrelated important episode cannot win.
+        score = coverage * 4.0 + phrase_bonus + importance * 0.04
+        item["relevance_score"] = round(score, 4)
+        item["matched_terms"] = [
+            token for token in dict.fromkeys(tokens) if token in normalized_content
+        ]
+        item["dialogue_context"] = False
+        ranked.append((score, item))
+
+    ranked.sort(
+        key=lambda pair: (
+            pair[0],
+            int(pair[1].get("importance") or 1),
+            str(pair[1].get("happened_at") or ""),
+            int(pair[1].get("id") or 0),
+        ),
+        reverse=True,
+    )
+
+    selected = [item for _, item in ranked[:limit]]
+    # Add the paired Chappie reply for a matching user statement, but only via
+    # the explicit same-dialogue-turn relation stored at ingestion time.
+    selected_ids = {int(item["id"]) for item in selected}
+    user_event_ids = [
+        int(item["id"]) for item in selected if item.get("actor") == "user"
+    ]
+    if user_event_ids and len(selected) < limit:
+        placeholders = ",".join("?" for _ in user_event_ids)
+        linked = db.execute(
+            f"""
+            SELECT a.id, a.source_conversation_id, a.actor, a.event_type,
+                   a.content, a.happened_at, a.importance
+            FROM autobiographical_links l
+            JOIN autobiographical_events a
+              ON a.id=l.target_event_id AND a.user_id=l.user_id
+            WHERE l.user_id=? AND l.relation_type='same_dialogue_turn'
+              AND l.source_event_id IN ({placeholders})
+            ORDER BY a.id DESC
+            """,
+            [user_id, *user_event_ids],
+        ).fetchall()
+        for row in linked:
+            item = dict(row)
+            if int(item["id"]) in selected_ids:
+                continue
+            item["relevance_score"] = 0.0
+            item["matched_terms"] = []
+            item["dialogue_context"] = True
+            selected.append(item)
+            selected_ids.add(int(item["id"]))
+            if len(selected) >= limit:
+                break
+    return selected
+
+
+
+def find_related_autobiographical_events(
+    db: sqlite3.Connection,
+    user_id: str,
+    event_id: int,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Suggest past episodes with shared meaningful terms, never assert causality.
+
+    Results are lexical candidates only. A shared word is not proof that two
+    episodes concern the same object, person, or cause. No rows are written.
+    """
+    event_id = max(0, int(event_id))
+    limit = max(1, min(int(limit), 10))
+    source = db.execute(
+        """
+        SELECT id, content, happened_at
+        FROM autobiographical_events
+        WHERE user_id=? AND id=?
+        """,
+        (user_id, event_id),
+    ).fetchone()
+    if source is None:
+        return []
+
+    def terms(value: str) -> set[str]:
+        return {
+            token for token in _normalize_search_text(value).split()
+            if len(token) >= 3 and token not in _SEARCH_STOPWORDS
+        }
+
+    source_terms = terms(source["content"])
+    if not source_terms:
+        return []
+
+    rows = db.execute(
+        """
+        SELECT id, source_conversation_id, actor, event_type, content,
+               happened_at, importance
+        FROM autobiographical_events
+        WHERE user_id=? AND id<>?
+        ORDER BY id DESC
+        LIMIT 2000
+        """,
+        (user_id, event_id),
+    ).fetchall()
+
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        candidate_terms = terms(item.get("content", ""))
+        common = sorted(source_terms & candidate_terms)
+        # Require at least two meaningful shared terms to reduce weak matches.
+        if len(common) < 2:
+            continue
+        union = source_terms | candidate_terms
+        score = len(common) / max(1, len(union))
+        item["shared_terms"] = common[:12]
+        item["lexical_similarity"] = round(score, 4)
+        item["relation_status"] = "candidate_only"
+        item["interpretation_warning"] = (
+            "Chevauchement lexical uniquement : identité, causalité et "
+            "équivalence entre expériences non confirmées."
+        )
+        candidates.append(item)
+
+    candidates.sort(
+        key=lambda item: (
+            item["lexical_similarity"],
+            str(item.get("happened_at") or ""),
+            int(item.get("id") or 0),
+        ),
+        reverse=True,
+    )
+    return candidates[:limit]
 
 def autobiographical_statistics(
     db: sqlite3.Connection,

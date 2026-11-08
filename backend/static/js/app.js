@@ -700,6 +700,412 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
 
+    // V50.9 — supervised learning center (read-only agenda)
+    const dismissedAgendaItems = new Set();
+
+    window.loadSupervisedAgenda = async function() {
+        const list = document.getElementById("learningAgendaList");
+        const status = document.getElementById("learningAgendaStatus");
+        if (!list) return;
+        if (status) status.textContent = "Lecture des pistes d'apprentissage…";
+        try {
+            const data = await apiCall("/api/learning/supervised-agenda");
+            const agenda = Array.isArray(data.agenda) ? data.agenda : [];
+            const visible = agenda.filter(item =>
+                !dismissedAgendaItems.has(String(item.kind) + ":" + String(item.source_id))
+            );
+            list.replaceChildren();
+            if (!visible.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = agenda.length
+                    ? "Aucune piste affichée. Les pistes écartées restent dans l'historique et peuvent réapparaître au prochain rechargement."
+                    : "Aucune piste prioritaire pour le moment. Chappie n'a rien à proposer à partir des données disponibles.";
+                list.appendChild(empty);
+            }
+            visible.forEach(item => {
+                const card = document.createElement("article");
+                card.className = "agenda-card priority-" + (["high", "medium", "low"].includes(item.priority) ? item.priority : "low");
+                const meta = document.createElement("div");
+                meta.className = "agenda-meta";
+                const type = document.createElement("span");
+                type.className = "badge";
+                type.textContent = item.kind === "review_hypothesis" ? "Hypothèse à réexaminer" : "Observation à comprendre";
+                const priority = document.createElement("span");
+                priority.className = "badge";
+                priority.textContent = "Priorité " + (item.priority === "high" ? "haute" : item.priority === "medium" ? "moyenne" : "basse");
+                meta.append(type, priority);
+                const title = document.createElement("h4");
+                title.textContent = item.topic || "Sujet non précisé";
+                const reason = document.createElement("p");
+                reason.textContent = item.reason || "Piste proposée à partir de l'historique.";
+                const next = document.createElement("p");
+                next.style.marginTop = "7px";
+                next.textContent = "Prochaine étape possible : " + (item.suggested_next_step || "En discuter avec le superviseur.");
+                const actions = document.createElement("div");
+                actions.className = "agenda-actions";
+                const prepare = document.createElement("button");
+                prepare.type = "button";
+                prepare.textContent = item.kind === "review_hypothesis" ? "Préparer une simulation" : "Examiner l'observation";
+                prepare.addEventListener("click", () => {
+                    if (item.kind === "review_hypothesis") {
+                        const hypothesisId = document.getElementById("causalHypothesisId");
+                        const environment = document.getElementById("causalEnvironment");
+                        const procedure = document.getElementById("causalProcedure");
+                        if (hypothesisId) hypothesisId.value = String(item.source_id);
+                        if (environment) environment.value = "simulation";
+                        if (procedure && !procedure.value.trim()) procedure.value = "Proposer une simulation simple qui pourrait aussi bien contredire que soutenir l'hypothèse. À vérifier et compléter par le superviseur.";
+                        const target = procedure || document.getElementById("causalExperimentPrediction");
+                        if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); target.focus(); }
+                        if (status) status.textContent = "Piste sélectionnée. Complète le protocole et la prédiction, puis coche toi-même la confirmation avant tout enregistrement.";
+                    } else {
+                        const observationId = document.getElementById("causalObservationId");
+                        const hypothesis = document.getElementById("causalHypothesis");
+                        if (observationId) observationId.value = String(item.source_id);
+                        const target = hypothesis || observationId;
+                        if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); target.focus(); }
+                        if (status) status.textContent = "Observation sélectionnée. Formule toi-même une hypothèse ; aucune hypothèse ni expérience n'a été créée.";
+                    }
+                });
+                const dismiss = document.createElement("button");
+                dismiss.type = "button";
+                dismiss.className = "secondary";
+                dismiss.textContent = "Écarter cette piste";
+                dismiss.addEventListener("click", () => {
+                    dismissedAgendaItems.add(String(item.kind) + ":" + String(item.source_id));
+                    card.remove();
+                    if (!list.querySelector(".agenda-card")) {
+                        const empty = document.createElement("div");
+                        empty.className = "agenda-empty";
+                        empty.textContent = "Toutes les pistes affichées ont été écartées pour cette session.";
+                        list.appendChild(empty);
+                    }
+                });
+                actions.append(prepare, dismiss);
+                card.append(meta, title, reason, next, actions);
+                list.appendChild(card);
+            });
+            if (status) status.textContent = visible.length + " piste(s) à examiner · lecture seule · aucune expérience créée.";
+        } catch (error) {
+            if (status) status.textContent = "Impossible de charger les propositions : " + error.message;
+            list.replaceChildren();
+            const message = document.createElement("div");
+            message.className = "agenda-empty";
+            message.textContent = "Le centre d'apprentissage n'a pas pu récupérer les données. Réessaie après vérification de la connexion.";
+            list.appendChild(message);
+        }
+    };
+
+    // V50.13 — provenance-aware knowledge library
+    window.loadAcquiredKnowledge = async function() {
+        const list = document.getElementById("acquiredKnowledgeList");
+        const status = document.getElementById("acquiredKnowledgeStatus");
+        const query = document.getElementById("acquiredKnowledgeQuery")?.value?.trim() || "";
+        if (!list) return;
+        if (status) status.textContent = "Recherche des connaissances et vérification de leur provenance…";
+        try {
+            const params = new URLSearchParams({ query, limit: "12" });
+            const data = await apiCall("/api/learning/knowledge?" + params.toString());
+            const items = Array.isArray(data.items) ? data.items : [];
+            list.replaceChildren();
+            if (!items.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = query
+                    ? "Aucun élément correspondant dans les données actuellement disponibles."
+                    : "Aucun souvenir, épisode ou résultat d'évaluation disponible pour le moment.";
+                list.appendChild(empty);
+            }
+            const labels = {
+                confirmed_memory: "Souvenir confirmé",
+                taught_not_independently_verified: "Enseigné · maîtrise non vérifiée",
+                observed_not_understood: "Observé · compréhension non vérifiée",
+                hypothesis_unverified: "Hypothèse non vérifiée",
+                experience_only_not_proof_of_learning: "Expérience · pas une preuve d'apprentissage",
+                supervised_skill_validated: "Compétence validée sous supervision",
+                supervised_assessment_not_validated: "Évaluation non validée",
+                assessment_provenance_unconfirmed: "Provenance de l'évaluation incertaine"
+            };
+            items.forEach(item => {
+                const card = document.createElement("article");
+                card.className = "agenda-card";
+                const meta = document.createElement("div");
+                meta.className = "agenda-meta";
+                const kind = document.createElement("span");
+                kind.className = "badge";
+                kind.textContent = item.kind === "skill_assessment" ? "Compétence"
+                    : item.kind === "experience" ? "Expérience" : "Souvenir";
+                const state = document.createElement("span");
+                state.className = "badge";
+                state.textContent = labels[item.status] || "Statut inconnu";
+                meta.append(kind, state);
+                const title = document.createElement("h4");
+                title.textContent = item.skill || item.category || "Élément mémorisé";
+                const content = document.createElement("p");
+                content.textContent = item.content || "Aucun détail disponible.";
+                const source = document.createElement("p");
+                source.className = "muted small";
+                source.textContent = "Source : " + (item.source || "non précisée")
+                    + " · Référence : " + String(item.source_id)
+                    + (item.timestamp ? " · Date : " + item.timestamp : "");
+                card.append(meta, title, content, source);
+                if (item.score !== undefined) {
+                    const score = document.createElement("p");
+                    score.className = "muted small";
+                    score.textContent = "Évaluation : " + Number(item.score).toFixed(0) + "/100"
+                        + (item.supervisor_approved ? " · supervision approuvée" : " · supervision non confirmée");
+                    card.appendChild(score);
+                }
+                list.appendChild(card);
+            });
+            if (status) status.textContent = items.length + " élément(s) affiché(s) · " +
+                String(data.candidate_count || 0) + " candidat(s) retrouvé(s) · lecture seule.";
+        } catch (error) {
+            if (status) status.textContent = "Impossible de charger la bibliothèque : " + error.message;
+            list.replaceChildren();
+            const message = document.createElement("div");
+            message.className = "agenda-empty";
+            message.textContent = "La bibliothèque n'a pas pu récupérer les données. Réessaie après vérification de la connexion.";
+            list.appendChild(message);
+        }
+    };
+
+    // V50.10 — supervised personal learning goals
+    window.loadPersonalLearningGoals = async function() {
+        const proposalsList = document.getElementById("personalGoalProposals");
+        const goalsList = document.getElementById("personalGoalsList");
+        const status = document.getElementById("personalGoalsStatus");
+        if (!proposalsList || !goalsList) return;
+        if (status) status.textContent = "Lecture des objectifs et propositions…";
+        try {
+            if (!skillCatalogCache.length) await window.loadSkillCatalog();
+            const data = await apiCall("/api/learning/goals");
+            const proposals = data.suggestions?.proposals || [];
+            const goals = data.persisted?.goals || [];
+            proposalsList.replaceChildren();
+            goalsList.replaceChildren();
+
+            if (!proposals.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = "Aucune nouvelle proposition. Les objectifs actifs existants restent suivis ci-dessous.";
+                proposalsList.appendChild(empty);
+            }
+            proposals.forEach(proposal => {
+                const card = document.createElement("article");
+                card.className = "agenda-card";
+                const title = document.createElement("h4");
+                title.textContent = proposal.title;
+                const reason = document.createElement("p");
+                reason.textContent = proposal.reason || "Proposition issue de l'historique d'apprentissage.";
+                const criterion = document.createElement("p");
+                criterion.textContent = "Critère de réussite : " + proposal.criterion;
+                const steps = document.createElement("ol");
+                (proposal.steps || []).forEach(description => {
+                    const li = document.createElement("li");
+                    li.textContent = description;
+                    steps.appendChild(li);
+                });
+                const adopt = document.createElement("button");
+                adopt.type = "button";
+                adopt.textContent = "Adopter cet objectif";
+                adopt.addEventListener("click", async () => {
+                    adopt.disabled = true;
+                    try {
+                        await apiCall("/api/goals", {
+                            method: "POST",
+                            body: { title: proposal.title, steps: proposal.steps }
+                        });
+                        if (status) status.textContent = "Objectif adopté et enregistré. Il pourra progresser avec des preuves.";
+                        await window.loadPersonalLearningGoals();
+                    } catch (error) {
+                        adopt.disabled = false;
+                        if (status) status.textContent = "Objectif non enregistré : " + error.message;
+                    }
+                });
+                card.append(title, reason, criterion, steps, adopt);
+                proposalsList.appendChild(card);
+            });
+
+            if (!goals.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = "Aucun objectif adopté pour le moment.";
+                goalsList.appendChild(empty);
+            }
+            goals.forEach(goal => {
+                const card = document.createElement("article");
+                card.className = "agenda-card";
+                const title = document.createElement("h4");
+                title.textContent = goal.title;
+                const progress = document.createElement("p");
+                progress.textContent = "Progression : " + Math.round(goal.progress || 0) + " % · " + goal.status;
+                card.append(title, progress);
+                (goal.steps || []).forEach(step => {
+                    const row = document.createElement("div");
+                    row.className = "goal-step-row";
+                    const label = document.createElement("p");
+                    label.textContent = (step.status === "completed" ? "✓ " : "○ ") + step.description;
+                    const evidence = document.createElement("textarea");
+                    evidence.rows = 2;
+                    evidence.maxLength = 2000;
+                    evidence.placeholder = "Décris une preuve réelle pour cette étape…";
+                    evidence.value = step.evidence || "";
+                    const save = document.createElement("button");
+                    save.type = "button";
+                    save.className = "secondary";
+                    save.textContent = step.status === "completed" ? "Actualiser la preuve" : "Enregistrer la preuve";
+                    save.addEventListener("click", async () => {
+                        if (!evidence.value.trim()) {
+                            if (status) status.textContent = "Ajoute une preuve avant de valider l'étape.";
+                            evidence.focus();
+                            return;
+                        }
+                        save.disabled = true;
+                        try {
+                            await apiCall("/api/learning/goals/steps", {
+                                method: "POST",
+                                body: {
+                                    goal_id: goal.id,
+                                    step_id: step.id,
+                                    evidence: evidence.value.trim(),
+                                    completed: true
+                                }
+                            });
+                            if (status) status.textContent = "Preuve enregistrée. Progression recalculée à partir des étapes documentées.";
+                            await window.loadPersonalLearningGoals();
+                        } catch (error) {
+                            save.disabled = false;
+                            if (status) status.textContent = "Preuve non enregistrée : " + error.message;
+                        }
+                    });
+                    row.append(label, evidence, save);
+                    card.appendChild(row);
+                });
+
+                const linkedAssessments = goal.skill_assessments || [];
+                if (linkedAssessments.length) {
+                    const linkedTitle = document.createElement("h5");
+                    linkedTitle.textContent = "Évaluations de compétences reliées";
+                    card.appendChild(linkedTitle);
+                    linkedAssessments.forEach(assessment => {
+                        const line = document.createElement("p");
+                        const [systemKey, branchKey] = assessment.test_name.split(":");
+                        const system = skillCatalogCache.find(item => item.key === systemKey);
+                        const branch = system?.branches?.find(item => item.key === branchKey);
+                        line.textContent = (system?.name || systemKey) + " · " +
+                            (branch?.name || branchKey) + " · " + assessment.score + "/100 · " +
+                            (assessment.passed ? "évaluation réussie" : "évaluation non réussie");
+                        card.appendChild(line);
+                    });
+                }
+
+                const completedSteps = (goal.steps || []).filter(step =>
+                    step.status === "completed" && String(step.evidence || "").trim()
+                );
+                if (completedSteps.length) {
+                    const assessmentPanel = document.createElement("div");
+                    assessmentPanel.className = "goal-skill-assessment";
+                    const heading = document.createElement("h5");
+                    heading.textContent = "Relier une compétence à cet objectif";
+                    const note = document.createElement("p");
+                    note.className = "muted";
+                    note.textContent = "Choisis une étape déjà prouvée, puis réalise une évaluation distincte. Seule une évaluation supervisée réussie fera progresser l'arbre.";
+                    const stepSelect = document.createElement("select");
+                    completedSteps.forEach(step => {
+                        const option = document.createElement("option");
+                        option.value = String(step.id);
+                        option.textContent = step.description;
+                        stepSelect.appendChild(option);
+                    });
+                    const branchSelect = document.createElement("select");
+                    skillCatalogCache.forEach(system => {
+                        const group = document.createElement("optgroup");
+                        group.label = system.name;
+                        (system.branches || []).forEach(branch => {
+                            const option = document.createElement("option");
+                            option.value = system.key + ":" + branch.key;
+                            option.textContent = branch.name;
+                            group.appendChild(option);
+                        });
+                        branchSelect.appendChild(group);
+                    });
+                    const scoreLabel = document.createElement("label");
+                    scoreLabel.textContent = "Score observé (0 à 100)";
+                    const scoreInput = document.createElement("input");
+                    scoreInput.type = "number";
+                    scoreInput.min = "0";
+                    scoreInput.max = "100";
+                    scoreInput.value = "75";
+                    const evidenceLabel = document.createElement("label");
+                    evidenceLabel.textContent = "Preuve de l'évaluation (20 à 2000 caractères)";
+                    const assessmentEvidence = document.createElement("textarea");
+                    assessmentEvidence.rows = 3;
+                    assessmentEvidence.maxLength = 2000;
+                    assessmentEvidence.placeholder = "Décris l'exercice supplémentaire, la réponse de Chappie et comment tu as vérifié le résultat.";
+                    const approvalLabel = document.createElement("label");
+                    approvalLabel.className = "inline-check";
+                    const approval = document.createElement("input");
+                    approval.type = "checkbox";
+                    const approvalText = document.createElement("span");
+                    approvalText.textContent = "Je confirme avoir personnellement supervisé et vérifié cette évaluation.";
+                    approvalLabel.append(approval, approvalText);
+                    const assess = document.createElement("button");
+                    assess.type = "button";
+                    assess.textContent = "Valider l'évaluation de compétence";
+                    assess.addEventListener("click", async () => {
+                        const proof = assessmentEvidence.value.trim();
+                        const score = Number(scoreInput.value);
+                        if (!approval.checked) {
+                            if (status) status.textContent = "Coche la validation du superviseur après avoir vérifié l'exercice.";
+                            return;
+                        }
+                        if (proof.length < 20 || proof.length > 2000 || !Number.isFinite(score) || score < 0 || score > 100) {
+                            if (status) status.textContent = "Vérifie le score et saisis une preuve de 20 à 2000 caractères.";
+                            return;
+                        }
+                        const [system, branch] = branchSelect.value.split(":");
+                        assess.disabled = true;
+                        try {
+                            const result = await apiCall("/api/cognition/skills/assessments", {
+                                method: "POST",
+                                body: {
+                                    system, branch, score, evidence: proof,
+                                    supervisor_approved: true,
+                                    goal_id: goal.id,
+                                    goal_step_id: Number(stepSelect.value)
+                                }
+                            });
+                            if (status) status.textContent = result.assessment?.passed
+                                ? "Évaluation liée et réussie. L'arbre des compétences a été recalculé."
+                                : "Évaluation liée mais non réussie : aucun niveau supplémentaire n'est attribué.";
+                            await window.loadSkills();
+                            await window.loadPersonalLearningGoals();
+                        } catch (error) {
+                            assess.disabled = false;
+                            if (status) status.textContent = "Évaluation refusée : " + error.message;
+                        }
+                    });
+                    assessmentPanel.append(
+                        heading, note, stepSelect, branchSelect,
+                        scoreLabel, scoreInput, evidenceLabel, assessmentEvidence,
+                        approvalLabel, assess
+                    );
+                    card.appendChild(assessmentPanel);
+                } else {
+                    const note = document.createElement("p");
+                    note.className = "muted";
+                    note.textContent = "Une étape doit d'abord être validée avec une preuve avant de pouvoir relier une évaluation de compétence.";
+                    card.appendChild(note);
+                }
+                goalsList.appendChild(card);
+            });
+            if (status) status.textContent = proposals.length + " proposition(s) · " + goals.length + " objectif(s) persisté(s). Aucune proposition n'a été adoptée automatiquement.";
+        } catch (error) {
+            if (status) status.textContent = "Impossible de charger les objectifs : " + error.message;
+        }
+    };
+
     // V34 — causal learning controls
     window.createCausalObservation = async function() {
         const value = id => document.getElementById(id)?.value?.trim() || "";
@@ -996,6 +1402,9 @@ document.addEventListener("DOMContentLoaded", () => {
         window.fetchPsychology();
         window.loadWorldMap();
         window.loadCausalLearning();
+        window.loadSupervisedAgenda();
+        window.loadPersonalLearningGoals();
+        window.loadAcquiredKnowledge();
         window.loadSkills();
     }
 });

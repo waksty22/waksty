@@ -56,3 +56,56 @@ def test_memory_migration_is_idempotent_and_preserves_legacy_data():
     assert db.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 1
     assert db.execute("SELECT access_count FROM memories_v19").fetchone()[0] == 7
     db.close()
+
+def test_retrieval_matches_multiple_query_terms_and_ranks_relevance_first():
+    from memory.episodic_memory import save_episodic_memory, search_episodic_memories
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    save_episodic_memory(
+        db, "creator", "La maison bleue près du port",
+        category="famille", importance=2, tags=["Bretagne"],
+    )
+    save_episodic_memory(
+        db, "creator", "Le port de pêche",
+        category="lieu", importance=5, tags=["bateau"],
+    )
+    db.commit()
+
+    results = search_episodic_memories(db, "creator", "maison port", limit=5)
+    assert [item["content"] for item in results] == [
+        "La maison bleue près du port",
+        "Le port de pêche",
+    ]
+    assert results[0]["relevance_score"] > results[1]["relevance_score"]
+    assert db.execute(
+        "SELECT access_count FROM memories_v19 WHERE content=?",
+        ("La maison bleue près du port",),
+    ).fetchone()[0] == 1
+    db.close()
+
+
+def test_retrieval_is_accent_insensitive_and_keeps_user_isolation():
+    from memory.episodic_memory import save_episodic_memory, search_episodic_memories
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    save_episodic_memory(
+        db, "creator", "Le café préféré est près de la gare",
+        category="préférence", importance=3,
+    )
+    save_episodic_memory(
+        db, "another-user", "Le cafe préféré est près de la gare",
+        category="préférence", importance=5,
+    )
+    db.commit()
+
+    results = search_episodic_memories(db, "creator", "cafe gare", limit=5)
+    assert len(results) == 1
+    assert results[0]["user_id"] == "creator"
+    assert results[0]["content"] == "Le café préféré est près de la gare"
+    assert search_episodic_memories(db, "creator", "inexistant", limit=5) == []
+    db.close()
+

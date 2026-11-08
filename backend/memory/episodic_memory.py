@@ -19,6 +19,7 @@ import json
 import logging
 import math
 import sqlite3
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -484,7 +485,7 @@ def search_episodic_memories(
         for term in terms:
             pattern = f"%{_escape_like(term)}%"
             predicates.append(
-                "(content LIKE ? ESCAPE '\\\\' COLLATE NOCASE "
+                "(content LIKE ? ESCAPE '\\' COLLATE NOCASE "
                 "OR category LIKE ? ESCAPE '\\\\' COLLATE NOCASE "
                 "OR tags LIKE ? ESCAPE '\\\\' COLLATE NOCASE)"
             )

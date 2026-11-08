@@ -101,7 +101,7 @@ from learning.object_learning import (
 from learning.causal_learning import (
     init_causal_learning_tables, record_observation as record_causal_observation,
     propose_hypothesis, plan_experiment, evaluate_experiment,
-    list_causal_learning,
+    list_causal_learning, review_causal_learning,
 )
 from learning.supervised_learning import (
     init_supervised_learning_tables,
@@ -1957,6 +1957,14 @@ TOOLS = [{
             },
         },
         {
+            "name": "review_causal_learning",
+            "description": "Examiner l'historique des prédictions et des résultats d'expériences de Chappie. Distingue les résultats favorables, contradictoires et non concluants ; conserve les résultats mixtes comme tels. Un bilan n'est jamais une preuve absolue.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {},
+            },
+        },
+        {
             "name": "get_shared_brain_state",
             "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
             "parameters": {
@@ -2028,6 +2036,10 @@ def execute_tool(
                 "relation_is_confirmed": False,
                 "similarity_basis": "shared_meaningful_terms_only",
             }
+
+        if name == "review_causal_learning":
+            with db_connection() as causal_db:
+                return review_causal_learning(causal_db, user_id, limit=50)
 
         if name == "get_shared_brain_state":
             with db_connection() as brain_db:

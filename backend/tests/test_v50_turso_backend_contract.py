@@ -160,7 +160,8 @@ def test_server_startup_and_sqlite_backup_blockers_are_explicit():
     init_source = ast.get_source_segment(source, init_db)
     assert 'PRAGMA journal_mode=WAL' in init_source
     assert "executescript" in init_source
-    assert ".backup(" in source or ".backup(" in source.replace(" ", "")
+    assert "export_encrypted_logical_backup" in source
+    assert "/api/turso/backup" in source
 
 
 def test_turso_driver_probe_does_not_equate_native_connection_with_sqlite3():

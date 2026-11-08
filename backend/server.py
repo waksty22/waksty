@@ -4311,6 +4311,15 @@ async def api_list_causal_learning(auth=Depends(require_auth)):
 
 
 
+@app.get("/api/learning/knowledge")
+async def api_acquired_knowledge(query: str = "", limit: int = 12, auth=Depends(require_auth)):
+    """Read-only, user-scoped view of memories, experiences and skill assessments."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        result = retrieve_acquired_knowledge(db, user_id, query=query, limit=limit)
+    return result
+
+
 @app.get("/api/learning/supervised-agenda")
 async def api_supervised_learning_agenda(auth=Depends(require_auth)):
     """Return this user's learning suggestions without creating any records."""

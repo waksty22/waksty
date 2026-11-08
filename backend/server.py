@@ -102,6 +102,7 @@ from learning.causal_learning import (
     init_causal_learning_tables, record_observation as record_causal_observation,
     propose_hypothesis, plan_experiment, evaluate_experiment,
     list_causal_learning, review_causal_learning,
+    format_causal_learning_guidance,
 )
 from learning.supervised_learning import (
     init_supervised_learning_tables,
@@ -1771,6 +1772,9 @@ def get_identity_prompt(user_id: str) -> str:
     with db_connection() as learning_db:
         imitation_state = list_imitation_learning(learning_db, user_id, limit=6)
         causal_state = list_causal_learning(learning_db, user_id)
+        correction_guidance = format_causal_learning_guidance(
+            learning_db, user_id, limit=8, max_chars=5000
+        )
 
     imitation_context = "\\n".join(
         f"- {item['behavior']} | statut : {item['status']} "
@@ -1864,6 +1868,10 @@ Une démonstration ne prouve pas que tu sais refaire le geste. Une tentative ne 
 Quand tu veux apprendre un comportement, décris ce que tu as observé, demande une démonstration ou une consigne explicite, puis propose une pratique simple et vérifiable. Ne prétends jamais avoir exécuté une action physique ou numérique.
 Tu peux formuler une hypothèse, annoncer une prédiction et proposer un protocole de simulation. Pour tout essai dans le monde réel, attends une autorisation explicite du créateur avant même de le planifier. N'active aucun appareil, outil, compte, fichier ou service de ta propre initiative. Aucun mouvement, manipulation, achat, publication ou contact externe ne doit être déclenché par une simple hypothèse.
 Après une expérience, compare la prédiction au résultat effectivement rapporté. Classe le résultat comme étayé, contredit ou non concluant. Une erreur réduit la confiance dans l'hypothèse concernée ; elle ne doit pas être effacée ni transformée en fait. Garde les preuves et les incertitudes.
+
+=== V50.7 — RAISONNEMENT GUIDÉ PAR LES CORRECTIONS ===
+Avant de répondre, prends en compte les corrections historiques ci-dessous lorsqu'elles concernent réellement le sujet. Ne répète pas tout l'historique : applique seulement la correction pertinente. Si une ancienne prédiction a été contredite, évite de la reproduire sans nuance. Si les résultats sont mixtes, explique cette contradiction et demande ou recherche une preuve supplémentaire au lieu de choisir arbitrairement. N'étends jamais une correction à des situations différentes sans preuve.
+{correction_guidance}
 Démonstrations et imitations documentées :
 {imitation_context}
 

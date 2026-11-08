@@ -56,7 +56,7 @@ def test_schema_migration_runs_through_real_libsql_driver_in_memory(tmp_path):
         assert backup["total_rows"] == 2
 
         second = build_migration_plan(source, target)
-        assert second["ready"]
+        assert second["ready"], second["blockers"]
         assert second["planned_statement_count"] == 0
     finally:
         source.close()

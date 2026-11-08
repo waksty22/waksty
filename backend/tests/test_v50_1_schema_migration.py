@@ -190,7 +190,7 @@ def test_unmatched_table_constraints_block_migration(source_sql, target_sql):
         target.execute(target_sql)
         plan = build_migration_plan(source, target)
         assert not plan["ready"]
-        assert any("contraintes ou définition SQL" in item for item in plan["blockers"])
+        assert any("CHECK" in item or "UNIQUE" in item for item in plan["blockers"])
         with pytest.raises(ValueError):
             apply_migration_plan(target, plan, apply=True)
     finally:

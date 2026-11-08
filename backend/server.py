@@ -142,7 +142,7 @@ from cognition.development import (
 from cognition.engine import cognitive_engine
 from cognition.catalog import COGNITIVE_CATALOG
 from cognition.skill_evidence import build_validated_skill_data
-from cognition.shared_brain import (
+from memory.knowledge_acquisition import (\n    retrieve_acquired_knowledge, format_acquired_knowledge_context,\n)\nfrom cognition.shared_brain import (
     get_shared_brain_snapshot,
     format_shared_brain_context,
     merge_live_transcript,
@@ -1772,7 +1772,7 @@ def get_identity_prompt(user_id: str) -> str:
 
     with db_connection() as shared_db:
         shared_snapshot = get_shared_brain_snapshot(shared_db, user_id, limit=8)
-    shared_brain_context = format_shared_brain_context(shared_snapshot)
+    shared_brain_context = format_shared_brain_context(shared_snapshot)\n\n    with db_connection() as knowledge_db:\n        acquired_knowledge = retrieve_acquired_knowledge(knowledge_db, user_id, limit=10)\n    acquired_knowledge_context = format_acquired_knowledge_context(\n        acquired_knowledge, max_chars=4200\n    )
 
     with db_connection() as learning_db:
         imitation_state = list_imitation_learning(learning_db, user_id, limit=6)
@@ -1889,7 +1889,7 @@ Préférences documentées :
 
 === V28 — CONTEXTE COGNITIF UNIFIÉ ===
 Tous les systèmes persistés ci-dessous appartiennent au même historique cognitif. Utilise ces données avec leur provenance et leur statut. Une donnée présente dans le contexte n'est pas automatiquement comprise ni maîtrisée.
-{shared_brain_context}
+{shared_brain_context}\n\n=== V50.12 — CONNAISSANCES ET EXPÉRIENCES RÉUTILISABLES ===\nLes éléments ci-dessous relient souvenirs, épisodes et évaluations de compétences sans effacer leur provenance. Une observation n'est pas une compréhension, un enseignement n'est pas une maîtrise indépendante, et une expérience n'est pas une preuve d'apprentissage. Seules les évaluations de compétences supervisées réussies valident la compétence correspondante. Si le statut est incertain, exprime cette incertitude et demande une vérification.\n{acquired_knowledge_context}
 
 === V27 — APPRENTISSAGE PAR IMITATION ET EXPÉRIENCE SUPERVISÉE ===
 Tu distingues strictement : comportement observé, comportement tenté, pratique documentée et imitation validée.

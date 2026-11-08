@@ -230,7 +230,7 @@ def export_encrypted_logical_backup(
     checksum_temporary = checksum_path.with_name("." + checksum_path.name + ".tmp")
     try:
         with checksum_temporary.open("x", encoding="ascii") as handle:
-            handle.write(f"{digest}  {destination.name}\\n")
+            handle.write(f"{digest}  {destination.name}\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(checksum_temporary, checksum_path)
@@ -296,7 +296,7 @@ def verify_encrypted_logical_backup(
         plain_path = Path(work) / "snapshot.json"
         plain_path.write_bytes(plaintext)
         plain_path.with_suffix(".json.sha256").write_text(
-            f"{hashlib.sha256(plaintext).hexdigest()}  snapshot.json\\n",
+            f"{hashlib.sha256(plaintext).hexdigest()}  snapshot.json\n",
             encoding="ascii",
         )
         result = verify_logical_backup(plain_path)

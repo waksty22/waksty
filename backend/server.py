@@ -139,6 +139,7 @@ from cognition.development import (
     list_preferences,
     development_statistics,
 )
+from cognition.event_receipts import claim_cognitive_event
 from cognition.engine import cognitive_engine
 from cognition.catalog import COGNITIVE_CATALOG
 from cognition.skill_evidence import build_validated_skill_data
@@ -1128,6 +1129,7 @@ def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
 def update_emotions_once(
     user_id: str,
     message: str,
+    event_id: Optional[str] = None,
 ) -> dict[str, float]:
 
     em = get_emotions(user_id)  
@@ -1263,9 +1265,15 @@ def update_emotions_once(
 
     now = utc_now()  
 
-    with db_connection() as db:  
-        db.execute(  
-            """  
+    with db_connection() as db:
+        if event_id and not claim_cognitive_event(
+            db, user_id, event_id, "emotion_state_update"
+        ):
+            db.rollback()
+            return get_emotions(user_id)
+
+        db.execute(
+            """
             UPDATE emotional_state  
             SET joy=?, fear=?, curiosity=?, frustration=?,  
                 sadness=?, energy=?, updated_at=?  
@@ -2299,12 +2307,16 @@ async def run_brain(
             f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).",  
         )  
 
-    emotion_state = update_emotions_once(user_id, message)
+    cognitive_event_id = str(turn_id or secrets.token_urlsafe(24))
+    emotion_state = update_emotions_once(
+        user_id, message, event_id=cognitive_event_id
+    )
     try:
         with db_connection() as affect_db:
             record_affective_snapshot(
                 affect_db, user_id, emotion_state,
                 source="classic_chat", event_label="message utilisateur",
+                event_id=cognitive_event_id,
             )
             affect_db.commit()
     except Exception:
@@ -2316,6 +2328,7 @@ async def run_brain(
             taught = record_explicit_word_teaching(
                 teaching_db, user_id, message,
                 evidence="Enseignement explicite via le chat classique",
+                event_id=cognitive_event_id,
             )
             if taught:
                 teaching_db.commit()
@@ -4750,29 +4763,6 @@ async def websocket_endpoint(
                             live_turn_state["user"] = merge_live_transcript(
                                 live_turn_state["user"], heard_text
                             )
-                            try:
-                                with db_connection() as sensory_db:
-                                    live_emotions = update_emotions_once(user_id, heard_text)
-                                    record_affective_snapshot(
-                                        sensory_db, user_id, live_emotions,
-                                        source="gemini_live", event_label="transcription utilisateur",
-                                    )
-                                    record_heard_text(
-                                        sensory_db, user_id, heard_text,
-                                        evidence="Transcription confirmée par Gemini Live",
-                                    )
-                                    audio_observation = record_observation(
-                                        sensory_db, user_id, "audio", heard_text,
-                                        "gemini_live_transcription",
-                                        confidence=0.8,
-                                        metadata={"language": "fr"},
-                                    )
-                                    link_temporally_cooccurring_observation(
-                                        sensory_db, user_id, audio_observation["observation_id"]
-                                    )
-                                    sensory_db.commit()
-                            except Exception:
-                                log.exception("[GEMINI LIVE] Échec mémorisation transcription")
                             await websocket.send_json({"type": "user_text", "text": heard_text})
 
                     output_transcription = server_content.get("outputTranscription") or {}
@@ -4830,16 +4820,49 @@ async def websocket_endpoint(
 
                         if live_turn_state["user"] or assistant_text:
                             try:
-                                with db_connection() as teaching_db:
-                                    taught = record_explicit_word_teaching(
-                                        teaching_db, user_id, live_turn_state["user"],
-                                        evidence="Enseignement explicite via Gemini Live",
+                                completed_user_text = live_turn_state["user"].strip()
+                                if completed_user_text:
+                                    live_emotions = update_emotions_once(
+                                        user_id, completed_user_text,
+                                        event_id=live_turn_state["turn_id"],
                                     )
-                                    if taught:
-                                        teaching_db.commit()
-                                        log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live", len(taught))
+                                    with db_connection() as cognitive_db:
+                                        record_affective_snapshot(
+                                            cognitive_db, user_id, live_emotions,
+                                            source="gemini_live",
+                                            event_label="tour utilisateur terminé",
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        record_heard_text(
+                                            cognitive_db, user_id, completed_user_text,
+                                            evidence="Transcription confirmée par Gemini Live",
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        audio_observation = record_observation(
+                                            cognitive_db, user_id, "audio",
+                                            completed_user_text,
+                                            "gemini_live_transcription",
+                                            confidence=0.8,
+                                            metadata={"language": "fr"},
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        link_temporally_cooccurring_observation(
+                                            cognitive_db, user_id,
+                                            audio_observation["observation_id"],
+                                        )
+                                        taught = record_explicit_word_teaching(
+                                            cognitive_db, user_id, completed_user_text,
+                                            evidence="Enseignement explicite via Gemini Live",
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        cognitive_db.commit()
+                                        if taught:
+                                            log.info(
+                                                "[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live",
+                                                len(taught),
+                                            )
                             except Exception:
-                                log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")
+                                log.exception("[GEMINI LIVE] Échec mémorisation cognitive du tour terminé")
                             try:
                                 save_conversation_turn(
                                     user_id,

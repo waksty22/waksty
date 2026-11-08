@@ -47,6 +47,11 @@ def seed(db, user="creator"):
             'confirmed', 0.95, 4, '2026-11-02', '2026-11-02')""", (user,)
     )
     db.execute(
+        """INSERT INTO memories_v19 VALUES
+           (4, ?, 'objets', 'Une montre a été observée dans une image',
+            'observed', 0.6, 2, '2026-11-02', '2026-11-02')""", (user,)
+    )
+    db.execute(
         """INSERT INTO autobiographical_events VALUES
            (1, ?, 'user', 'user_statement',
             'Le Créateur a montré une montre à Chappie',
@@ -55,7 +60,7 @@ def seed(db, user="creator"):
     details = {
         "source": "supervised_assessment",
         "supervisor_approved": True,
-        "evidence": "A distingué correctement trois montres nouvelles.",
+        "evidence": "A distingué correctement trois modèles de montre nouveaux.",
         "goal_id": 8,
         "goal_step_id": 11,
     }
@@ -141,8 +146,8 @@ def test_formatted_context_is_bounded_and_keeps_uncertainty_rules():
     db = make_db()
     seed(db)
     result = retrieve_acquired_knowledge(db, "creator", "montre")
-    context = format_acquired_knowledge_context(result, max_chars=1000)
-    assert len(context) <= 1000
+    context = format_acquired_knowledge_context(result, max_chars=2000)
+    assert len(context) <= 2000
     assert "expérience n'est pas une preuve" in context
     assert "observed_not_understood" in context
     db.close()

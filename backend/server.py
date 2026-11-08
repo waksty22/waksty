@@ -1138,7 +1138,18 @@ def update_emotions_once(
     db: Optional[sqlite3.Connection] = None,
 ) -> dict[str, float]:
 
-    em = get_emotions(user_id)
+    if db is None:
+        em = get_emotions(user_id)
+    else:
+        row = db.execute(
+            "SELECT * FROM emotional_state WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(
+                "État émotionnel absent : initialiser le profil avant la transaction."
+            )
+        em = dict(row)
     analyze_user_intent(user_id, message, db=db)  
 
     msg = message.casefold()  
@@ -2500,6 +2511,8 @@ async def run_brain(
         reply, repeatable_words, max_words=1 if maturity < 3.0 else None
     )
 
+    # Ensure the initial state exists before opening the write transaction.
+    get_emotions(user_id)
     with db_connection() as cognitive_db:
         saved = save_conversation_turn(
             user_id,
@@ -4831,6 +4844,9 @@ async def websocket_endpoint(
                         if live_turn_state["user"] or assistant_text:
                             completed_user_text = live_turn_state["user"].strip()
                             try:
+                                if completed_user_text:
+                                    # Initialize/read defaults before the transaction acquires its write lock.
+                                    get_emotions(user_id)
                                 with db_connection() as cognitive_db:
                                     saved = save_conversation_turn(
                                         user_id,

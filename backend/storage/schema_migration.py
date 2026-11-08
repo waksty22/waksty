@@ -82,10 +82,12 @@ def _normalized_sql(value: Any) -> str:
 
 
 def _table_definition_signature(sql: Any, omit_columns: set[str] | None = None) -> str | None:
-    """Canonicalize CREATE TABLE SQL, optionally omitting approved columns.
+    """Compare table constraints and per-column SQL independently of column order.
 
-    This catches CHECK, UNIQUE, COLLATE and other constraints not exposed by
-    PRAGMA table_info. Unsupported definitions return None and are blocked.
+    SQLite appends ALTER TABLE columns to sqlite_master SQL. Comparing ordered
+    CREATE TABLE text would therefore reject a valid additive migration on its
+    second run. This canonical form keys column clauses by name and sorts
+    table-level constraints, while still detecting CHECK/UNIQUE/COLLATE drift.
     """
     if not sql:
         return None
@@ -165,7 +167,9 @@ def _table_definition_signature(sql: Any, omit_columns: set[str] | None = None) 
     parts.append(body[start:].strip())
 
     omitted = {name.casefold() for name in (omit_columns or set())}
-    kept: list[str] = []
+    columns: dict[str, str] = {}
+    constraints: list[str] = []
+    table_constraint_words = {"constraint", "check", "unique", "primary", "foreign"}
     for part in parts:
         token = part.lstrip()
         if not token:
@@ -179,14 +183,24 @@ def _table_definition_signature(sql: Any, omit_columns: set[str] | None = None) 
             identifier = first[1:-1].replace("]]", "]")
         else:
             identifier = first
-        if identifier.casefold() in omitted:
-            continue
-        kept.append(_normalized_sql(part))
+        normalized = _normalized_sql(part)
+        if identifier.casefold() in table_constraint_words:
+            constraints.append(normalized)
+        else:
+            key = identifier.casefold()
+            if key in omitted:
+                continue
+            if key in columns:
+                return None
+            columns[key] = normalized
 
     prefix = _normalized_sql(text[:open_at])
-    if not prefix or not kept:
+    if not prefix:
         return None
-    return prefix + " (" + ", ".join(kept) + ")"
+    column_signature = [f"column:{name}:{value}" for name, value in sorted(columns.items())]
+    constraint_signature = [f"constraint:{value}" for value in sorted(constraints)]
+    return prefix + "|" + "|".join(column_signature + constraint_signature)
+
 
 
 def build_migration_plan(

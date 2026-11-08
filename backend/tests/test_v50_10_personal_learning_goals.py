@@ -11,6 +11,8 @@ from learning.causal_learning import (
     init_causal_learning_tables, record_observation, propose_hypothesis,
     plan_experiment, evaluate_experiment,
 )
+SERVER = (BACKEND / "server.py").read_text(encoding="utf-8")
+
 from learning.personal_goals import (
     suggest_personal_learning_goals, list_personal_learning_goals,
     record_personal_goal_step,
@@ -89,7 +91,7 @@ def test_goal_progress_requires_evidence_and_is_user_scoped():
     db = make_db()
     db.execute("INSERT INTO goals(user_id,title) VALUES('alice','Objectif')")
     goal_id = db.execute("SELECT id FROM goals").fetchone()["id"]
-    db.execute("INSERT INTO goal_steps(goal_id,description) VALUES(?, 'Étape')")
+    db.execute("INSERT INTO goal_steps(goal_id,description) VALUES(?, 'Étape')", (goal_id,))
     step_id = db.execute("SELECT id FROM goal_steps").fetchone()["id"]
     db.commit()
     try:
@@ -120,3 +122,25 @@ def test_goal_listing_includes_steps_and_never_writes():
     assert result["goals"][0]["steps"][0]["description"] == "Étape mesurable"
     assert result["read_only"] is True
     db.close()
+
+
+
+def test_shared_brain_tools_and_authenticated_api_are_connected():
+    assert '"name": "suggest_personal_learning_goals"' in SERVER
+    assert '"name": "review_personal_learning_goals"' in SERVER
+    assert 'if name == "suggest_personal_learning_goals"' in SERVER
+    assert '@app.get("/api/learning/goals")' in SERVER
+    assert '@app.post("/api/learning/goals/steps")' in SERVER
+    assert "result = create_goal(" in SERVER
+    assert "result = await create_goal(" not in SERVER
+
+
+def test_dashboard_requires_click_to_adopt_and_evidence_to_progress():
+    html = (BACKEND / "static" / "index.html").read_text(encoding="utf-8")
+    app = (BACKEND / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    assert 'id="personalGoalProposals"' in html
+    assert 'id="personalGoalsList"' in html
+    assert 'textContent = "Adopter cet objectif"' in app
+    assert 'apiCall("/api/goals"' in app
+    assert 'apiCall("/api/learning/goals/steps"' in app
+    assert 'evidence: evidence.value.trim()' in app

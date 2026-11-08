@@ -102,6 +102,9 @@ def test_save_conversation_turn_enqueues_in_the_callers_transaction(tmp_path, mo
 
     monkeypatch.setattr(server, "db_connection", connect)
     monkeypatch.setattr(server, "valid_user", lambda value: value)
+    # Production initializes the additive outbox schema during application startup.
+    with connect() as db:
+        init_conversation_finalization_outbox(db)
     monkeypatch.setattr(
         server, "finalize_conversation_turn",
         lambda _user: (_ for _ in ()).throw(AssertionError("must run after caller commit")),

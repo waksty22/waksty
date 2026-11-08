@@ -110,7 +110,7 @@ def test_context_budget_never_cuts_json_records_and_reports_omissions():
     assert "Les données omises restent en base" in context
 
     match = re.search(
-        r"ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS:\\n(\\[.*?\\])",
+        r"ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS:\n(\\[.*?\\])",
         context,
         flags=re.S,
     )
@@ -128,7 +128,7 @@ def test_context_keeps_statistics_and_all_records_when_under_budget():
     }
     context = format_shared_brain_context(snapshot)
     match = re.search(
-        r"VOCABULAIRE PERSONNEL — état d'acquisition:\\n(\\[.*?\\])",
+        r"VOCABULAIRE PERSONNEL — état d'acquisition:\n(\\[.*?\\])",
         context,
         flags=re.S,
     )

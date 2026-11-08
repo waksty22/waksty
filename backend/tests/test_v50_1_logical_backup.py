@@ -67,3 +67,23 @@ def test_verifier_detects_tampering(tmp_path):
         assert result["reason"] == "checksum_mismatch"
     finally:
         db.close()
+
+
+def test_encrypted_export_never_leaves_plaintext_artifact(tmp_path):
+    from storage.logical_backup import (
+        export_encrypted_logical_backup,
+        verify_encrypted_logical_backup,
+    )
+    db = _database()
+    target = tmp_path / "private-turso-backup.enc"
+    password = "local-test-password-never-production"
+    try:
+        result = export_encrypted_logical_backup(db, target, password)
+        assert result["encrypted"] is True
+        assert result["verified"] is True
+        assert target.read_bytes().startswith(b"CHAPPIE-LOGICAL-V1")
+        assert not (tmp_path / "snapshot.json").exists()
+        assert verify_encrypted_logical_backup(target, password)["valid"] is True
+        assert verify_encrypted_logical_backup(target, "wrong-password")["valid"] is False
+    finally:
+        db.close()

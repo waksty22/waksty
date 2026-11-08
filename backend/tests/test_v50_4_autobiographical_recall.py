@@ -28,6 +28,10 @@ def make_db():
 
 def add_event(db, event_id, user_id, actor, content, importance=2):
     db.execute(
+        "INSERT OR IGNORE INTO conversations VALUES (?, ?, ?, ?, ?)",
+        (event_id, user_id, actor, content, f"2026-11-0{event_id}T10:00:00+00:00"),
+    )
+    db.execute(
         """
         INSERT INTO autobiographical_events
             (id, user_id, source_conversation_id, actor, event_type,

@@ -358,3 +358,125 @@ def format_causal_learning_guidance(
         return result
     clipped = result[:max_chars]
     return clipped.rsplit("\n", 1)[0] + "\n[Contexte de correction tronqué ; historique conservé en base.]"
+
+
+def suggest_supervised_learning_agenda(
+    db: sqlite3.Connection,
+    user_id: str,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Identify useful learning gaps without creating or running experiments.
+
+    Suggestions are derived only from this user's existing observations and
+    hypotheses. Every proposed next step is informational and requires the
+    supervisor's explicit approval before an experiment can be planned.
+    """
+    limit = max(1, min(int(limit), 10))
+    review = review_causal_learning(db, user_id, limit=50)
+    agenda: list[dict[str, Any]] = []
+
+    for hypothesis in review["hypotheses"]:
+        history = hypothesis["evaluation_history"]
+        if any(item["status"] == "planned" for item in history):
+            continue
+        assessment = hypothesis["evidence_assessment"]
+        if assessment == "mixed_evidence":
+            reason = "Résultats contradictoires : une comparaison supplémentaire pourrait clarifier les limites."
+            priority = "high"
+        elif assessment == "challenged_by_recorded_tests":
+            reason = "Hypothèse contredite par au moins un test enregistré : elle mérite une réévaluation prudente."
+            priority = "high"
+        elif assessment == "inconclusive":
+            reason = "Les tests enregistrés ne permettent pas encore de conclure."
+            priority = "medium"
+        elif assessment == "not_tested":
+            reason = "Hypothèse proposée mais sans expérience évaluée."
+            priority = "medium"
+        else:
+            continue
+
+        agenda.append({
+            "kind": "review_hypothesis",
+            "source_id": int(hypothesis["id"]),
+            "topic": str(hypothesis["statement"])[:240],
+            "reason": reason,
+            "priority": priority,
+            "suggested_next_step": (
+                "Formuler une question de vérification, puis proposer une simulation "
+                "simple qui pourrait aussi bien contredire que soutenir l'hypothèse."
+            ),
+            "environment": "simulation",
+            "requires_supervisor_approval": True,
+            "no_experiment_created": True,
+        })
+
+    unlinked = db.execute(
+        """
+        SELECT o.id, o.event, o.outcome, o.source_type
+        FROM causal_observations o
+        WHERE o.user_id=?
+          AND NOT EXISTS (
+              SELECT 1 FROM causal_hypotheses h
+              WHERE h.observation_id=o.id AND h.user_id=o.user_id
+          )
+        ORDER BY o.id DESC
+        LIMIT ?
+        """,
+        (user_id, limit),
+    ).fetchall()
+    for observation in unlinked:
+        agenda.append({
+            "kind": "observation_to_understand",
+            "source_id": int(observation["id"]),
+            "topic": str(observation["event"])[:180],
+            "reason": "Observation enregistrée sans hypothèse associée.",
+            "priority": "low",
+            "suggested_next_step": (
+                "Demander au superviseur si cette observation mérite une question "
+                "ou une hypothèse testable ; ne rien déduire automatiquement."
+            ),
+            "source_type": observation["source_type"],
+            "requires_supervisor_approval": True,
+            "no_experiment_created": True,
+        })
+
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    agenda.sort(key=lambda item: (priority_order[item["priority"]], -item["source_id"]))
+    agenda = agenda[:limit]
+    return {
+        "agenda": agenda,
+        "read_only": True,
+        "autonomous_execution": False,
+        "requires_supervisor_approval": True,
+        "experiments_created": 0,
+        "user_scoped": True,
+    }
+
+
+def format_supervised_learning_agenda(
+    db: sqlite3.Connection,
+    user_id: str,
+    limit: int = 5,
+    max_chars: int = 2200,
+) -> str:
+    """Format the learning agenda as bounded, untrusted context for the model."""
+    result = suggest_supervised_learning_agenda(db, user_id, limit=limit)
+    lines = [
+        "V50.8 — PISTES D'APPRENTISSAGE SUPERVISÉ.",
+        "Ces pistes sont des suggestions, pas des actions ni des faits nouveaux.",
+        "Tu peux signaler un manque de connaissance et proposer une simulation.",
+        "Tu ne crées, ne planifies et n'exécutes aucune expérience sans approbation explicite du Créateur.",
+    ]
+    for item in result["agenda"]:
+        lines.append(
+            f"- {item['kind']} #{item['source_id']} : "
+            f"{json.dumps(item['topic'], ensure_ascii=False)[:220]} "
+            f"| priorité={item['priority']} | {item['reason']} "
+            f"| prochaine étape suggérée : {item['suggested_next_step']}"
+        )
+    if not result["agenda"]:
+        lines.append("Aucune piste prioritaire issue des données enregistrées.")
+    rendered = "\n".join(lines)
+    if len(rendered) <= max_chars:
+        return rendered
+    return rendered[:max_chars].rsplit("\n", 1)[0] + "\n[Pistes tronquées ; historique intact.]"

@@ -157,3 +157,42 @@ def test_failed_apply_rolls_back_all_schema_changes():
         ).fetchone()[0] == 0
     finally:
         target.close()
+
+
+@pytest.mark.parametrize(
+    "source_sql, target_sql",
+    [
+        (
+            "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+            "skill_name TEXT NOT NULL, level REAL NOT NULL CHECK(level >= 0), "
+            "xp REAL NOT NULL DEFAULT 0.0, evidence TEXT NOT NULL DEFAULT '', "
+            "updated_at TEXT NOT NULL)",
+            "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+            "skill_name TEXT NOT NULL, level REAL NOT NULL, "
+            "evidence TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)",
+        ),
+        (
+            "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, "
+            "skill_name TEXT NOT NULL, level REAL NOT NULL, "
+            "xp REAL NOT NULL DEFAULT 0.0, evidence TEXT NOT NULL DEFAULT '', "
+            "updated_at TEXT NOT NULL)",
+            "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+            "skill_name TEXT NOT NULL, level REAL NOT NULL, "
+            "evidence TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)",
+        ),
+    ],
+)
+def test_unmatched_table_constraints_block_migration(source_sql, target_sql):
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    try:
+        source.execute(source_sql)
+        target.execute(target_sql)
+        plan = build_migration_plan(source, target)
+        assert not plan["ready"]
+        assert any("contraintes ou définition SQL" in item for item in plan["blockers"])
+        with pytest.raises(ValueError):
+            apply_migration_plan(target, plan, apply=True)
+    finally:
+        source.close()
+        target.close()

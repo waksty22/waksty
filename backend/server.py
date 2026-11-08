@@ -4204,6 +4204,15 @@ async def api_list_causal_learning(auth=Depends(require_auth)):
         return list_causal_learning(db, user_id)
 
 
+
+@app.get("/api/learning/supervised-agenda")
+async def api_supervised_learning_agenda(auth=Depends(require_auth)):
+    """Return this user's learning suggestions without creating any records."""
+    user_id = _authenticated_user(auth)
+    with db_connection() as db:
+        return suggest_supervised_learning_agenda(db, user_id, limit=5)
+
+
 @app.post("/api/learning/causal/observations")
 async def api_record_causal_observation(
     request: Request, auth=Depends(require_auth)

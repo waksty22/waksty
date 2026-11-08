@@ -700,6 +700,102 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
 
+    // V50.9 — supervised learning center (read-only agenda)
+    const dismissedAgendaItems = new Set();
+
+    window.loadSupervisedAgenda = async function() {
+        const list = document.getElementById("learningAgendaList");
+        const status = document.getElementById("learningAgendaStatus");
+        if (!list) return;
+        if (status) status.textContent = "Lecture des pistes d'apprentissage…";
+        try {
+            const data = await apiCall("/api/learning/supervised-agenda");
+            const agenda = Array.isArray(data.agenda) ? data.agenda : [];
+            const visible = agenda.filter(item =>
+                !dismissedAgendaItems.has(String(item.kind) + ":" + String(item.source_id))
+            );
+            list.replaceChildren();
+            if (!visible.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = agenda.length
+                    ? "Aucune piste affichée. Les pistes écartées restent dans l'historique et peuvent réapparaître au prochain rechargement."
+                    : "Aucune piste prioritaire pour le moment. Chappie n'a rien à proposer à partir des données disponibles.";
+                list.appendChild(empty);
+            }
+            visible.forEach(item => {
+                const card = document.createElement("article");
+                card.className = "agenda-card priority-" + (["high", "medium", "low"].includes(item.priority) ? item.priority : "low");
+                const meta = document.createElement("div");
+                meta.className = "agenda-meta";
+                const type = document.createElement("span");
+                type.className = "badge";
+                type.textContent = item.kind === "review_hypothesis" ? "Hypothèse à réexaminer" : "Observation à comprendre";
+                const priority = document.createElement("span");
+                priority.className = "badge";
+                priority.textContent = "Priorité " + (item.priority === "high" ? "haute" : item.priority === "medium" ? "moyenne" : "basse");
+                meta.append(type, priority);
+                const title = document.createElement("h4");
+                title.textContent = item.topic || "Sujet non précisé";
+                const reason = document.createElement("p");
+                reason.textContent = item.reason || "Piste proposée à partir de l'historique.";
+                const next = document.createElement("p");
+                next.style.marginTop = "7px";
+                next.textContent = "Prochaine étape possible : " + (item.suggested_next_step || "En discuter avec le superviseur.");
+                const actions = document.createElement("div");
+                actions.className = "agenda-actions";
+                const prepare = document.createElement("button");
+                prepare.type = "button";
+                prepare.textContent = item.kind === "review_hypothesis" ? "Préparer une simulation" : "Examiner l'observation";
+                prepare.addEventListener("click", () => {
+                    if (item.kind === "review_hypothesis") {
+                        const hypothesisId = document.getElementById("causalHypothesisId");
+                        const environment = document.getElementById("causalEnvironment");
+                        const procedure = document.getElementById("causalProcedure");
+                        if (hypothesisId) hypothesisId.value = String(item.source_id);
+                        if (environment) environment.value = "simulation";
+                        if (procedure && !procedure.value.trim()) procedure.value = "Proposer une simulation simple qui pourrait aussi bien contredire que soutenir l'hypothèse. À vérifier et compléter par le superviseur.";
+                        const target = procedure || document.getElementById("causalExperimentPrediction");
+                        if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); target.focus(); }
+                        if (status) status.textContent = "Piste sélectionnée. Complète le protocole et la prédiction, puis coche toi-même la confirmation avant tout enregistrement.";
+                    } else {
+                        const observationId = document.getElementById("causalObservationId");
+                        const hypothesis = document.getElementById("causalHypothesis");
+                        if (observationId) observationId.value = String(item.source_id);
+                        const target = hypothesis || observationId;
+                        if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); target.focus(); }
+                        if (status) status.textContent = "Observation sélectionnée. Formule toi-même une hypothèse ; aucune hypothèse ni expérience n'a été créée.";
+                    }
+                });
+                const dismiss = document.createElement("button");
+                dismiss.type = "button";
+                dismiss.className = "secondary";
+                dismiss.textContent = "Écarter cette piste";
+                dismiss.addEventListener("click", () => {
+                    dismissedAgendaItems.add(String(item.kind) + ":" + String(item.source_id));
+                    card.remove();
+                    if (!list.querySelector(".agenda-card")) {
+                        const empty = document.createElement("div");
+                        empty.className = "agenda-empty";
+                        empty.textContent = "Toutes les pistes affichées ont été écartées pour cette session.";
+                        list.appendChild(empty);
+                    }
+                });
+                actions.append(prepare, dismiss);
+                card.append(meta, title, reason, next, actions);
+                list.appendChild(card);
+            });
+            if (status) status.textContent = visible.length + " piste(s) à examiner · lecture seule · aucune expérience créée.";
+        } catch (error) {
+            if (status) status.textContent = "Impossible de charger les propositions : " + error.message;
+            list.replaceChildren();
+            const message = document.createElement("div");
+            message.className = "agenda-empty";
+            message.textContent = "Le centre d'apprentissage n'a pas pu récupérer les données. Réessaie après vérification de la connexion.";
+            list.appendChild(message);
+        }
+    };
+
     // V34 — causal learning controls
     window.createCausalObservation = async function() {
         const value = id => document.getElementById(id)?.value?.trim() || "";
@@ -996,6 +1092,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.fetchPsychology();
         window.loadWorldMap();
         window.loadCausalLearning();
+        window.loadSupervisedAgenda();
         window.loadSkills();
     }
 });

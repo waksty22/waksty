@@ -24,7 +24,7 @@
   <h1>Sauvegarde de la mémoire Turso</h1>
   <section class="panel">
     <p>Cette opération crée une sauvegarde logique chiffrée des tables, de leur structure et de leurs enregistrements. Elle est vérifiée avant téléchargement et ne modifie ni ne supprime aucune donnée dans Turso.</p>
-    <p class="warning">Le fichier contient des conversations, souvenirs et autres données personnelles de Chappie. Il est chiffré en AES-256-GCM avec BACKUP_ENCRYPTION_KEY configurée sur Render. Conserve-le dans un endroit privé. Le checksum SHA-256 est affiché après le téléchargement.</p>
+    <p class="warning">L’archive contient le fichier chiffré AES-256-GCM et son fichier compagnon SHA-256 pour permettre une vérification hors ligne. Les données de Chappie restent chiffrées avec BACKUP_ENCRYPTION_KEY configurée sur Render. Conserve cette archive dans un endroit privé.</p>
     <label for="apiToken">Jeton API Chappie</label>
     <input id="apiToken" type="password" autocomplete="off" placeholder="Saisis ton CHAPPIE_API_TOKEN">
     <button id="backupButton" type="button">Télécharger la sauvegarde complète</button>
@@ -59,7 +59,7 @@
         const blob = await response.blob();
         const disposition = response.headers.get("Content-Disposition") || "";
         const match = disposition.match(/filename="([^"]+)"/);
-        const filename = match ? match[1] : "chappie-turso-backup.json.enc";
+        const filename = match ? match[1] : "chappie-turso-backup.zip";
         const objectUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = objectUrl;
@@ -69,7 +69,7 @@
         link.remove();
         URL.revokeObjectURL(objectUrl);
         const sizeMb = (blob.size / 1024 / 1024).toFixed(2);
-        statusBox.textContent = "Sauvegarde chiffrée et vérifiée : " + filename + " (" + sizeMb + " Mo). SHA-256 : " + (response.headers.get("X-Backup-SHA256") || "indisponible") + ". Tables : " + (response.headers.get("X-Backup-Table-Count") || "?") + ", lignes : " + (response.headers.get("X-Backup-Row-Count") || "?") + ". Vérifie qu'elle apparaît bien dans les téléchargements.";
+        statusBox.textContent = "Archive de sauvegarde chiffrée et vérifiée : " + filename + " (" + sizeMb + " Mo). SHA-256 : " + (response.headers.get("X-Backup-SHA256") || "indisponible") + ". Tables : " + (response.headers.get("X-Backup-Table-Count") || "?") + ", lignes : " + (response.headers.get("X-Backup-Row-Count") || "?") + ". Vérifie qu'elle apparaît bien dans les téléchargements.";
         statusBox.className = "ok";
       } catch (error) {
         statusBox.textContent = error.message || "Erreur pendant la sauvegarde.";

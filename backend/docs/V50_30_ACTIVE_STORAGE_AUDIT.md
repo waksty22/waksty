@@ -2,15 +2,14 @@
 
 **Statut : audit et garde-fous uniquement. Aucun changement de configuration, aucune écriture de production, aucun déploiement.**
 
-## Conclusion confirmée dans le code
+## Conclusion confirmée
 
-Au commit de départ de cette étape, `backend/server.py` définit :
+Deux états doivent être distingués :
 
-- `BASE_DIR` à partir de `CHAPPIE_DATA_DIR`, avec le repli `./chappie_data` ;
-- `DB_PATH = BASE_DIR / "chappie_v16.sqlite3"` ;
-- `db_connection()` appelle directement `sqlite3.connect(DB_PATH)`.
+- **Branche `main` actuellement déployable :** `backend/server.py` utilise directement `sqlite3.connect(DB_PATH)`.
+- **Pile de développement V50.21–V50.30 de cette PR :** `db_connection()` passe par `StorageSettings.from_env()`, épingle le chemin canonique `DB_PATH`, puis appelle `open_sqlite_application_connection()`. Ce helper est volontairement SQLite-only et refuse le backend Turso. La fabrique générique `open_storage_connection()` n'est pas appelée par le serveur.
 
-La fabrique `backend/storage/connection_factory.py` sait ouvrir SQLite ou libSQL/Turso, mais le serveur ne l'utilise pas pour ses connexions métier. La présence de `TURSO_DATABASE_URL` et `TURSO_AUTH_TOKEN` ne prouve donc pas que Turso est le stockage actif.
+Donc, même dans cette pile de développement, **Turso n'est pas le stockage métier actif**. La présence de `TURSO_DATABASE_URL` et `TURSO_AUTH_TOKEN` ne prouve pas une synchronisation ou un basculement.
 
 ## Résultats des exercices de restauration isolée
 
@@ -42,7 +41,7 @@ Ces résultats valident le mécanisme de restauration des artefacts testés, **p
 
 ## Critères de sortie V50.30
 
-- [x] Confirmer dans le code le backend et la connexion utilisés par le serveur.
+- [x] Distinguer le code actuellement sur `main` de la pile de développement pré-cutover.
 - [x] Ajouter un test de non-régression qui bloque un basculement implicite vers Turso.
 - [x] Documenter les résultats réels des deux restaurations.
 - [ ] Vérifier le disque persistant Render et l'alignement du chemin actif.

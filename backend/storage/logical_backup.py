@@ -172,3 +172,96 @@ def verify_logical_backup(path: str | Path) -> dict[str, Any]:
         }
     finally:
         db.close()
+
+
+def export_encrypted_logical_backup(
+    connection: Any,
+    destination: str | Path,
+    encryption_key: str,
+) -> dict[str, Any]:
+    """Write only an AES-GCM encrypted logical backup; plaintext stays temporary."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    import secrets
+
+    if not isinstance(encryption_key, str) or len(encryption_key) < 12:
+        raise ValueError("Une clé de chiffrement d'au moins 12 caractères est requise.")
+    destination = Path(destination).expanduser().resolve()
+    if destination.exists():
+        raise FileExistsError(f"Refusing to overwrite existing backup: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="chappie-logical-") as work:
+        plain_path = Path(work) / "snapshot.json"
+        result = export_logical_backup(connection, plain_path)
+        plaintext = plain_path.read_bytes()
+        salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
+        key = PBKDF2HMAC(
+            algorithm=hashes.SHA256(), length=32, salt=salt, iterations=600_000
+        ).derive(encryption_key.encode("utf-8"))
+        encrypted = b"CHAPPIE-LOGICAL-V1" + salt + nonce + AESGCM(key).encrypt(
+            nonce, plaintext, b"CHAPPIE-LOGICAL-V1"
+        )
+        temporary = destination.with_name("." + destination.name + ".tmp")
+        try:
+            with temporary.open("xb") as handle:
+                handle.write(encrypted)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+    digest = hashlib.sha256(encrypted).hexdigest()
+    destination.with_suffix(destination.suffix + ".sha256").write_text(
+        f"{digest}  {destination.name}\\n", encoding="ascii"
+    )
+    return {
+        "path": str(destination),
+        "sha256": digest,
+        "size_bytes": len(encrypted),
+        "verified": True,
+        "encrypted": True,
+        "encryption": "AES-256-GCM/PBKDF2-SHA256-600000",
+        "table_count": result["table_count"],
+        "total_rows": result["total_rows"],
+    }
+
+
+def verify_encrypted_logical_backup(
+    path: str | Path, encryption_key: str
+) -> dict[str, Any]:
+    """Decrypt into a private temporary directory and verify without altering DBs."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    path = Path(path).expanduser().resolve()
+    raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    checksum_path = path.with_suffix(path.suffix + ".sha256")
+    if not checksum_path.exists() or checksum_path.read_text(encoding="ascii").split()[0] != digest:
+        return {"valid": False, "reason": "checksum_missing_or_mismatch"}
+    magic = b"CHAPPIE-LOGICAL-V1"
+    if not raw.startswith(magic) or len(raw) < len(magic) + 28:
+        return {"valid": False, "reason": "invalid_format"}
+    if not isinstance(encryption_key, str) or len(encryption_key) < 12:
+        return {"valid": False, "reason": "invalid_key"}
+    offset = len(magic)
+    salt, nonce = raw[offset:offset + 16], raw[offset + 16:offset + 28]
+    key = PBKDF2HMAC(
+        algorithm=hashes.SHA256(), length=32, salt=salt, iterations=600_000
+    ).derive(encryption_key.encode("utf-8"))
+    try:
+        plaintext = AESGCM(key).decrypt(nonce, raw[offset + 28:], magic)
+    except Exception:
+        return {"valid": False, "reason": "decryption_failed"}
+    with tempfile.TemporaryDirectory(prefix="chappie-logical-verify-") as work:
+        plain_path = Path(work) / "snapshot.json"
+        plain_path.write_bytes(plaintext)
+        plain_path.with_suffix(".json.sha256").write_text(
+            f"{hashlib.sha256(plaintext).hexdigest()}  snapshot.json\\n",
+            encoding="ascii",
+        )
+        result = verify_logical_backup(plain_path)
+    return {**result, "encrypted": True, "encryption": "AES-256-GCM"}

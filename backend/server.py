@@ -5013,91 +5013,63 @@ async def api_storage_schema_audit(auth=Depends(require_auth)):
 
 @app.get("/api/turso/backup")
 async def api_turso_backup(auth=Depends(require_auth)):
-    """Create a read-only JSON export of user tables and schema from Turso."""
+    """Create a verified AES-GCM encrypted, read-only logical Turso backup."""
     _authenticated_user(auth)
     database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
     auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    encryption_key = os.getenv("BACKUP_ENCRYPTION_KEY", "")
     if not database_url or not auth_token:
         raise HTTPException(status_code=503, detail="Turso n'est pas entièrement configuré.")
+    if len(encryption_key) < 12:
+        raise HTTPException(
+            status_code=503,
+            detail="BACKUP_ENCRYPTION_KEY doit être configurée (12 caractères minimum).",
+        )
 
     connection = None
     try:
         import libsql
+        from storage.logical_backup import export_encrypted_logical_backup
+
         connection = libsql.connect(database=database_url, auth_token=auth_token)
         connection.execute("SELECT 1").fetchone()
 
-        schema_rows = connection.execute(
-            "SELECT type, name, tbl_name, sql FROM sqlite_master "
-            "WHERE type IN ('table', 'index', 'trigger', 'view') "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY "
-            "CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 "
-            "WHEN 'trigger' THEN 2 ELSE 3 END, name"
-        ).fetchall()
-
-        table_names = [
-            str(row[1]) for row in schema_rows
-            if str(row[0]) == "table"
-        ]
-        if len(table_names) > 100:
-            raise HTTPException(status_code=413, detail="Trop de tables pour une sauvegarde via cette page.")
-
-        def json_safe(value):
-            if isinstance(value, bytes):
-                return {"__type__": "bytes_base64", "data": base64.b64encode(value).decode("ascii")}
-            return value
-
-        export = {
-            "format": "chappie-turso-backup",
-            "format_version": 1,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "database_host": database_url.split("://", 1)[-1].split("/", 1)[0],
-            "read_only": True,
-            "schema": [
-                {"type": str(row[0]), "name": str(row[1]),
-                 "table": str(row[2]), "sql": row[3]}
-                for row in schema_rows
-            ],
-            "tables": {},
-        }
-
-        for table_name in table_names:
-            quoted_name = '"' + table_name.replace('"', '""') + '"'
-            cursor = connection.execute(f"SELECT * FROM {quoted_name}")
-            columns = [str(item[0]) for item in (cursor.description or [])]
-            records = []
-            for record in cursor.fetchall():
-                records.append({
-                    columns[index]: json_safe(value)
-                    for index, value in enumerate(record)
-                })
-            export["tables"][table_name] = {
-                "columns": columns,
-                "row_count": len(records),
-                "rows": records,
-            }
-
-        payload = json.dumps(export, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        if len(payload) > 25 * 1024 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail="Sauvegarde supérieure à 25 Mo : export fractionné nécessaire.",
+        with tempfile.TemporaryDirectory(prefix="chappie-turso-backup-") as temp_dir:
+            filename = "chappie-turso-backup-" + datetime.now(
+                timezone.utc
+            ).strftime("%Y%m%d-%H%M%S") + ".json.enc"
+            backup_path = Path(temp_dir) / filename
+            result = export_encrypted_logical_backup(
+                connection, backup_path, encryption_key
             )
-        filename = "chappie-turso-backup-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + ".json"
-        log.info("[TURSO] Export de sauvegarde en lecture seule terminé (%s octets, %s tables).",
-                 len(payload), len(table_names))
-        return StreamingResponse(
-            iter([payload]),
-            media_type="application/json; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"',
-                     "Cache-Control": "no-store"},
+            payload = backup_path.read_bytes()
+
+        log.info(
+            "[TURSO] Verified encrypted logical backup ready "
+            "(%s bytes, %s tables, %s rows).",
+            len(payload), result["table_count"], result["total_rows"],
+        )
+        return Response(
+            content=payload,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "X-Backup-SHA256": result["sha256"],
+                "X-Backup-Verified": "true",
+                "X-Backup-Encrypted": "AES-256-GCM",
+                "X-Backup-Table-Count": str(result["table_count"]),
+                "X-Backup-Row-Count": str(result["total_rows"]),
+            },
         )
     except HTTPException:
         raise
-    except Exception:
-        log.exception("[TURSO] Échec de l'export de sauvegarde en lecture seule.")
+    except Exception as exc:
+        log.exception("[TURSO] Échec de l'export logique chiffré en lecture seule.")
         raise HTTPException(
             status_code=503,
-            detail="Sauvegarde impossible. Vérifie les logs Render sans partager de secrets.",
+            detail="Sauvegarde Turso impossible : " + type(exc).__name__,
         )
     finally:
         if connection is not None:

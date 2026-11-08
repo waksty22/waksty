@@ -190,8 +190,6 @@ def search_autobiographical_events(
         if len(token) >= 2 and token not in _SEARCH_STOPWORDS
     ]
     if not tokens:
-        tokens = normalized_query.split()
-    if not tokens:
         return []
 
     # Bound the candidate scan to recent source episodes for predictable cost.

@@ -2,9 +2,9 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVER = (ROOT / "server.py").read_text(encoding="utf-8")
-HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-APP = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
+SERVER = (ROOT / "backend" / "server.py").read_text(encoding="utf-8")
+HTML = (ROOT / "backend" / "static" / "index.html").read_text(encoding="utf-8")
+APP = (ROOT / "backend" / "static" / "js" / "app.js").read_text(encoding="utf-8")
 
 
 def test_authenticated_read_only_agenda_endpoint_exists():

@@ -151,7 +151,8 @@ def list_autobiographical_events(
 
 
 def _normalize_search_text(value: str) -> str:
-    value = unicodedata.normalize("NFKD", str(value or "").casefold())
+    value = str(value or "").casefold().replace("œ", "oe").replace("æ", "ae")
+    value = unicodedata.normalize("NFKD", value)
     value = "".join(char for char in value if not unicodedata.combining(char))
     return " ".join(re.findall(r"[a-z0-9]+", value))
 

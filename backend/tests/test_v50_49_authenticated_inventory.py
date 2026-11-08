@@ -80,7 +80,7 @@ def test_inventory_endpoint_requires_existing_authentication_dependency():
         Path(server.__file__).read_text(encoding="utf-8"),
         next(
             node for node in ast.walk(ast.parse(Path(server.__file__).read_text(encoding="utf-8")))
-            if isinstance(node, ast.AsyncFunctionDef)
+            if isinstance(node, ast.FunctionDef)
             and node.name == "system_persistence_inventory"
         ),
     )

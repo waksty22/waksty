@@ -5,6 +5,7 @@ explicitly adopts it through the authenticated goals API.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -106,6 +107,9 @@ def list_personal_learning_goals(
         ).fetchall()
         goal["steps"] = [dict(step) for step in steps]
         goal["progress"] = float(goal.get("progress") or 0.0)
+        goal["skill_assessments"] = list_goal_skill_assessments(
+            db, user_id, int(goal["id"])
+        )
         goals.append(goal)
     return {"goals": goals, "user_scoped": True, "read_only": True}
 
@@ -161,3 +165,44 @@ def record_personal_goal_step(
         "goal_status": goal_status,
         "evidence_recorded": True,
     }
+
+
+def list_goal_skill_assessments(
+    db: sqlite3.Connection, user_id: str, goal_id: int
+) -> list[dict[str, Any]]:
+    """Return only supervisor-approved assessment records explicitly linked to this user's goal."""
+    owner = db.execute(
+        "SELECT id FROM goals WHERE id=? AND user_id=?",
+        (goal_id, user_id),
+    ).fetchone()
+    if owner is None:
+        raise ValueError("Objectif introuvable pour cet utilisateur.")
+    exists = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='competency_tests'"
+    ).fetchone()
+    if exists is None:
+        return []
+    rows = db.execute(
+        """SELECT test_name, passed, score, tested_at, details
+           FROM competency_tests WHERE user_id=? ORDER BY tested_at DESC, id DESC LIMIT 100""",
+        (user_id,),
+    ).fetchall()
+    linked: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            details = json.loads(row["details"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(details, dict) or details.get("goal_id") != goal_id:
+            continue
+        if details.get("source") != "supervised_assessment" or details.get("supervisor_approved") is not True:
+            continue
+        linked.append({
+            "test_name": str(row["test_name"]),
+            "passed": bool(row["passed"]),
+            "score": float(row["score"]),
+            "tested_at": str(row["tested_at"]),
+            "goal_step_id": details.get("goal_step_id"),
+            "evidence": str(details.get("evidence") or "")[:500],
+        })
+    return linked

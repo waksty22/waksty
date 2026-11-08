@@ -6,6 +6,7 @@ to export, snapshot, or restore a remote Turso database.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import sqlite3
 import tempfile
@@ -83,7 +84,7 @@ def _verify_checksum(path: Path) -> str:
     ):
         raise sqlite3.DatabaseError("Fichier checksum invalide.")
     actual = _sha256(path)
-    if not hashlib.compare_digest(actual, fields[0].lower()):
+    if not hmac.compare_digest(actual, fields[0].lower()):
         raise sqlite3.DatabaseError("Checksum SHA-256 invalide pour la sauvegarde.")
     return actual
 

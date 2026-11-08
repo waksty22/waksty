@@ -1,4 +1,6 @@
 import sqlite3
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -87,3 +89,50 @@ def test_live_transcript_merges_incremental_chunks():
     assert merge_live_transcript("Bonjour", "Bonjour") == "Bonjour"
     assert merge_live_transcript("Bonjour tout", "tout va bien") == "Bonjour tout va bien"
     assert merge_live_transcript("Bonjour", "Bonjour tout le monde") == "Bonjour tout le monde"
+
+
+def test_context_budget_never_cuts_json_records_and_reports_omissions():
+    from cognition.shared_brain import MAX_CONTEXT_CHARS
+
+    rows = [
+        {"id": index, "content": "souvenir " + ("important " * 90)}
+        for index in range(120)
+    ]
+    snapshot = {
+        "autobiographical_events": rows,
+        "statistics": {"totals": {"autobiographical_events": len(rows)}},
+        "rules": {"unknowns_must_remain_unknown": True},
+    }
+    context = format_shared_brain_context(snapshot)
+
+    assert len(context) <= MAX_CONTEXT_CHARS
+    assert "CONTEXTE PARTIEL" in context
+    assert "Les données omises restent en base" in context
+
+    match = re.search(
+        r"ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS:\\n(\\[.*?\\])",
+        context,
+        flags=re.S,
+    )
+    assert match is not None
+    decoded = json.loads(match.group(1))
+    assert decoded
+    assert all(isinstance(item, dict) and "id" in item for item in decoded)
+    assert decoded[-1]["id"] < len(rows) - 1
+
+
+def test_context_keeps_statistics_and_all_records_when_under_budget():
+    snapshot = {
+        "vocabulary": [{"word": "bonjour", "state": "heard"}],
+        "statistics": {"totals": {"vocabulary": 1}},
+    }
+    context = format_shared_brain_context(snapshot)
+    match = re.search(
+        r"VOCABULAIRE PERSONNEL — état d'acquisition:\\n(\\[.*?\\])",
+        context,
+        flags=re.S,
+    )
+    assert match is not None
+    assert json.loads(match.group(1)) == snapshot["vocabulary"]
+    assert "STATISTIQUES DES DONNÉES PERSISTÉES" in context
+    assert "CONTEXTE PARTIEL" not in context

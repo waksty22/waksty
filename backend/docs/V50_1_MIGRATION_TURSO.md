@@ -73,9 +73,9 @@ Tant que cette sauvegarde distante n'est pas démontrée restaurable, la migrati
 ## Tests attendus
 
 - Le mode simulation ne modifie ni schéma ni lignes.
-- L'export logique refuse l'écrasement, vérifie son SHA-256, restaure les données dans une SQLite isolée et compare les compteurs de lignes.
+- L'export logique chiffré refuse l'écrasement, vérifie son SHA-256, teste le mauvais mot de passe et restaure temporairement les données dans une SQLite isolée.
 - L'application additive crée une table et un index manquants et ajoute `skills.xp`.
-- Un test d'intégration lance les véritables initialisateurs de schéma de Chappie dans un fichier SQLite temporaire, reconstruit le schéma dans une cible mémoire vide et compare les inventaires.
+- Un test d'intégration lance les véritables initialisateurs de schéma de Chappie dans un fichier SQLite temporaire, reconstruit le schéma dans une cible mémoire vide et compare les inventaires.\n- Un test complémentaire utilise le pilote `libsql` réel sur une base `:memory:` locale (aucun accès réseau/Turso) pour vérifier l'application additive, la conservation des lignes et l'idempotence.
 - Les lignes préexistantes restent identiques.
 - Une seconde exécution ne planifie aucune opération supplémentaire.
 - Une colonne inattendue bloque l'application.

@@ -796,6 +796,80 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    // V50.13 — provenance-aware knowledge library
+    window.loadAcquiredKnowledge = async function() {
+        const list = document.getElementById("acquiredKnowledgeList");
+        const status = document.getElementById("acquiredKnowledgeStatus");
+        const query = document.getElementById("acquiredKnowledgeQuery")?.value?.trim() || "";
+        if (!list) return;
+        if (status) status.textContent = "Recherche des connaissances et vérification de leur provenance…";
+        try {
+            const params = new URLSearchParams({ query, limit: "12" });
+            const data = await apiCall("/api/learning/knowledge?" + params.toString());
+            const items = Array.isArray(data.items) ? data.items : [];
+            list.replaceChildren();
+            if (!items.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = query
+                    ? "Aucun élément correspondant dans les données actuellement disponibles."
+                    : "Aucun souvenir, épisode ou résultat d'évaluation disponible pour le moment.";
+                list.appendChild(empty);
+            }
+            const labels = {
+                confirmed_memory: "Souvenir confirmé",
+                taught_not_independently_verified: "Enseigné · maîtrise non vérifiée",
+                observed_not_understood: "Observé · compréhension non vérifiée",
+                hypothesis_unverified: "Hypothèse non vérifiée",
+                experience_only_not_proof_of_learning: "Expérience · pas une preuve d'apprentissage",
+                supervised_skill_validated: "Compétence validée sous supervision",
+                supervised_assessment_not_validated: "Évaluation non validée",
+                assessment_provenance_unconfirmed: "Provenance de l'évaluation incertaine"
+            };
+            items.forEach(item => {
+                const card = document.createElement("article");
+                card.className = "agenda-card";
+                const meta = document.createElement("div");
+                meta.className = "agenda-meta";
+                const kind = document.createElement("span");
+                kind.className = "badge";
+                kind.textContent = item.kind === "skill_assessment" ? "Compétence"
+                    : item.kind === "experience" ? "Expérience" : "Souvenir";
+                const state = document.createElement("span");
+                state.className = "badge";
+                state.textContent = labels[item.status] || "Statut inconnu";
+                meta.append(kind, state);
+                const title = document.createElement("h4");
+                title.textContent = item.skill || item.category || "Élément mémorisé";
+                const content = document.createElement("p");
+                content.textContent = item.content || "Aucun détail disponible.";
+                const source = document.createElement("p");
+                source.className = "muted small";
+                source.textContent = "Source : " + (item.source || "non précisée")
+                    + " · Référence : " + String(item.source_id)
+                    + (item.timestamp ? " · Date : " + item.timestamp : "");
+                card.append(meta, title, content, source);
+                if (item.score !== undefined) {
+                    const score = document.createElement("p");
+                    score.className = "muted small";
+                    score.textContent = "Évaluation : " + Number(item.score).toFixed(0) + "/100"
+                        + (item.supervisor_approved ? " · supervision approuvée" : " · supervision non confirmée");
+                    card.appendChild(score);
+                }
+                list.appendChild(card);
+            });
+            if (status) status.textContent = items.length + " élément(s) affiché(s) · " +
+                String(data.candidate_count || 0) + " candidat(s) retrouvé(s) · lecture seule.";
+        } catch (error) {
+            if (status) status.textContent = "Impossible de charger la bibliothèque : " + error.message;
+            list.replaceChildren();
+            const message = document.createElement("div");
+            message.className = "agenda-empty";
+            message.textContent = "La bibliothèque n'a pas pu récupérer les données. Réessaie après vérification de la connexion.";
+            list.appendChild(message);
+        }
+    };
+
     // V50.10 — supervised personal learning goals
     window.loadPersonalLearningGoals = async function() {
         const proposalsList = document.getElementById("personalGoalProposals");
@@ -1330,6 +1404,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.loadCausalLearning();
         window.loadSupervisedAgenda();
         window.loadPersonalLearningGoals();
+        window.loadAcquiredKnowledge();
         window.loadSkills();
     }
 });

@@ -15,6 +15,7 @@ on:
       - feature/chappie-v50-6-learning-from-errors
       - feature/chappie-v50-7-correction-guided-reasoning
       - feature/chappie-v50-8-supervised-learning-agenda
+      - feature/chappie-v50-9-learning-center
   pull_request:
     branches:
       - main

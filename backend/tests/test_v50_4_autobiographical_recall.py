@@ -67,7 +67,7 @@ def test_autobiographical_search_adds_only_explicit_same_turn_reply():
     add_event(db, 1, "creator", "user",
               "J'ai acheté un vélo rouge hier.", 3)
     add_event(db, 2, "creator", "assistant",
-              "Tu m'as raconté l'achat de ton vélo rouge.", 1)
+              "Je me souviens de ce que tu m'as raconté hier.", 1)
     db.execute(
         """
         INSERT INTO autobiographical_links

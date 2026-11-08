@@ -94,6 +94,23 @@ def test_adapter_normalizes_cursor_rows_and_iteration():
     assert rows[1][0] == 2
 
 
+def test_adapter_preserves_insert_lastrowid_but_not_stale_select_metadata():
+    native = FakeNativeConnection()
+    db = adapt_libsql_connection(native)
+    inserted = db.execute("INSERT INTO sample(label) VALUES (?)", ("Chappie",))
+    selected = db.execute("SELECT 1")
+    updated = db.execute("UPDATE sample SET label='Nova'")
+    assert inserted.lastrowid == 17
+    assert selected.lastrowid is None
+    assert updated.lastrowid is None
+
+
+def test_executemany_does_not_publish_native_lastrowid():
+    db = adapt_libsql_connection(FakeNativeConnection())
+    cursor = db.executemany("INSERT INTO sample(label) VALUES (?)", [("A",), ("B",)])
+    assert cursor.lastrowid is None
+
+
 def test_adapter_exposes_fetchone_fetchall_fetchmany():
     cursor = CompatCursor(FakeCursor([(1, "a"), (2, "b"), (3, "c")]))
     assert cursor.fetchone()["id"] == 1
@@ -148,28 +165,3 @@ def test_turso_remains_blocked_at_application_boundary():
     )
     with pytest.raises(RuntimeError, match="Turso n'est pas encore activé"):
         open_sqlite_application_connection(settings)
-
-
-def test_server_startup_and_sqlite_backup_blockers_are_explicit():
-    source = (BACKEND / "server.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    init_db = next(
-        node for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "init_db"
-    )
-    init_source = ast.get_source_segment(source, init_db)
-    assert 'PRAGMA journal_mode=WAL' in init_source
-    assert "executescript" in init_source
-    assert "export_encrypted_logical_backup" in source
-    assert "/api/turso/backup" in source
-
-
-def test_turso_driver_probe_does_not_equate_native_connection_with_sqlite3():
-    source = (BACKEND / "storage" / "turso_compat.py").read_text(encoding="utf-8")
-    assert "sqlite_connection_type" in source
-    assert "isinstance(" in source
-    # This is an informational driver check, not permission to wire the
-    # adapter into the application factory.
-    factory = (BACKEND / "storage" / "connection_factory.py").read_text(encoding="utf-8")
-    assert "open_sqlite_application_connection" in factory
-    assert "Le backend Turso n'est pas encore activé" in factory

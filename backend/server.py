@@ -3655,7 +3655,11 @@ async def api_create_goal(
     if len(steps) > 50:  
         raise HTTPException(status_code=400, detail="Trop d'étapes.")  
 
-    result = create_goal(\n        user_id=user_id,\n        title=title,\n        steps=steps,\n    )  
+    result = create_goal(
+        user_id=user_id,
+        title=title,
+        steps=steps,
+    )  
 
     return {  
         "success": True,  

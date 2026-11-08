@@ -148,7 +148,7 @@ def test_formatted_context_is_bounded_and_keeps_uncertainty_rules():
     result = retrieve_acquired_knowledge(db, "creator", "montre")
     context = format_acquired_knowledge_context(result, max_chars=2000)
     assert len(context) <= 2000
-    assert "expérience n'est pas une preuve" in context
+    assert "experience_only_not_proof_of_learning" in context
     assert "observed_not_understood" in context
     db.close()
 

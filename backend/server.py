@@ -587,7 +587,7 @@ async def system_diagnostics(_: str = Depends(require_auth)):
     }
 
 @app.get("/api/system/persistence-inventory")
-async def system_persistence_inventory(_: str = Depends(require_auth)):
+def system_persistence_inventory(_: str = Depends(require_auth)):
     """Authenticated read-only inventory of the active SQLite database."""
     try:
         return inspect_sqlite_database(DB_PATH)

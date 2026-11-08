@@ -415,6 +415,31 @@ def save_episodic_memory(
     }
 
 
+def _memory_search_terms(query: str) -> list[str]:
+    """Return distinct, accent-insensitive terms useful for French memory search."""
+    import re
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", query.casefold())
+    normalized = "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    )
+    stop_words = {
+        "a", "au", "aux", "avec", "ce", "ces", "dans", "de", "des",
+        "du", "elle", "en", "et", "eux", "il", "je", "la", "le",
+        "les", "leur", "lui", "ma", "mais", "me", "mes", "moi",
+        "mon", "ne", "nos", "notre", "nous", "on", "ou", "par",
+        "pas", "pour", "que", "qui", "sa", "se", "ses", "son",
+        "sur", "ta", "te", "tes", "toi", "ton", "tu", "un", "une",
+        "vos", "votre", "vous", "the", "and", "for", "with",
+    }
+    terms: list[str] = []
+    for term in re.findall(r"[a-z0-9]{2,}", normalized):
+        if term not in stop_words and term not in terms:
+            terms.append(term)
+    return terms[:12]
+
+
 def search_episodic_memories(
     db: sqlite3.Connection,
     user_id: str,
@@ -422,133 +447,111 @@ def search_episodic_memories(
     limit: int = 10,
 ) -> list[dict[str, Any]]:
     """
-    Recherche les souvenirs d'un utilisateur.
+    Retrieve relevant episodic memories using multi-term lexical matching.
 
-    La recherche examine :
-    - le contenu ;
-    - la catégorie ;
-    - les tags.
-
-    Chaque souvenir retourné voit son compteur d'accès augmenter.
+    Exact phrases receive a relevance bonus, but a query need not appear
+    verbatim: matching content, category, or tags across several words is
+    enough. Results remain isolated by user and preserve source/confidence.
     """
     user_id = _normalize_user_id(user_id)
 
     if query is None:
         query = ""
-
     if not isinstance(query, str):
         raise ValueError("La recherche doit être du texte.")
 
-    query = query.strip()
-
-    if len(query) > MAX_SEARCH_LENGTH:
-        query = query[:MAX_SEARCH_LENGTH]
-
+    query = query.strip()[:MAX_SEARCH_LENGTH]
     limit = _normalize_limit(limit, 1, 30)
 
-    if query:
-        pattern = f"%{_escape_like(query)}%"
-
+    columns = """
+        SELECT id, user_id, category, content, importance, source_type,
+               confidence, tags, access_count, created_at, updated_at
+        FROM memories_v19
+        WHERE user_id = ?
+    """
+    if not query:
         cursor = db.execute(
-            """
-            SELECT
-                id,
-                user_id,
-                category,
-                content,
-                importance,
-                source_type,
-                confidence,
-                tags,
-                access_count,
-                created_at,
-                updated_at
-            FROM memories_v19
-            WHERE user_id = ?
-              AND (
-                    content LIKE ? ESCAPE '\\' COLLATE NOCASE
-                    OR category LIKE ? ESCAPE '\\' COLLATE NOCASE
-                    OR tags LIKE ? ESCAPE '\\' COLLATE NOCASE
-              )
-            ORDER BY
-                importance DESC,
-                access_count DESC,
-                updated_at DESC
-            LIMIT ?
-            """,
-            (
-                user_id,
-                pattern,
-                pattern,
-                pattern,
-                limit,
-            ),
-        )
-    else:
-        cursor = db.execute(
-            """
-            SELECT
-                id,
-                user_id,
-                category,
-                content,
-                importance,
-                source_type,
-                confidence,
-                tags,
-                access_count,
-                created_at,
-                updated_at
-            FROM memories_v19
-            WHERE user_id = ?
-            ORDER BY
-                importance DESC,
-                access_count DESC,
-                updated_at DESC
-            LIMIT ?
-            """,
+            columns + " ORDER BY importance DESC, access_count DESC, updated_at DESC LIMIT ?",
             (user_id, limit),
         )
-
-    rows = cursor.fetchall()
+        rows = cursor.fetchall()
+    else:
+        terms = _memory_search_terms(query)
+        if not terms:
+            terms = [query.casefold()]
+        predicates = []
+        params: list[Any] = [user_id]
+        for term in terms:
+            pattern = f"%{_escape_like(term)}%"
+            predicates.append(
+                "(content LIKE ? ESCAPE '\\\\' COLLATE NOCASE "
+                "OR category LIKE ? ESCAPE '\\\\' COLLATE NOCASE "
+                "OR tags LIKE ? ESCAPE '\\\\' COLLATE NOCASE)"
+            )
+            params.extend((pattern, pattern, pattern))
+        cursor = db.execute(
+            columns + " AND (" + " OR ".join(predicates) + ") LIMIT 250",
+            tuple(params),
+        )
+        rows = cursor.fetchall()
 
     results: list[dict[str, Any]] = []
-    memory_ids: list[int] = []
-
+    normalized_query = query.casefold()
+    terms = _memory_search_terms(query) if query else []
     for row in rows:
         item = _row_to_dict(row, cursor)
-
         try:
             parsed_tags = json.loads(item.get("tags") or "[]")
-
-            item["tags"] = (
-                parsed_tags
-                if isinstance(parsed_tags, list)
-                else []
-            )
-
+            item["tags"] = parsed_tags if isinstance(parsed_tags, list) else []
         except (ValueError, TypeError):
             item["tags"] = []
 
+        searchable = " ".join([
+            str(item.get("content") or ""),
+            str(item.get("category") or ""),
+            " ".join(str(tag) for tag in item["tags"]),
+        ]).casefold()
+        searchable_folded = unicodedata.normalize("NFKD", searchable)
+        searchable_folded = "".join(
+            char for char in searchable_folded
+            if not unicodedata.combining(char)
+        )
+        matched = sum(
+            1 for term in terms if term in searchable_folded
+        )
+        phrase_match = bool(normalized_query and normalized_query in searchable)
+        # Relevance is lexical evidence, not a claim that the memory is true.
+        item["relevance_score"] = round(
+            (matched / max(1, len(terms))) * 10
+            + (3 if phrase_match else 0),
+            3,
+        )
         results.append(item)
-        memory_ids.append(int(item["id"]))
 
-    # Incrémentation atomique, limitée aux souvenirs sélectionnés.
-    if memory_ids:
+    if query:
+        results.sort(
+            key=lambda item: (
+                item["relevance_score"],
+                int(item.get("importance") or 0),
+                float(item.get("confidence") or 0),
+                int(item.get("access_count") or 0),
+                str(item.get("updated_at") or ""),
+            ),
+            reverse=True,
+        )
+    results = results[:limit]
+
+    if results:
         db.executemany(
             """
             UPDATE memories_v19
             SET access_count = access_count + 1
             WHERE user_id = ? AND id = ?
             """,
-            [
-                (user_id, memory_id)
-                for memory_id in memory_ids
-            ],
+            [(user_id, int(item["id"])) for item in results],
         )
 
     return results
-
 
 def apply_memory_decay(
     db: sqlite3.Connection,

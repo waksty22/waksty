@@ -1661,6 +1661,26 @@ En attente de synchronisation du cerveau...
           <p class="muted small" style="margin-top:12px">Préparer une piste ne lance rien. Toute expérience doit être décrite, vérifiée et explicitement approuvée par toi. Écarter une piste la masque uniquement jusqu'au prochain rechargement de la page.</p>
         </section>
 
+        <section class="panel learning-agenda" aria-labelledby="personalGoalsTitle">
+          <div class="learning-agenda-head">
+            <div>
+              <h3 id="personalGoalsTitle">🎯 Objectifs personnels de Chappie</h3>
+              <p class="muted">Des objectifs mesurables proposés à partir de son apprentissage. Rien n'est enregistré avant ton accord.</p>
+            </div>
+            <button type="button" class="secondary" onclick="loadPersonalLearningGoals()">↻ Actualiser</button>
+          </div>
+          <div id="personalGoalsStatus" class="status" role="status" aria-live="polite">En attente de synchronisation.</div>
+          <h4>Propositions à adopter</h4>
+          <div id="personalGoalProposals" class="agenda-list">
+            <div class="agenda-empty">Aucune proposition chargée.</div>
+          </div>
+          <h4 style="margin-top:18px">Objectifs suivis</h4>
+          <div id="personalGoalsList" class="agenda-list">
+            <div class="agenda-empty">Aucun objectif chargé.</div>
+          </div>
+          <p class="muted small" style="margin-top:12px">Une proposition n'est pas un objectif actif. Tu dois l'adopter. Une étape ne progresse qu'avec une preuve écrite et rattachée à ton compte.</p>
+        </section>
+
         <details class="panel advanced-tools">
           <summary>🧪 Apprentissage avancé : objets et expériences</summary>
           <div class="advanced-tools-content">

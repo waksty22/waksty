@@ -103,7 +103,8 @@ Revenir à SQLite si le démarrage échoue, si une table manque, si une écritur
 - [x] Sauvegarde logique Turso chiffrée avec vérification locale.
 - [x] Outil de comparaison de schéma et de plan de migration non destructif présent.
 - [x] Fabrique de connexions et adaptateur libsql présents, isolés du stockage actif.
-- [x] Diagnostic en lecture seule du chemin SQLite réellement ouvert (V50.20, code/tests prêts ; exécution sur Render à faire après déploiement approuvé).\n- [ ] Audit réel des deux bases et rapport de compatibilité.
+- [x] Diagnostic en lecture seule du chemin SQLite réellement ouvert (V50.20, code/tests prêts ; exécution sur Render à faire après déploiement approuvé).
+- [ ] Audit réel des deux bases et rapport de compatibilité.
 - [ ] Compatibilité complète du backend avec libsql.
 - [ ] Migrateur de données idempotent avec contrôle d'empreintes.
 - [ ] Répétition de migration/restauration sur environnement isolé.

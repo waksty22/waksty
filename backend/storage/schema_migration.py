@@ -80,6 +80,115 @@ def _normalized_sql(value: Any) -> str:
     return " ".join(str(value or "").split()).casefold()
 
 
+
+def _table_definition_signature(sql: Any, omit_columns: set[str] | None = None) -> str | None:
+    """Canonicalize CREATE TABLE SQL, optionally omitting approved columns.
+
+    This catches CHECK, UNIQUE, COLLATE and other constraints not exposed by
+    PRAGMA table_info. Unsupported definitions return None and are blocked.
+    """
+    if not sql:
+        return None
+    text = str(sql).strip()
+    open_at = text.find("(")
+    if open_at < 0:
+        return None
+
+    backtick = chr(96)
+    quote: str | None = None
+    depth = 0
+    close_at = -1
+    i = open_at
+    while i < len(text):
+        char = text[i]
+        if quote:
+            if quote == "]":
+                if char == "]":
+                    if i + 1 < len(text) and text[i + 1] == "]":
+                        i += 1
+                    else:
+                        quote = None
+            elif char == quote:
+                if i + 1 < len(text) and text[i + 1] == quote:
+                    i += 1
+                else:
+                    quote = None
+        elif char in ("'", '"', backtick):
+            quote = char
+        elif char == "[":
+            quote = "]"
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                close_at = i
+                break
+        i += 1
+    if close_at < 0 or text[close_at + 1:].strip().strip(";"):
+        return None
+
+    body = text[open_at + 1:close_at]
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    quote = None
+    i = 0
+    while i < len(body):
+        char = body[i]
+        if quote:
+            if quote == "]":
+                if char == "]":
+                    if i + 1 < len(body) and body[i + 1] == "]":
+                        i += 1
+                    else:
+                        quote = None
+            elif char == quote:
+                if i + 1 < len(body) and body[i + 1] == quote:
+                    i += 1
+                else:
+                    quote = None
+        elif char in ("'", '"', backtick):
+            quote = char
+        elif char == "[":
+            quote = "]"
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(body[start:i].strip())
+            start = i + 1
+        i += 1
+    if quote or depth != 0:
+        return None
+    parts.append(body[start:].strip())
+
+    omitted = {name.casefold() for name in (omit_columns or set())}
+    kept: list[str] = []
+    for part in parts:
+        token = part.lstrip()
+        if not token:
+            return None
+        first = token.split(None, 1)[0]
+        if first.startswith('"') and first.endswith('"'):
+            identifier = first[1:-1].replace('""', '"')
+        elif first.startswith(backtick) and first.endswith(backtick):
+            identifier = first[1:-1].replace(backtick + backtick, backtick)
+        elif first.startswith("[") and first.endswith("]"):
+            identifier = first[1:-1].replace("]]", "]")
+        else:
+            identifier = first
+        if identifier.casefold() in omitted:
+            continue
+        kept.append(_normalized_sql(part))
+
+    prefix = _normalized_sql(text[:open_at])
+    if not prefix or not kept:
+        return None
+    return prefix + " (" + ", ".join(kept) + ")"
+
+
 def build_migration_plan(
     source: Any,
     target: Any,
@@ -134,6 +243,19 @@ def build_migration_plan(
         if _foreign_key_signature(source, table_name) != _foreign_key_signature(target, table_name):
             blockers.append(f"{table_name}: contraintes de clés étrangères différentes.")
         missing_columns = sorted(set(source_columns) - set(target_columns))
+        allowed_missing = set(missing_columns) & set(allowed.get(table_name, {}))
+        source_definition = _table_definition_signature(
+            source_tables[table_name]["sql"], allowed_missing
+        )
+        target_definition = _table_definition_signature(target_tables[table_name]["sql"])
+        if source_definition is None or target_definition is None:
+            blockers.append(
+                f"{table_name}: définition SQL de table impossible à comparer de façon sûre."
+            )
+        elif source_definition != target_definition:
+            blockers.append(
+                f"{table_name}: contraintes ou définition SQL de table différentes."
+            )
         unexpected = [
             column for column in missing_columns
             if column not in allowed.get(table_name, {})

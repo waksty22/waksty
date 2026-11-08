@@ -1276,7 +1276,6 @@ def update_emotions_once(
         if event_id and not claim_cognitive_event(
             db, user_id, event_id, "emotion_state_update"
         ):
-            db.rollback()
             return get_emotions(user_id)
 
         db.execute(

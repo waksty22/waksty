@@ -48,6 +48,14 @@ def memory_pipeline(tmp_path, monkeypatch):
                 kind TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE conversation_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                through_conversation_id INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, through_conversation_id)
+            );
             CREATE TABLE conversation_turn_receipts (
                 user_id TEXT NOT NULL,
                 turn_id TEXT NOT NULL,

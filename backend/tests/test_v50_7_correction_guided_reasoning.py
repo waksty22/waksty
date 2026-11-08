@@ -46,8 +46,27 @@ def create_test(db, user_id, evaluation, result):
 
 def test_guidance_includes_relevant_correction_and_mixed_evidence():
     db = setup_db()
-    create_test(db, "creator", "contradicted", "Aucune pousse observée.")
-    create_test(db, "creator", "supported", "Une pousse observée.")
+    observation = record_observation(
+        db, "creator", "Une graine est placée dans la terre",
+        "Une pousse apparaît", source_type="observed",
+    )
+    hypothesis = propose_hypothesis(
+        db, "creator", observation["id"],
+        "Cette graine germe dans ces conditions",
+        "Une pousse apparaît", confidence=0.6,
+    )
+    for evaluation, result in (
+        ("contradicted", "Aucune pousse observée."),
+        ("supported", "Une pousse observée."),
+    ):
+        experiment = plan_experiment(
+            db, "creator", hypothesis["id"], "simulation",
+            "Simulation de germination", "Une pousse apparaît",
+            supervisor_approved=True,
+        )
+        evaluate_experiment(
+            db, "creator", experiment["id"], result, evaluation
+        )
     context = format_causal_learning_guidance(db, "creator")
     assert "bilan=mixed_evidence" in context
     assert "contredites=1" in context

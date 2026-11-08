@@ -10,6 +10,7 @@ on:
       - feature/v36-4-libsql-integration-clean
       - feature/v36-5-episodic-memory-libsql-clean
       - feature/chappie-v50-integrated-build
+      - feature/chappie-v50-4-autobiographical-recall
   pull_request:
     branches:
       - main

@@ -1646,6 +1646,26 @@ En attente de synchronisation du cerveau...
           <h4>Souvenirs visuels des lieux</h4>
           <div id="worldPlacesList" class="world-grid">Aucun lieu observé pour le moment.</div>
         </div>
+        <section class="panel learning-agenda" aria-labelledby="acquiredKnowledgeTitle">
+          <div class="learning-agenda-head">
+            <div>
+              <h3 id="acquiredKnowledgeTitle">🧠 Bibliothèque des connaissances</h3>
+              <p class="muted">Ce que Chappie retrouve dans ses souvenirs, ses expériences et ses évaluations, avec l'origine et le niveau de validation de chaque élément.</p>
+            </div>
+            <button type="button" class="secondary" onclick="loadAcquiredKnowledge()">↻ Actualiser</button>
+          </div>
+          <div class="knowledge-search">
+            <label for="acquiredKnowledgeQuery">Rechercher dans ses connaissances</label>
+            <input id="acquiredKnowledgeQuery" type="search" maxlength="200" placeholder="Ex. montre, musique, objet…" onkeydown="if(event.key==='Enter') loadAcquiredKnowledge()">
+            <button type="button" class="secondary" onclick="loadAcquiredKnowledge()">Rechercher</button>
+          </div>
+          <div id="acquiredKnowledgeStatus" class="status" role="status" aria-live="polite">En attente de synchronisation.</div>
+          <div id="acquiredKnowledgeList" class="agenda-list">
+            <div class="agenda-empty">Les connaissances retrouvées apparaîtront ici.</div>
+          </div>
+          <p class="muted small" style="margin-top:12px">Une observation, un enseignement ou une expérience ne deviennent pas automatiquement une maîtrise. Cette bibliothèque est consultative et ne modifie aucun souvenir ni score.</p>
+        </section>
+
         <section class="panel learning-agenda" aria-labelledby="learningAgendaTitle">
           <div class="learning-agenda-head">
             <div>

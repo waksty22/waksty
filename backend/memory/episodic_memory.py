@@ -510,6 +510,8 @@ def search_episodic_memories(
             1 for term in terms if term in searchable_folded
         )
         phrase_match = bool(normalized_query and normalized_query in searchable)
+        if query and matched == 0 and not phrase_match:
+            continue
         # Relevance is lexical evidence, not a claim that the memory is true.
         item["relevance_score"] = round(
             (matched / max(1, len(terms))) * 10

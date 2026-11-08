@@ -31,7 +31,9 @@ La restauration vérifiée préserve également une copie de retour arrière ava
 
 ### Turso distant (export logique préparé, non exécuté)
 
-Un exporteur logique portable est maintenant ajouté dans `storage.logical_backup`. Il accepte une connexion déjà ouverte, lit les tables et les objets de schéma, encode les BLOB, produit un fichier JSON et son SHA-256, puis restaure le fichier dans une SQLite temporaire pour vérifier l'intégrité, les clés étrangères et les compteurs. Il refuse d'écraser un fichier de sauvegarde existant.
+Un exporteur logique portable est maintenant ajouté dans `storage.logical_backup`. Il accepte une connexion déjà ouverte, ouvre un savepoint de lecture pour conserver un instantané cohérent pendant la lecture de toutes les tables, encode les BLOB, produit un fichier JSON et son SHA-256, puis restaure le fichier dans une SQLite temporaire pour vérifier l'intégrité, les clés étrangères et les compteurs. Il refuse d'écraser un fichier de sauvegarde existant.
+
+Pour tout artefact destiné à être conservé, `export_encrypted_logical_backup(...)` chiffre le JSON temporaire en AES-256-GCM (clé dérivée par PBKDF2-HMAC-SHA256, 600 000 itérations). Après écriture, la fonction relit le fichier chiffré exact sur disque, contrôle son SHA-256, le déchiffre, puis vérifie la restauration logique. Si l'une de ces vérifications échoue, elle supprime l'artefact incomplet et lève une erreur. Le texte clair ne reste que dans des répertoires temporaires supprimés automatiquement.
 
 Cet exporteur n'ouvre pas de connexion et ne lit aucun secret : il n'est pas raccordé au serveur, à une route HTTP ou au démarrage. Il n'a pas été exécuté sur la base de production.
 
@@ -73,7 +75,8 @@ Tant que cette sauvegarde distante n'est pas démontrée restaurable, la migrati
 ## Tests attendus
 
 - Le mode simulation ne modifie ni schéma ni lignes.
-- L'export logique chiffré refuse l'écrasement, vérifie son SHA-256, teste le mauvais mot de passe et restaure temporairement les données dans une SQLite isolée.
+- L'export logique utilise un instantané de lecture cohérent, y compris avec le pilote libSQL local.
+- L'export chiffré vérifie sur disque le checksum, le déchiffrement et la restauration, teste le mauvais mot de passe et refuse de laisser un artefact incomplet.
 - L'application additive crée une table et un index manquants et ajoute `skills.xp`.
 - Un test d'intégration lance les véritables initialisateurs de schéma de Chappie dans un fichier SQLite temporaire, reconstruit le schéma dans une cible mémoire vide et compare les inventaires.\n- Un test complémentaire utilise le pilote `libsql` réel sur une base `:memory:` locale (aucun accès réseau/Turso) pour vérifier l'application additive, la conservation des lignes et l'idempotence.
 - Les lignes préexistantes restent identiques.

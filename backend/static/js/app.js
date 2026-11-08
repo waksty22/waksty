@@ -796,6 +796,125 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    // V50.10 — supervised personal learning goals
+    window.loadPersonalLearningGoals = async function() {
+        const proposalsList = document.getElementById("personalGoalProposals");
+        const goalsList = document.getElementById("personalGoalsList");
+        const status = document.getElementById("personalGoalsStatus");
+        if (!proposalsList || !goalsList) return;
+        if (status) status.textContent = "Lecture des objectifs et propositions…";
+        try {
+            const data = await apiCall("/api/learning/goals");
+            const proposals = data.suggestions?.proposals || [];
+            const goals = data.persisted?.goals || [];
+            proposalsList.replaceChildren();
+            goalsList.replaceChildren();
+
+            if (!proposals.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = "Aucune nouvelle proposition. Les objectifs actifs existants restent suivis ci-dessous.";
+                proposalsList.appendChild(empty);
+            }
+            proposals.forEach(proposal => {
+                const card = document.createElement("article");
+                card.className = "agenda-card";
+                const title = document.createElement("h4");
+                title.textContent = proposal.title;
+                const reason = document.createElement("p");
+                reason.textContent = proposal.reason || "Proposition issue de l'historique d'apprentissage.";
+                const criterion = document.createElement("p");
+                criterion.textContent = "Critère de réussite : " + proposal.criterion;
+                const steps = document.createElement("ol");
+                (proposal.steps || []).forEach(description => {
+                    const li = document.createElement("li");
+                    li.textContent = description;
+                    steps.appendChild(li);
+                });
+                const adopt = document.createElement("button");
+                adopt.type = "button";
+                adopt.textContent = "Adopter cet objectif";
+                adopt.addEventListener("click", async () => {
+                    adopt.disabled = true;
+                    try {
+                        await apiCall("/api/goals", {
+                            method: "POST",
+                            body: { title: proposal.title, steps: proposal.steps }
+                        });
+                        if (status) status.textContent = "Objectif adopté et enregistré. Il pourra progresser avec des preuves.";
+                        await window.loadPersonalLearningGoals();
+                    } catch (error) {
+                        adopt.disabled = false;
+                        if (status) status.textContent = "Objectif non enregistré : " + error.message;
+                    }
+                });
+                card.append(title, reason, criterion, steps, adopt);
+                proposalsList.appendChild(card);
+            });
+
+            if (!goals.length) {
+                const empty = document.createElement("div");
+                empty.className = "agenda-empty";
+                empty.textContent = "Aucun objectif adopté pour le moment.";
+                goalsList.appendChild(empty);
+            }
+            goals.forEach(goal => {
+                const card = document.createElement("article");
+                card.className = "agenda-card";
+                const title = document.createElement("h4");
+                title.textContent = goal.title;
+                const progress = document.createElement("p");
+                progress.textContent = "Progression : " + Math.round(goal.progress || 0) + " % · " + goal.status;
+                card.append(title, progress);
+                (goal.steps || []).forEach(step => {
+                    const row = document.createElement("div");
+                    row.className = "goal-step-row";
+                    const label = document.createElement("p");
+                    label.textContent = (step.status === "completed" ? "✓ " : "○ ") + step.description;
+                    const evidence = document.createElement("textarea");
+                    evidence.rows = 2;
+                    evidence.maxLength = 2000;
+                    evidence.placeholder = "Décris une preuve réelle pour cette étape…";
+                    evidence.value = step.evidence || "";
+                    const save = document.createElement("button");
+                    save.type = "button";
+                    save.className = "secondary";
+                    save.textContent = step.status === "completed" ? "Actualiser la preuve" : "Enregistrer la preuve";
+                    save.addEventListener("click", async () => {
+                        if (!evidence.value.trim()) {
+                            if (status) status.textContent = "Ajoute une preuve avant de valider l'étape.";
+                            evidence.focus();
+                            return;
+                        }
+                        save.disabled = true;
+                        try {
+                            await apiCall("/api/learning/goals/steps", {
+                                method: "POST",
+                                body: {
+                                    goal_id: goal.id,
+                                    step_id: step.id,
+                                    evidence: evidence.value.trim(),
+                                    completed: true
+                                }
+                            });
+                            if (status) status.textContent = "Preuve enregistrée. Progression recalculée à partir des étapes documentées.";
+                            await window.loadPersonalLearningGoals();
+                        } catch (error) {
+                            save.disabled = false;
+                            if (status) status.textContent = "Preuve non enregistrée : " + error.message;
+                        }
+                    });
+                    row.append(label, evidence, save);
+                    card.appendChild(row);
+                });
+                goalsList.appendChild(card);
+            });
+            if (status) status.textContent = proposals.length + " proposition(s) · " + goals.length + " objectif(s) persisté(s). Aucune proposition n'a été adoptée automatiquement.";
+        } catch (error) {
+            if (status) status.textContent = "Impossible de charger les objectifs : " + error.message;
+        }
+    };
+
     // V34 — causal learning controls
     window.createCausalObservation = async function() {
         const value = id => document.getElementById(id)?.value?.trim() || "";
@@ -1093,6 +1212,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.loadWorldMap();
         window.loadCausalLearning();
         window.loadSupervisedAgenda();
+        window.loadPersonalLearningGoals();
         window.loadSkills();
     }
 });

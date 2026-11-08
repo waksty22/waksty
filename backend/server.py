@@ -2324,33 +2324,6 @@ async def run_brain(
         )  
 
     cognitive_event_id = str(turn_id or secrets.token_urlsafe(24))
-    emotion_state = update_emotions_once(
-        user_id, message, event_id=cognitive_event_id
-    )
-    try:
-        with db_connection() as affect_db:
-            record_affective_snapshot(
-                affect_db, user_id, emotion_state,
-                source="classic_chat", event_label="message utilisateur",
-                event_id=cognitive_event_id,
-            )
-            affect_db.commit()
-    except Exception:
-        log.exception("[V26] Impossible d'enregistrer l'état affectif")
-
-    # Explicit teaching is shared across chat and Live; only the "heard" stage is granted.
-    try:
-        with db_connection() as teaching_db:
-            taught = record_explicit_word_teaching(
-                teaching_db, user_id, message,
-                evidence="Enseignement explicite via le chat classique",
-                event_id=cognitive_event_id,
-            )
-            if taught:
-                teaching_db.commit()
-                log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis le chat", len(taught))
-    except Exception:
-        log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement du chat")
 
     # Une conversation n'est pas une preuve d'apprentissage.
     # Les compétences progressent uniquement après validation explicite.
@@ -2528,13 +2501,35 @@ async def run_brain(
         reply, repeatable_words, max_words=1 if maturity < 3.0 else None
     )
 
-    save_conversation_turn(
-        user_id,
-        message,
-        reply,
-        source="conversation",
-        turn_id=cognitive_event_id,
-    )  
+    with db_connection() as cognitive_db:
+        saved = save_conversation_turn(
+            user_id,
+            message,
+            reply,
+            source="conversation",
+            turn_id=cognitive_event_id,
+            db=cognitive_db,
+        )
+        if saved:
+            emotion_state = update_emotions_once(
+                user_id, message,
+                event_id=cognitive_event_id,
+                db=cognitive_db,
+            )
+            record_affective_snapshot(
+                cognitive_db, user_id, emotion_state,
+                source="classic_chat", event_label="message utilisateur",
+                event_id=cognitive_event_id,
+            )
+            taught = record_explicit_word_teaching(
+                cognitive_db, user_id, message,
+                evidence="Enseignement explicite via le chat classique",
+                event_id=cognitive_event_id,
+            )
+            cognitive_db.commit()
+
+    if saved:
+        finalize_conversation_turn(user_id)
 
     return {  
         "reply": reply,  

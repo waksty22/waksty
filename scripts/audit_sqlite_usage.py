@@ -71,7 +71,7 @@ def scan_file(path: Path) -> list[dict]:
         }]
 
     findings: list[dict] = []
-    rel = path.relative_to(ROOT).as_posix()
+    try:\n        rel = path.relative_to(ROOT).as_posix()\n    except ValueError:\n        rel = path.name
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):

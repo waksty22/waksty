@@ -72,3 +72,21 @@ def test_sqlite_factory_does_not_read_turso_secrets(monkeypatch, tmp_path):
         assert db.execute("SELECT 1").fetchone()[0] == 1
     finally:
         db.close()
+
+def test_factory_uses_the_same_data_dir_and_filename_as_server(monkeypatch, tmp_path):
+    active_dir = tmp_path / "active-chappie-data"
+    competing_path = tmp_path / "different-empty-database.sqlite3"
+    monkeypatch.setenv("CHAPPIE_DATA_DIR", str(active_dir))
+    # A legacy/accidental second path variable must not split the app and
+    # factory onto different SQLite files.
+    monkeypatch.setenv("CHAPPIE_SQLITE_PATH", str(competing_path))
+    monkeypatch.delenv("CHAPPIE_STORAGE_BACKEND", raising=False)
+
+    settings = StorageSettings.from_env()
+
+    assert settings.backend == "sqlite"
+    assert Path(settings.sqlite_path) == (
+        active_dir.resolve() / "chappie_v16.sqlite3"
+    )
+    assert Path(settings.sqlite_path) != competing_path
+

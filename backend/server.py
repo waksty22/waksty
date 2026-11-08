@@ -152,6 +152,7 @@ from cognition.shared_brain import (
 )
 from storage.turso_compat import inspect_turso_driver
 from storage.schema_audit import inspect_database, compare_database_inventories
+from storage.path_diagnostics import inspect_sqlite_path_diagnostics
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
@@ -5011,7 +5012,48 @@ async def api_storage_schema_audit(auth=Depends(require_auth)):
 
 
 
+
+@app.get("/api/storage/path-diagnostics")
+async def api_storage_path_diagnostics(auth=Depends(require_auth)):
+    """Inspect the exact SQLite file used by the app without changing it."""
+    _authenticated_user(auth)
+    connection = None
+    try:
+        # Reuse the same connection factory as application reads/writes.
+        # Do not open an alternate path: sqlite3.connect() could create a
+        # misleading empty database if the configured file were missing.
+        connection = db_connection()
+        return {
+            "diagnostics_version": "50.20",
+            "read_only": True,
+            "data_contents_exposed": False,
+            "database": inspect_sqlite_path_diagnostics(
+                connection=connection,
+                configured_db_path=DB_PATH,
+                configured_data_dir=BASE_DIR,
+                data_dir_env_configured=bool(
+                    os.getenv("CHAPPIE_DATA_DIR", "").strip()
+                ),
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("[STORAGE PATH] Échec du diagnostic SQLite en lecture seule.")
+        raise HTTPException(
+            status_code=503,
+            detail="Diagnostic du chemin SQLite impossible : " + type(exc).__name__,
+        )
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+
 @app.get("/api/turso/backup")
+
 async def api_turso_backup(auth=Depends(require_auth)):
     """Create a verified AES-GCM encrypted, read-only logical Turso backup."""
     _authenticated_user(auth)

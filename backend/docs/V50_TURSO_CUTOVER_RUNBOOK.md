@@ -31,6 +31,14 @@
 
 Livrable : rapport daté, sans contenu personnel, avec écarts et décision explicite « prêt / bloqué ».
 
+## Complément V50.20 — Diagnostic du fichier SQLite réellement ouvert
+
+L'endpoint authentifié `GET /api/storage/path-diagnostics` réutilise `db_connection()`, donc inspecte la même base SQLite que l'application. Il expose uniquement les chemins de configuration et du fichier ouvert, les tailles des fichiers SQLite/WAL/SHM, le mode journal, le point de montage Linux le plus spécifique et le résultat de `PRAGMA integrity_check`. Il ne lit ni ne retourne les lignes métier et n'ouvre aucune base alternative.
+
+Le point de montage observé est une information système, pas une preuve contractuelle de persistance Render. Il faut le comparer au chemin de montage du disque configuré dans le tableau de bord Render. L'absence de `CHAPPIE_DATA_DIR` signifie que le code utilise son chemin par défaut ; elle ne permet pas, à elle seule, de conclure que le disque est absent.
+
+**Sécurité :** cet endpoint reste protégé par l'authentification existante. Il n'effectue aucune écriture SQLite/Turso, aucun checkpoint WAL et aucune création de fichier de base supplémentaire.
+
 ## Phase B — Préparation de la cible
 
 - Produire une sauvegarde SQLite cohérente et vérifiée depuis le volume actif.
@@ -95,7 +103,7 @@ Revenir à SQLite si le démarrage échoue, si une table manque, si une écritur
 - [x] Sauvegarde logique Turso chiffrée avec vérification locale.
 - [x] Outil de comparaison de schéma et de plan de migration non destructif présent.
 - [x] Fabrique de connexions et adaptateur libsql présents, isolés du stockage actif.
-- [ ] Audit réel des deux bases et rapport de compatibilité.
+- [x] Diagnostic en lecture seule du chemin SQLite réellement ouvert (V50.20, code/tests prêts ; exécution sur Render à faire après déploiement approuvé).\n- [ ] Audit réel des deux bases et rapport de compatibilité.
 - [ ] Compatibilité complète du backend avec libsql.
 - [ ] Migrateur de données idempotent avec contrôle d'empreintes.
 - [ ] Répétition de migration/restauration sur environnement isolé.

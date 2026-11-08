@@ -804,6 +804,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!proposalsList || !goalsList) return;
         if (status) status.textContent = "Lecture des objectifs et propositions…";
         try {
+            if (!skillCatalogCache.length) await window.loadSkillCatalog();
             const data = await apiCall("/api/learning/goals");
             const proposals = data.suggestions?.proposals || [];
             const goals = data.persisted?.goals || [];
@@ -907,6 +908,122 @@ document.addEventListener("DOMContentLoaded", () => {
                     row.append(label, evidence, save);
                     card.appendChild(row);
                 });
+
+                const linkedAssessments = goal.skill_assessments || [];
+                if (linkedAssessments.length) {
+                    const linkedTitle = document.createElement("h5");
+                    linkedTitle.textContent = "Évaluations de compétences reliées";
+                    card.appendChild(linkedTitle);
+                    linkedAssessments.forEach(assessment => {
+                        const line = document.createElement("p");
+                        const [systemKey, branchKey] = assessment.test_name.split(":");
+                        const system = skillCatalogCache.find(item => item.key === systemKey);
+                        const branch = system?.branches?.find(item => item.key === branchKey);
+                        line.textContent = (system?.name || systemKey) + " · " +
+                            (branch?.name || branchKey) + " · " + assessment.score + "/100 · " +
+                            (assessment.passed ? "évaluation réussie" : "évaluation non réussie");
+                        card.appendChild(line);
+                    });
+                }
+
+                const completedSteps = (goal.steps || []).filter(step =>
+                    step.status === "completed" && String(step.evidence || "").trim()
+                );
+                if (completedSteps.length) {
+                    const assessmentPanel = document.createElement("div");
+                    assessmentPanel.className = "goal-skill-assessment";
+                    const heading = document.createElement("h5");
+                    heading.textContent = "Relier une compétence à cet objectif";
+                    const note = document.createElement("p");
+                    note.className = "muted";
+                    note.textContent = "Choisis une étape déjà prouvée, puis réalise une évaluation distincte. Seule une évaluation supervisée réussie fera progresser l'arbre.";
+                    const stepSelect = document.createElement("select");
+                    completedSteps.forEach(step => {
+                        const option = document.createElement("option");
+                        option.value = String(step.id);
+                        option.textContent = step.description;
+                        stepSelect.appendChild(option);
+                    });
+                    const branchSelect = document.createElement("select");
+                    skillCatalogCache.forEach(system => {
+                        const group = document.createElement("optgroup");
+                        group.label = system.name;
+                        (system.branches || []).forEach(branch => {
+                            const option = document.createElement("option");
+                            option.value = system.key + ":" + branch.key;
+                            option.textContent = branch.name;
+                            group.appendChild(option);
+                        });
+                        branchSelect.appendChild(group);
+                    });
+                    const scoreLabel = document.createElement("label");
+                    scoreLabel.textContent = "Score observé (0 à 100)";
+                    const scoreInput = document.createElement("input");
+                    scoreInput.type = "number";
+                    scoreInput.min = "0";
+                    scoreInput.max = "100";
+                    scoreInput.value = "75";
+                    const evidenceLabel = document.createElement("label");
+                    evidenceLabel.textContent = "Preuve de l'évaluation (20 à 2000 caractères)";
+                    const assessmentEvidence = document.createElement("textarea");
+                    assessmentEvidence.rows = 3;
+                    assessmentEvidence.maxLength = 2000;
+                    assessmentEvidence.placeholder = "Décris l'exercice supplémentaire, la réponse de Chappie et comment tu as vérifié le résultat.";
+                    const approvalLabel = document.createElement("label");
+                    approvalLabel.className = "inline-check";
+                    const approval = document.createElement("input");
+                    approval.type = "checkbox";
+                    const approvalText = document.createElement("span");
+                    approvalText.textContent = "Je confirme avoir personnellement supervisé et vérifié cette évaluation.";
+                    approvalLabel.append(approval, approvalText);
+                    const assess = document.createElement("button");
+                    assess.type = "button";
+                    assess.textContent = "Valider l'évaluation de compétence";
+                    assess.addEventListener("click", async () => {
+                        const proof = assessmentEvidence.value.trim();
+                        const score = Number(scoreInput.value);
+                        if (!approval.checked) {
+                            if (status) status.textContent = "Coche la validation du superviseur après avoir vérifié l'exercice.";
+                            return;
+                        }
+                        if (proof.length < 20 || proof.length > 2000 || !Number.isFinite(score) || score < 0 || score > 100) {
+                            if (status) status.textContent = "Vérifie le score et saisis une preuve de 20 à 2000 caractères.";
+                            return;
+                        }
+                        const [system, branch] = branchSelect.value.split(":");
+                        assess.disabled = true;
+                        try {
+                            const result = await apiCall("/api/cognition/skills/assessments", {
+                                method: "POST",
+                                body: {
+                                    system, branch, score, evidence: proof,
+                                    supervisor_approved: true,
+                                    goal_id: goal.id,
+                                    goal_step_id: Number(stepSelect.value)
+                                }
+                            });
+                            if (status) status.textContent = result.assessment?.passed
+                                ? "Évaluation liée et réussie. L'arbre des compétences a été recalculé."
+                                : "Évaluation liée mais non réussie : aucun niveau supplémentaire n'est attribué.";
+                            await window.loadSkills();
+                            await window.loadPersonalLearningGoals();
+                        } catch (error) {
+                            assess.disabled = false;
+                            if (status) status.textContent = "Évaluation refusée : " + error.message;
+                        }
+                    });
+                    assessmentPanel.append(
+                        heading, note, stepSelect, branchSelect,
+                        scoreLabel, scoreInput, evidenceLabel, assessmentEvidence,
+                        approvalLabel, assess
+                    );
+                    card.appendChild(assessmentPanel);
+                } else {
+                    const note = document.createElement("p");
+                    note.className = "muted";
+                    note.textContent = "Une étape doit d'abord être validée avec une preuve avant de pouvoir relier une évaluation de compétence.";
+                    card.appendChild(note);
+                }
                 goalsList.appendChild(card);
             });
             if (status) status.textContent = proposals.length + " proposition(s) · " + goals.length + " objectif(s) persisté(s). Aucune proposition n'a été adoptée automatiquement.";

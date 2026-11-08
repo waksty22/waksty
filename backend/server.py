@@ -1790,7 +1790,13 @@ def get_identity_prompt(user_id: str) -> str:
 
     personal_goals_context = "\n".join(
         f"- {goal['title']} | état={goal['status']} | progression={goal['progress']:.0f}% "
-        f"| étapes={sum(1 for step in goal['steps'] if step['status'] == 'completed' and step['evidence'])}/{len(goal['steps'])}"
+        f"| étapes={sum(1 for step in goal['steps'] if step['status'] == 'completed' and step['evidence'])}/{len(goal['steps'])} "
+        f"| compétences évaluées : "
+        + (", ".join(
+            f"{assessment['test_name']} ({assessment['score']:.0f}/100, "
+            f"{'réussie' if assessment['passed'] else 'non réussie'})"
+            for assessment in goal.get('skill_assessments', [])[:5]
+        ) or "aucune")
         for goal in personal_goals_state["goals"]
     ) or "Aucun objectif personnel enregistré."
     personal_goal_suggestions_context = "\n".join(
@@ -3177,11 +3183,34 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
     if not math.isfinite(score) or not 0 <= score <= 100:
         raise HTTPException(status_code=422, detail="Le score doit être compris entre 0 et 100.")
     test_name = system_key + ":" + branch_key
+    goal_id = data.get("goal_id")
+    goal_step_id = data.get("goal_step_id")
+    if (goal_id is None) != (goal_step_id is None):
+        raise HTTPException(status_code=422, detail="Pour relier une évaluation à un objectif, indique aussi l'étape concernée.")
+    if goal_id is not None:
+        try:
+            goal_id = int(goal_id)
+            goal_step_id = int(goal_step_id)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="Identifiants d'objectif ou d'étape invalides.")
+        with db_connection() as db:
+            linked_step = db.execute(
+                """SELECT s.id FROM goals g
+                   JOIN goal_steps s ON s.goal_id=g.id
+                   WHERE g.id=? AND g.user_id=? AND s.id=?
+                     AND s.status='completed' AND length(trim(s.evidence))>0""",
+                (goal_id, user_id, goal_step_id),
+            ).fetchone()
+        if linked_step is None:
+            raise HTTPException(status_code=403, detail="L'étape doit appartenir à ton objectif et comporter une preuve déjà enregistrée.")
     details = {
         "source": "supervised_assessment",
         "supervisor_approved": True,
         "evidence": evidence,
     }
+    if goal_id is not None:
+        details["goal_id"] = goal_id
+        details["goal_step_id"] = goal_step_id
     try:
         with db_connection() as db:
             prior = db.execute(

@@ -283,10 +283,15 @@ def db_connection() -> sqlite3.Connection:
     # refuses Turso until startup, backup, diagnostics and route contracts are
     # fully backend-neutral.
     settings = StorageSettings.from_env()
-    if settings.sqlite_path != str(DB_PATH):
-        raise RuntimeError(
-            "Le chemin SQLite de la fabrique diffère de la base active du serveur."
-        )
+    # DB_PATH is the server's canonical path. Tests and controlled maintenance
+    # may replace it at runtime; production derives it from CHAPPIE_DATA_DIR.
+    # Keep the selected backend and credentials, but never open a second file.
+    settings = StorageSettings(
+        backend=settings.backend,
+        sqlite_path=str(DB_PATH),
+        turso_database_url=settings.turso_database_url,
+        turso_auth_token=settings.turso_auth_token,
+    )
     return open_sqlite_application_connection(settings)
 
 def init_db() -> None:

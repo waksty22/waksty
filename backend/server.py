@@ -153,6 +153,10 @@ from cognition.shared_brain import (
 from storage.turso_compat import inspect_turso_driver
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
+from storage.connection_factory import (
+    StorageSettings,
+    open_sqlite_application_connection,
+)
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
@@ -275,15 +279,15 @@ def local_now() -> str:
         return datetime.now().astimezone().isoformat()
 
 def db_connection() -> sqlite3.Connection:
-    db = sqlite3.connect(
-        DB_PATH,
-        timeout=20,
-        check_same_thread=False,
-    )
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=20000")
-    return db
+    # Keep the exact DB_PATH selected by CHAPPIE_DATA_DIR. The shared factory
+    # refuses Turso until startup, backup, diagnostics and route contracts are
+    # fully backend-neutral.
+    settings = StorageSettings.from_env()
+    if settings.sqlite_path != str(DB_PATH):
+        raise RuntimeError(
+            "Le chemin SQLite de la fabrique diffère de la base active du serveur."
+        )
+    return open_sqlite_application_connection(settings)
 
 def init_db() -> None:
     with db_connection() as db:

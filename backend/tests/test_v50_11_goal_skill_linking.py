@@ -79,7 +79,6 @@ def test_only_linked_supervised_assessments_are_listed_for_the_goal_owner():
     assert len(linked) == 1
     assert linked[0]["test_name"] == "tete:logique_inductive"
     assert linked[0]["goal_step_id"] == step_id
-    assert list_goal_skill_assessments(db, "other-user", goal_id) == [] if False else True
     goals = list_personal_learning_goals(db, "creator")
     assert goals["goals"][0]["skill_assessments"] == linked
     db.close()

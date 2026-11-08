@@ -1,7 +1,7 @@
-"""Regression guard: production storage stays on the explicitly audited SQLite path.
+"""Regression guard: keep the server on its SQLite-only pre-cutover adapter.
 
-This is a temporary pre-cutover invariant. A future, separately approved
-Turso cutover must replace these assertions with end-to-end backend tests.
+The shared connection factory supports Turso, but the application helper must
+fail closed until a separately approved and fully tested cutover.
 """
 from __future__ import annotations
 
@@ -14,8 +14,7 @@ SERVER_PATH = BACKEND_DIR / "server.py"
 
 def _function(tree: ast.AST, name: str) -> ast.FunctionDef:
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            assert isinstance(node, ast.FunctionDef)
+        if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
     raise AssertionError(f"Function not found: {name}")
 
@@ -32,27 +31,16 @@ def _call_names(node: ast.AST) -> set[str]:
     return names
 
 
-def test_server_db_connection_remains_explicitly_sqlite_before_cutover():
+def test_server_uses_sqlite_only_application_connection_before_cutover():
     tree = ast.parse(SERVER_PATH.read_text(encoding="utf-8"))
     connection = _function(tree, "db_connection")
     calls = _call_names(connection)
 
-    assert "sqlite3.connect" in calls
+    assert "StorageSettings.from_env" in calls
+    assert "StorageSettings" in calls
+    assert "open_sqlite_application_connection" in calls
     assert "open_storage_connection" not in calls
-    assert "open_sqlite_application_connection" not in calls
-
-    connect_calls = [
-        node for node in ast.walk(connection)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "sqlite3"
-        and node.func.attr == "connect"
-    ]
-    assert len(connect_calls) == 1
-    assert connect_calls[0].args
-    assert isinstance(connect_calls[0].args[0], ast.Name)
-    assert connect_calls[0].args[0].id == "DB_PATH"
+    assert "sqlite3.connect" not in calls
 
 
 def test_server_database_path_is_derived_from_configured_data_directory():

@@ -95,7 +95,7 @@ def test_apply_is_additive_and_preserves_existing_rows():
 
         # A second planning pass is a no-op: the migration is idempotent.
         rerun = build_migration_plan(source, target)
-        assert rerun["ready"]
+        assert rerun["ready"], rerun["blockers"]
         assert rerun["planned_statement_count"] == 0
     finally:
         source.close()

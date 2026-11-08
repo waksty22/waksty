@@ -366,3 +366,18 @@ La route authentifiée `GET /api/storage/schema-audit` est préparée pour compa
 Aucun contenu de conversation, souvenir, journal ou autre donnée personnelle n'est renvoyé. Les jetons et chaînes de connexion ne sont jamais inclus dans la réponse. La route exige l'authentification Chappie et ferme les deux connexions après l'audit.
 
 L'exécution sur les bases hébergées n'a pas lieu depuis la CI : elle ne sera possible qu'après déploiement contrôlé de cette route sur Render, puis appel authentifié depuis l'interface ou le client Chappie. Cet audit est un diagnostic, pas une migration ; aucune écriture ni bascule de stockage n'est effectuée.
+## 19. Récupération pertinente des souvenirs — V50.3
+
+La recherche épisodique utilise les termes significatifs d'une question au lieu d'exiger que la phrase complète existe telle quelle dans un souvenir :
+
+- recherche dans le contenu, la catégorie et les tags ;
+- normalisation Unicode des accents français ;
+- classement par couverture des termes, bonus d'expression exacte, puis importance, confiance, accès et récence ;
+- limite de candidats et de résultats, avec isolation stricte par utilisateur ;
+- incrémentation du compteur d'accès uniquement pour les souvenirs effectivement retournés.
+
+Le score mesure une correspondance lexicale, pas la vérité du souvenir. La provenance (observed, taught, inferred, confirmed) et la confiance restent inchangées.
+
+Le chat écrit et Gemini Live partagent déjà le même point d'entrée de recherche mémoire côté serveur (retrieve_memories / outil search_memories) : ils bénéficient du même classement sans modifier le protocole audio Live.
+
+Les tests utilisent uniquement des souvenirs synthétiques en bases locales en mémoire. Aucun souvenir de production n'est lu, déplacé, supprimé ou modifié.

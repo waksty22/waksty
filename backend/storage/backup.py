@@ -58,7 +58,7 @@ def _write_checksum_no_clobber(path: Path, digest: str) -> Path:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(fd, "w", encoding="ascii") as handle:
-            handle.write(f"{digest}  {path.name}\\n")
+            handle.write(f"{digest}  {path.name}\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.link(temporary, sidecar)

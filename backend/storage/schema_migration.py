@@ -81,60 +81,49 @@ def _normalized_sql(value: Any) -> str:
 
 
 
-def _table_definition_signature(sql: Any, omit_columns: set[str] | None = None) -> str | None:
-    """Compare table constraints and per-column SQL independently of column order.
+def _unique_index_signature(connection: Any, table_name: str) -> list[tuple[Any, ...]]:
+    """Return unique-index semantics, including UNIQUE table/column constraints."""
+    indexes = connection.execute(
+        f"PRAGMA index_list({_quote_identifier(table_name)})"
+    ).fetchall()
+    signature = []
+    for row in indexes:
+        if not int(_row_value(row, "unique", 2)):
+            continue
+        name = str(_row_value(row, "name", 1))
+        origin = str(_row_value(row, "origin", 3))
+        partial = int(_row_value(row, "partial", 4))
+        columns = connection.execute(
+            f"PRAGMA index_xinfo({_quote_identifier(name)})"
+        ).fetchall()
+        key_columns = tuple(
+            (
+                _row_value(column, "name", 2),
+                int(_row_value(column, "desc", 3)),
+                str(_row_value(column, "coll", 4) or "").casefold(),
+            )
+            for column in columns
+            if int(_row_value(column, "key", 5))
+        )
+        signature.append((origin, partial, key_columns))
+    return sorted(signature, key=repr)
 
-    SQLite appends ALTER TABLE columns to sqlite_master SQL. Comparing ordered
-    CREATE TABLE text would therefore reject a valid additive migration on its
-    second run. This canonical form keys column clauses by name and sorts
-    table-level constraints, while still detecting CHECK/UNIQUE/COLLATE drift.
-    """
+
+def _check_constraint_signature(sql: Any) -> list[str] | None:
+    """Extract CHECK clauses without depending on column declaration order."""
     if not sql:
         return None
-    text = str(sql).strip()
+    text = str(sql)
     open_at = text.find("(")
     if open_at < 0:
         return None
-
+    body_end = len(text) - 1
+    body = text[open_at + 1:body_end]
     backtick = chr(96)
-    quote: str | None = None
-    depth = 0
-    close_at = -1
-    i = open_at
-    while i < len(text):
-        char = text[i]
-        if quote:
-            if quote == "]":
-                if char == "]":
-                    if i + 1 < len(text) and text[i + 1] == "]":
-                        i += 1
-                    else:
-                        quote = None
-            elif char == quote:
-                if i + 1 < len(text) and text[i + 1] == quote:
-                    i += 1
-                else:
-                    quote = None
-        elif char in ("'", '"', backtick):
-            quote = char
-        elif char == "[":
-            quote = "]"
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0:
-                close_at = i
-                break
-        i += 1
-    if close_at < 0 or text[close_at + 1:].strip().strip(";"):
-        return None
-
-    body = text[open_at + 1:close_at]
     parts: list[str] = []
     start = 0
     depth = 0
-    quote = None
+    quote: str | None = None
     i = 0
     while i < len(body):
         char = body[i]
@@ -166,40 +155,63 @@ def _table_definition_signature(sql: Any, omit_columns: set[str] | None = None) 
         return None
     parts.append(body[start:].strip())
 
-    omitted = {name.casefold() for name in (omit_columns or set())}
-    columns: dict[str, str] = {}
-    constraints: list[str] = []
-    table_constraint_words = {"constraint", "check", "unique", "primary", "foreign"}
+    checks: list[str] = []
     for part in parts:
-        token = part.lstrip()
-        if not token:
-            return None
-        first = token.split(None, 1)[0]
-        if first.startswith('"') and first.endswith('"'):
-            identifier = first[1:-1].replace('""', '"')
-        elif first.startswith(backtick) and first.endswith(backtick):
-            identifier = first[1:-1].replace(backtick + backtick, backtick)
-        elif first.startswith("[") and first.endswith("]"):
-            identifier = first[1:-1].replace("]]", "]")
-        else:
-            identifier = first
-        normalized = _normalized_sql(part)
-        if identifier.casefold() in table_constraint_words:
-            constraints.append(normalized)
-        else:
-            key = identifier.casefold()
-            if key in omitted:
-                continue
-            if key in columns:
-                return None
-            columns[key] = normalized
-
-    prefix = _normalized_sql(text[:open_at])
-    if not prefix:
-        return None
-    column_signature = [f"column:{name}:{value}" for name, value in sorted(columns.items())]
-    constraint_signature = [f"constraint:{value}" for value in sorted(constraints)]
-    return prefix + "|" + "|".join(column_signature + constraint_signature)
+        lowered = part.casefold()
+        if lowered.startswith("check") or lowered.startswith("constraint"):
+            if "check" in lowered:
+                checks.append(_normalized_sql(part))
+            continue
+        # Extract inline CHECK(...) expressions from column declarations.
+        quote = None
+        i = 0
+        while i < len(part):
+            char = part[i]
+            if quote:
+                if quote == "]":
+                    if char == "]":
+                        quote = None
+                elif char == quote:
+                    quote = None
+            elif char in ("'", '"', backtick):
+                quote = char
+            elif char == "[":
+                quote = "]"
+            elif part[i:i + 5].casefold() == "check" and (
+                i == 0 or not (part[i - 1].isalnum() or part[i - 1] == "_")
+            ):
+                j = i + 5
+                while j < len(part) and part[j].isspace():
+                    j += 1
+                if j >= len(part) or part[j] != "(":
+                    i += 5
+                    continue
+                check_start = j
+                check_depth = 0
+                check_quote = None
+                while j < len(part):
+                    current = part[j]
+                    if check_quote:
+                        if current == check_quote:
+                            if j + 1 < len(part) and part[j + 1] == check_quote:
+                                j += 1
+                            else:
+                                check_quote = None
+                    elif current in ("'", '"', backtick):
+                        check_quote = current
+                    elif current == "(":
+                        check_depth += 1
+                    elif current == ")":
+                        check_depth -= 1
+                        if check_depth == 0:
+                            checks.append(_normalized_sql(part[i: j + 1]))
+                            break
+                    j += 1
+                if check_depth != 0:
+                    return None
+                i = j
+            i += 1
+    return sorted(checks)
 
 
 
@@ -256,20 +268,15 @@ def build_migration_plan(
                 )
         if _foreign_key_signature(source, table_name) != _foreign_key_signature(target, table_name):
             blockers.append(f"{table_name}: contraintes de clés étrangères différentes.")
+        if _unique_index_signature(source, table_name) != _unique_index_signature(target, table_name):
+            blockers.append(f"{table_name}: contraintes ou index UNIQUE différents.")
+        source_checks = _check_constraint_signature(source_tables[table_name]["sql"])
+        target_checks = _check_constraint_signature(target_tables[table_name]["sql"])
+        if source_checks is None or target_checks is None:
+            blockers.append(f"{table_name}: contraintes CHECK impossibles à comparer de façon sûre.")
+        elif source_checks != target_checks:
+            blockers.append(f"{table_name}: contraintes CHECK différentes.")
         missing_columns = sorted(set(source_columns) - set(target_columns))
-        allowed_missing = set(missing_columns) & set(allowed.get(table_name, {}))
-        source_definition = _table_definition_signature(
-            source_tables[table_name]["sql"], allowed_missing
-        )
-        target_definition = _table_definition_signature(target_tables[table_name]["sql"])
-        if source_definition is None or target_definition is None:
-            blockers.append(
-                f"{table_name}: définition SQL de table impossible à comparer de façon sûre."
-            )
-        elif source_definition != target_definition:
-            blockers.append(
-                f"{table_name}: contraintes ou définition SQL de table différentes."
-            )
         unexpected = [
             column for column in missing_columns
             if column not in allowed.get(table_name, {})

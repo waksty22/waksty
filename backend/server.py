@@ -5034,15 +5034,24 @@ async def api_turso_backup(auth=Depends(require_auth)):
         connection = libsql.connect(database=database_url, auth_token=auth_token)
         connection.execute("SELECT 1").fetchone()
 
+        import zipfile
+
         with tempfile.TemporaryDirectory(prefix="chappie-turso-backup-") as temp_dir:
             filename = "chappie-turso-backup-" + datetime.now(
                 timezone.utc
-            ).strftime("%Y%m%d-%H%M%S") + ".json.enc"
-            backup_path = Path(temp_dir) / filename
+            ).strftime("%Y%m%d-%H%M%S") + ".zip"
+            backup_path = Path(temp_dir) / "chappie-turso-backup.json.enc"
             result = export_encrypted_logical_backup(
                 connection, backup_path, encryption_key
             )
-            payload = backup_path.read_bytes()
+            archive_path = Path(temp_dir) / filename
+            checksum_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
+            with zipfile.ZipFile(
+                archive_path, mode="w", compression=zipfile.ZIP_STORED
+            ) as archive:
+                archive.write(backup_path, arcname=backup_path.name)
+                archive.write(checksum_path, arcname=checksum_path.name)
+            payload = archive_path.read_bytes()
 
         log.info(
             "[TURSO] Verified encrypted logical backup ready "
@@ -5059,6 +5068,7 @@ async def api_turso_backup(auth=Depends(require_auth)):
                 "X-Backup-SHA256": result["sha256"],
                 "X-Backup-Verified": "true",
                 "X-Backup-Encrypted": "AES-256-GCM",
+                "X-Backup-Format": "ZIP: encrypted backup + SHA-256 sidecar",
                 "X-Backup-Table-Count": str(result["table_count"]),
                 "X-Backup-Row-Count": str(result["total_rows"]),
             },

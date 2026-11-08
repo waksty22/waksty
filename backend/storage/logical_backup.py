@@ -42,10 +42,18 @@ def _query_rows(connection: Any, sql: str) -> tuple[list[str], list[tuple[Any, .
 
 
 def export_logical_backup(connection: Any, destination: str | Path) -> dict[str, Any]:
-    """Export all user tables to a JSON artifact; never writes to the DB."""
+    """Export all user tables to a JSON artifact; never writes to the DB.
+
+    Publish the data and checksum without clobbering either pre-existing file.
+    If either publication or the final isolated restore check fails, remove only
+    artifacts created by this invocation.
+    """
     destination = Path(destination).expanduser().resolve()
-    if destination.exists():
-        raise FileExistsError(f"Refusing to overwrite existing backup: {destination}")
+    checksum_path = destination.with_suffix(destination.suffix + ".sha256")
+    if destination.exists() or checksum_path.exists():
+        raise FileExistsError(
+            f"Refusing to overwrite existing backup or checksum: {destination}"
+        )
     objects_sql = """
         SELECT type, name, tbl_name, sql
         FROM sqlite_master
@@ -95,26 +103,45 @@ def export_logical_backup(connection: Any, destination: str | Path) -> dict[str,
     }
     encoded = (json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=destination.name + ".", suffix=".tmp", dir=destination.parent)
+
+    data_fd, data_temp_name = tempfile.mkstemp(
+        prefix=destination.name + ".", suffix=".tmp", dir=destination.parent
+    )
+    checksum_temp = destination.with_name("." + checksum_path.name + ".tmp")
+    published_data = False
+    published_checksum = False
     try:
-        with os.fdopen(fd, "wb") as handle:
+        with os.fdopen(data_fd, "wb") as handle:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary_name, destination)
-    except Exception:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
 
-    digest = hashlib.sha256(encoded).hexdigest()
-    checksum_path = destination.with_suffix(destination.suffix + ".sha256")
-    checksum_path.write_text(f"{digest}  {destination.name}\n", encoding="ascii")
-    verification = verify_logical_backup(destination)
-    if not verification["valid"]:
-        raise ValueError("Backup export failed local restore verification.")
+        digest = hashlib.sha256(encoded).hexdigest()
+        # Hard-link publication is atomic and fails if another process created
+        # the destination after our initial existence check.
+        os.link(data_temp_name, destination)
+        published_data = True
+
+        with checksum_temp.open("x", encoding="ascii") as handle:
+            handle.write(f"{digest}  {destination.name}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(checksum_temp, checksum_path)
+        published_checksum = True
+
+        verification = verify_logical_backup(destination)
+        if not verification["valid"]:
+            raise ValueError("Backup export failed local restore verification.")
+    except Exception:
+        if published_checksum:
+            checksum_path.unlink(missing_ok=True)
+        if published_data:
+            destination.unlink(missing_ok=True)
+        raise
+    finally:
+        Path(data_temp_name).unlink(missing_ok=True)
+        checksum_temp.unlink(missing_ok=True)
+
     return {
         "path": str(destination),
         "sha256": digest,

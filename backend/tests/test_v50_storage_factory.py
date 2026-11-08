@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
 from storage.connection_factory import (
     StorageSettings,
     open_storage_connection,
+    open_sqlite_application_connection,
 )
 
 
@@ -89,4 +90,26 @@ def test_factory_uses_the_same_data_dir_and_filename_as_server(monkeypatch, tmp_
         active_dir.resolve() / "chappie_v16.sqlite3"
     )
     assert Path(settings.sqlite_path) != competing_path
+
+def test_application_connection_helper_opens_sqlite_only(tmp_path):
+    settings = StorageSettings(
+        backend="sqlite",
+        sqlite_path=str(tmp_path / "server.sqlite3"),
+    )
+    db = open_sqlite_application_connection(settings)
+    try:
+        assert isinstance(db, sqlite3.Connection)
+        assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    finally:
+        db.close()
+
+
+def test_application_connection_helper_fails_closed_for_turso():
+    settings = StorageSettings(
+        backend="turso",
+        turso_database_url="libsql://example.turso.io",
+        turso_auth_token="test-token",
+    )
+    with pytest.raises(RuntimeError, match="Turso n'est pas encore activé"):
+        open_sqlite_application_connection(settings)
 

@@ -1934,6 +1934,17 @@ TOOLS = [{
             },
         },
         {
+            "name": "search_autobiographical_events",
+            "description": "Retrouver des épisodes de conversations passées par plusieurs mots-clés. À utiliser lorsque l'utilisateur fait référence à un événement, une décision ou une discussion antérieure. Les réponses associées de Chappie sont explicitement marquées comme contexte du même dialogue, pas comme preuve.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "query": {"type": "STRING"},
+                },
+                "required": ["query"],
+            },
+        },
+        {
             "name": "get_shared_brain_state",
             "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
             "parameters": {
@@ -1980,6 +1991,19 @@ def execute_tool(
                     10,  
                 )  
             }  
+
+        if name == "search_autobiographical_events":
+            query = str(args.get("query", ""))[:200]
+            with db_connection() as autobiography_db:
+                sync_autobiographical_events(autobiography_db, user_id)
+                events = search_autobiographical_events(
+                    autobiography_db, user_id, query, limit=8
+                )
+            return {
+                "events": events,
+                "grounded_in_source_messages": True,
+                "dialogue_links_are_context_not_confirmation": True,
+            }
 
         if name == "get_shared_brain_state":
             with db_connection() as brain_db:

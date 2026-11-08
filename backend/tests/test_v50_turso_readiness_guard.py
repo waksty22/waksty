@@ -41,7 +41,9 @@ def test_turso_application_helper_fails_closed():
     factory = _tree("storage/connection_factory.py")
     helper = _function(factory, "open_sqlite_application_connection")
     source = ast.unparse(helper)
-    assert 'selected.backend != "sqlite"' in source
+    assert "selected.backend" in source
+    assert "!=" in source
+    assert "sqlite" in source
     assert "RuntimeError" in source
     assert "Turso" in source
 

@@ -622,6 +622,10 @@ async def body_size_guard(request: Request, call_next):
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_id: Optional[str] = Field(
+        default=None, min_length=8, max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
     user_id: str = Field(  
         default="creator",  
         min_length=1,  
@@ -1572,60 +1576,52 @@ def save_conversation_turn(
     user_text: str,
     assistant_text: str,
     source: str = "conversation",
-) -> None:
+    turn_id: Optional[str] = None,
+) -> bool:
+    """Persist one complete turn; a supplied turn_id makes replays idempotent."""
+    user_id = valid_user(user_id)
+    user_text = re.sub(r"\s+", " ", str(user_text)).strip()[:MAX_MESSAGE_CHARS]
+    assistant_text = re.sub(r"\s+", " ", str(assistant_text)).strip()[:MAX_MESSAGE_CHARS]
+    if not user_text and not assistant_text:
+        return False
 
-    user_id = valid_user(user_id)  
+    turn_id = str(turn_id).strip()[:128] if turn_id is not None else ""
+    now = utc_now()
+    with db_connection() as db:
+        # Lazy, additive schema change: safe for existing SQLite installations.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_turn_receipts (
+                user_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, turn_id)
+            )
+        """)
+        if turn_id:
+            receipt = db.execute("""
+                INSERT OR IGNORE INTO conversation_turn_receipts
+                    (user_id, turn_id, source, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, turn_id, source[:40], now))
+            if receipt.rowcount == 0:
+                return False
 
-    user_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(user_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    assistant_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(assistant_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    if not user_text and not assistant_text:  
-        return  
-
-    now = utc_now()  
-
-    with db_connection() as db:  
-        if user_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "user", user_text, now),  
-            )  
-
-        if assistant_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "assistant", assistant_text, now),  
-            )  
-
-        db.execute(  
-            """  
-            INSERT INTO journal(user_id, entry, kind, created_at)  
-            VALUES(?,?,?,?)  
-            """,  
-            (  
-                user_id,  
-                f"Tour enregistré dans la mémoire commune (source : {source}).",  
-                source[:40],  
-                now,  
-            ),  
-        )  
-
-        db.commit()  
+        if user_text:
+            db.execute(
+                "INSERT INTO conversations(user_id, role, content, created_at) VALUES(?,?,?,?)",
+                (user_id, "user", user_text, now),
+            )
+        if assistant_text:
+            db.execute(
+                "INSERT INTO conversations(user_id, role, content, created_at) VALUES(?,?,?,?)",
+                (user_id, "assistant", assistant_text, now),
+            )
+        db.execute(
+            "INSERT INTO journal(user_id, entry, kind, created_at) VALUES(?,?,?,?)",
+            (user_id, f"Tour enregistré dans la mémoire commune (source : {source}).", source[:40], now),
+        )
+        db.commit()
 
     try:
         with db_connection() as db:
@@ -1666,6 +1662,8 @@ def save_conversation_turn(
         log.exception(  
             "Échec de consolidation après enregistrement d'un tour"  
         )
+    return True
+
 
 def get_identity_prompt(user_id: str, query: str = "") -> str:
     em = get_emotions(user_id)
@@ -2283,6 +2281,7 @@ async def call_gemini(
 async def run_brain(
     user_id: str,
     message: str,
+    turn_id: Optional[str] = None,
 ) -> dict[str, Any]:
 
     user_id = valid_user(user_id)  
@@ -2505,6 +2504,7 @@ async def run_brain(
         message,
         reply,
         source="conversation",
+        turn_id=turn_id,
     )  
 
     return {  
@@ -3054,7 +3054,9 @@ async def api_chat(
         )  
 
     try:  
-        result = await run_brain(user_id, message)  
+        result = await run_brain(
+            user_id, message, turn_id=_model_value(request, "request_id", None)
+        )  
 
         if isinstance(result, dict):  
             return result  
@@ -4643,7 +4645,10 @@ async def websocket_endpoint(
                 "model": GEMINI_LIVE_MODEL,
             })
 
-            live_turn_state = {"user": "", "assistant": "", "audio": []}
+            live_turn_state = {
+                "user": "", "assistant": "", "audio": [],
+                "turn_id": secrets.token_urlsafe(24),
+            }
 
             async def client_to_gemini():
                 while True:
@@ -4841,6 +4846,7 @@ async def websocket_endpoint(
                                     live_turn_state["user"],
                                     assistant_text if lexical_gate_passed else "",
                                     source="gemini_live",
+                                    turn_id=live_turn_state["turn_id"],
                                 )
                                 log.info(
                                     "[V34] Tour Live enregistré dans le cerveau commun "
@@ -4854,6 +4860,7 @@ async def websocket_endpoint(
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []
+                        live_turn_state["turn_id"] = secrets.token_urlsafe(24)
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

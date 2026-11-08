@@ -483,13 +483,12 @@ def search_episodic_memories(
         predicates = []
         params: list[Any] = [user_id]
         for term in terms:
-            pattern = f"%{_escape_like(term)}%"
             predicates.append(
-                "(content LIKE ? ESCAPE '\\' COLLATE NOCASE "
-                "OR category LIKE ? ESCAPE '\\\\' COLLATE NOCASE "
-                "OR tags LIKE ? ESCAPE '\\\\' COLLATE NOCASE)"
+                "(instr(lower(content), lower(?)) > 0 "
+                "OR instr(lower(category), lower(?)) > 0 "
+                "OR instr(lower(tags), lower(?)) > 0)"
             )
-            params.extend((pattern, pattern, pattern))
+            params.extend((term, term, term))
         cursor = db.execute(
             columns + " AND (" + " OR ".join(predicates) + ") LIMIT 250",
             tuple(params),

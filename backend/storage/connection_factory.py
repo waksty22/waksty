@@ -80,3 +80,26 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
         return connection
 
     raise ValueError("Backend de stockage non pris en charge.")
+
+def open_sqlite_application_connection(
+    settings: StorageSettings | None = None,
+) -> sqlite3.Connection:
+    """Open the server's SQLite connection; refuse a partial Turso cutover.
+
+    The application still contains SQLite-specific startup, backup and
+    diagnostics paths. Selecting Turso here would therefore be unsafe until
+    those contracts are migrated and tested together.
+    """
+    selected = settings or StorageSettings.from_env()
+    if selected.backend != "sqlite":
+        raise RuntimeError(
+            "Le backend Turso n'est pas encore activé pour le serveur Chappie."
+        )
+    connection = open_storage_connection(selected)
+    if not isinstance(connection, sqlite3.Connection):
+        try:
+            connection.close()
+        finally:
+            raise TypeError("La fabrique n'a pas retourné une connexion SQLite.")
+    return connection
+

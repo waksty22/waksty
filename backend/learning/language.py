@@ -10,6 +10,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
+from cognition.event_receipts import claim_cognitive_event
+
 WORD_STATES = ("heard", "imitated", "recognized", "understood", "usable")
 STATE_RANK = {state: index for index, state in enumerate(WORD_STATES)}
 MAX_WORD_LENGTH = 80
@@ -79,8 +81,13 @@ def record_heard_text(
     text: str,
     evidence: str = "Transcription vocale Gemini Live",
     max_tokens: int = 30,
+    event_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Record only lexical exposure, never comprehension or mastery."""
+    if event_id and not claim_cognitive_event(
+        db, user_id, event_id, "heard_vocabulary"
+    ):
+        return []
     tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", str(text), flags=re.UNICODE)
     recorded: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -100,8 +107,13 @@ def record_heard_text(
 def record_explicit_word_teaching(
     db: sqlite3.Connection, user_id: str, text: str,
     evidence: str = "Enseignement explicite de l'utilisateur",
+    event_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Store explicit word definitions as heard, never as understood."""
+    if event_id and not claim_cognitive_event(
+        db, user_id, event_id, "explicit_word_teaching"
+    ):
+        return []
     pattern = re.compile(
         r"(?:(?:le\s+)?mot\s+)?"
         r"(?P<word>[A-Za-zÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ'-]{0,79})"

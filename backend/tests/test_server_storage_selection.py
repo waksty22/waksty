@@ -88,3 +88,115 @@ def test_local_pending_cutover_marker_is_detected_after_database_reopen(
 
     monkeypatch.setattr(server, "DB_PATH", database_path)
     assert server._local_migration_pending_cutover() is True
+
+
+def test_init_db_stays_read_only_when_local_cutover_marker_exists(
+    monkeypatch, tmp_path
+):
+    import sqlite3
+    import server
+
+    database_path = tmp_path / "chappie.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES "
+        "('sqlite-to-turso-v50.55', 'pending_cutover', 't1')"
+    )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    server.init_db()
+
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+    check = sqlite3.connect(database_path)
+    try:
+        # init_db returned before executing its ordinary schema initialization.
+        assert check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'"
+        ).fetchone()[0] == 0
+    finally:
+        check.close()
+
+
+def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    local_path = tmp_path / "chappie.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    local.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES "
+        "('sqlite-to-turso-v50.55', 'pending_cutover', 't1')"
+    )
+    server._install_sqlite_cutover_write_guards(local)
+    local.commit()
+    local.close()
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('sqlite-to-turso-v50.55', 'completed')"
+    )
+    remote.commit()
+
+    fake_libsql = types.SimpleNamespace(
+        connect=lambda **kwargs: remote
+    )
+    monkeypatch.setitem(sys.modules, "libsql", fake_libsql)
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    result = asyncio.run(
+        server.api_storage_migration_cancel(payload, auth="creator")
+    )
+
+    assert result["cancelled"] is True
+    assert result["turso_data_preserved"] is True
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is False
+    assert remote.execute(
+        "SELECT COUNT(*) FROM chappie_storage_migrations"
+    ).fetchone()[0] == 0
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state"
+        ).fetchone()[0] == "cancelled"
+        assert local_check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchone()[0] == 0
+        local_check.execute("INSERT INTO probe(label) VALUES ('resumed')")
+        local_check.commit()
+    finally:
+        local_check.close()
+    remote.close()

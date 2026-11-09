@@ -43,3 +43,30 @@ export async function apiCall(url, options = {}) {
         throw error;
     }
 }
+
+
+export async function apiDownload(url, filename) {
+    const tokenInput = document.getElementById("token") || document.getElementById("tokenMobile") || document.getElementById("tokenMemory");
+    const token = tokenInput?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
+    const response = await fetch(url, {
+        method: "GET",
+        headers: token ? { "Authorization": `Bearer ${token}` } : {}
+    });
+    if (!response.ok) {
+        let message = `Erreur HTTP ${response.status}: ${response.statusText}`;
+        try {
+            const data = await response.json();
+            message = data.detail || data.message || message;
+        } catch (_) {}
+        throw new Error(message);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+}

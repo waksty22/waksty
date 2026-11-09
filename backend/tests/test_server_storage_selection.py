@@ -290,3 +290,43 @@ def test_pre_cutover_cancel_recovers_when_local_marker_was_not_written(
         ).fetchone()[0] == 0
     finally:
         remote_check.close()
+
+
+def test_missing_local_sqlite_and_missing_turso_credentials_fail_closed(
+    monkeypatch,
+):
+    import server
+
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="accès Turso incomplet"):
+        server._remote_turso_migration_completed()
+
+
+def test_missing_local_sqlite_and_missing_remote_marker_fail_closed(
+    monkeypatch, tmp_path,
+):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote_path = tmp_path / "empty-turso.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(
+            connect=lambda **kwargs: sqlite3.connect(remote_path)
+        ),
+    )
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    with pytest.raises(RuntimeError, match="Base SQLite absente"):
+        server._remote_turso_migration_completed()

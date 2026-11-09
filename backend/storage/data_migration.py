@@ -306,7 +306,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
                 + ". Migration bloquée ; vérifier/reconstruire les index FTS séparément."
             )
         return {
-            "version": "50.55",
+            "version": "50.56",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -315,14 +315,23 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
             "tables": [],
         }
 
+    # Always collect structural diagnostics, even when the additive schema
+    # planner finds blockers. This remains metadata-only: no business rows are
+    # selected or returned, and the report helps explain why preview is blocked.
+    detailed = compare_database_inventories(
+        inspect_database(source),
+        inspect_database(target),
+    ).get("detailed_audit", {})
+
     schema = build_migration_plan(source, target)
     if not schema.get("ready"):
         return {
-            "version": "50.55",
+            "version": "50.56",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
             "schema_plan": schema,
+            "schema_diagnostics": detailed,
             "blockers": list(schema.get("blockers", [])),
             "tables": [],
         }
@@ -330,10 +339,6 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     # The schema planner intentionally supports only reviewed additive changes.
     # Also consult the detailed audit for table-level options/generated-column
     # drift that a simple column comparison could otherwise miss.
-    detailed = compare_database_inventories(
-        inspect_database(source),
-        inspect_database(target),
-    ).get("detailed_audit", {})
     table_sql_blockers = []
     for difference in detailed.get("differences", []):
         if difference.get("category") != "table_constraints_or_options":

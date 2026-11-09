@@ -112,3 +112,95 @@ def test_backup_cannot_overwrite_the_live_database(tmp_path):
         create_verified_backup(database, database)
     with pytest.raises(ValueError, match="distinct"):
         restore_verified_backup(database, database)
+
+
+
+def test_backup_persists_checksum_and_refuses_overwrite(tmp_path):
+    database = tmp_path / "active.sqlite3"
+    backup = tmp_path / "backup.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("CREATE TABLE app_state (id INTEGER PRIMARY KEY, value TEXT)")
+        connection.execute("INSERT INTO app_state VALUES (1, 'safe')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    result = create_verified_backup(database, backup)
+    sidecar = Path(result["checksum_path"])
+    assert sidecar.exists()
+    assert result["checksum_verified"] is True
+    assert result["sha256"] in sidecar.read_text(encoding="ascii")
+
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        create_verified_backup(database, backup)
+    assert _read_value(backup) == "safe"
+
+
+def test_restore_rejects_checksum_mismatch_before_touching_target(tmp_path):
+    database = tmp_path / "active.sqlite3"
+    backup = tmp_path / "backup.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("CREATE TABLE app_state (id INTEGER PRIMARY KEY, value TEXT)")
+        connection.execute("INSERT INTO app_state VALUES (1, 'must-survive')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    create_verified_backup(database, backup)
+    _write_value(backup, "tampered-but-valid-sqlite")
+    with pytest.raises(sqlite3.DatabaseError, match="Checksum SHA-256 invalide"):
+        restore_verified_backup(backup, database)
+
+    assert _read_value(database) == "must-survive"
+    assert not list(tmp_path.glob("active.sqlite3.rollback-*.sqlite3"))
+
+
+def test_restore_refuses_backup_without_checksum_sidecar(tmp_path):
+    database = tmp_path / "active.sqlite3"
+    backup = tmp_path / "legacy.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("CREATE TABLE app_state (id INTEGER PRIMARY KEY, value TEXT)")
+        connection.execute("INSERT INTO app_state VALUES (1, 'must-survive')")
+        connection.commit()
+    finally:
+        connection.close()
+    _write_value(database, "later-value")
+    # A valid SQLite file without a matching checksum is not trusted.
+    connection = sqlite3.connect(backup)
+    try:
+        connection.execute("CREATE TABLE app_state (id INTEGER PRIMARY KEY, value TEXT)")
+        connection.execute("INSERT INTO app_state VALUES (1, 'old-value')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(sqlite3.DatabaseError, match="Checksum absent"):
+        restore_verified_backup(backup, database)
+    assert _read_value(database) == "later-value"
+    assert not list(tmp_path.glob("active.sqlite3.rollback-*.sqlite3"))
+
+
+def test_successful_restore_keeps_verifiable_rollback_artifact(tmp_path):
+    database = tmp_path / "active.sqlite3"
+    backup = tmp_path / "backup.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("CREATE TABLE app_state (id INTEGER PRIMARY KEY, value TEXT)")
+        connection.execute("INSERT INTO app_state VALUES (1, 'current')")
+        connection.commit()
+    finally:
+        connection.close()
+    create_verified_backup(database, backup)
+    _write_value(database, "changed-after-backup")
+
+    result = restore_verified_backup(backup, database)
+    rollback = Path(result["rollback_path"])
+    assert rollback.exists()
+    assert Path(result["rollback_checksum_path"]).exists()
+    assert result["rollback_sha256"]
+    rollback_result = restore_verified_backup(rollback, database)
+    assert rollback_result["integrity"] == "ok"
+    assert _read_value(database) == "changed-after-backup"

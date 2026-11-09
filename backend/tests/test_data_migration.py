@@ -120,6 +120,13 @@ def test_data_migration_blocks_existing_table_constraint_drift():
         assert plan["ready"] is False
         assert plan["read_only"] is True
         assert plan["blockers"]
+        assert plan["schema_diagnostics"]["read_only"] is True
+        assert plan["schema_diagnostics"]["data_contents_exposed"] is False
+        assert any(
+            item["category"] == "table_constraints_or_options"
+            and item["table"] == "guarded"
+            for item in plan["schema_diagnostics"]["differences"]
+        )
         assert target.execute(
             "SELECT sql FROM sqlite_master WHERE name='guarded'"
         ).fetchone()[0].endswith("CHECK(length(label) > 1))")

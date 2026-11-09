@@ -211,3 +211,82 @@ def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
     finally:
         local_check.close()
     remote.close()
+
+
+def test_pre_cutover_cancel_recovers_when_local_marker_was_not_written(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    local_path = tmp_path / "chappie.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.commit()
+    local.close()
+
+    remote_path = tmp_path / "turso.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('sqlite-to-turso-v50.55', 'completed')"
+    )
+    remote.commit()
+    remote.close()
+
+    class FakeLibsqlConnection:
+        def __init__(self):
+            self.connection = sqlite3.connect(remote_path)
+
+        def execute(self, *args, **kwargs):
+            return self.connection.execute(*args, **kwargs)
+
+        def commit(self):
+            return self.connection.commit()
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    result = asyncio.run(
+        server.api_storage_migration_cancel(payload, auth="creator")
+    )
+
+    assert result["cancelled"] is True
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is False
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        local_check.execute("INSERT INTO probe(label) VALUES ('resumed')")
+        local_check.commit()
+    finally:
+        local_check.close()
+
+    remote_check = sqlite3.connect(remote_path)
+    try:
+        assert remote_check.execute(
+            "SELECT COUNT(*) FROM chappie_storage_migrations"
+        ).fetchone()[0] == 0
+    finally:
+        remote_check.close()

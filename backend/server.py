@@ -3116,13 +3116,13 @@ async def autonomous_maintenance_loop() -> None:
                     ),  
                 )  
 
-                db.commit()  
-
-            if dream_due and uid:  
-                generate_dream(uid)  
+                db.commit()
 
             if STORAGE_MIGRATION_PENDING_CUTOVER:
                 return
+
+            if dream_due and uid:
+                generate_dream(uid)
 
             if rumination_due and uid:
                 generate_rumination(uid)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from typing import Any
 
 from storage.schema_audit import (
@@ -163,6 +164,93 @@ def _preflight_extra_columns(
     return blockers
 
 
+def _remove_column_from_create_sql(sql: str, column_name: str) -> str | None:
+    """Remove exactly one top-level column declaration from CREATE TABLE SQL."""
+    open_at = sql.find("(")
+    if open_at < 0:
+        return None
+    depth = 0
+    quote = None
+    close_at = None
+    i = open_at
+    while i < len(sql):
+        char = sql[i]
+        if quote:
+            if quote == "]":
+                if char == "]":
+                    quote = None
+            elif char == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:
+                    i += 1
+                else:
+                    quote = None
+        elif char in ("'", '"', "`"):
+            quote = char
+        elif char == "[":
+            quote = "]"
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                close_at = i
+                break
+        i += 1
+    if close_at is None:
+        return None
+
+    body = sql[open_at + 1:close_at]
+    parts = []
+    start = 0
+    depth = 0
+    quote = None
+    i = 0
+    while i < len(body):
+        char = body[i]
+        if quote:
+            if quote == "]":
+                if char == "]":
+                    quote = None
+            elif char == quote:
+                if i + 1 < len(body) and body[i + 1] == quote:
+                    i += 1
+                else:
+                    quote = None
+        elif char in ("'", '"', "`"):
+            quote = char
+        elif char == "[":
+            quote = "]"
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(body[start:i].strip())
+            start = i + 1
+        i += 1
+    parts.append(body[start:].strip())
+
+    kept = []
+    removed = 0
+    for part in parts:
+        match = re.match(
+            r'^\s*(?:"((?:""|[^"])*)"|\x60((?:\x60\x60|[^\x60])*)\x60|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))',
+            part,
+        )
+        first = next((value for value in match.groups() if value is not None), "") if match else ""
+        first = first.replace('""', '"').replace("``", "`")
+        if first.casefold() == column_name.casefold():
+            removed += 1
+        else:
+            kept.append(part)
+    if removed != 1:
+        return None
+    normalized = " ".join(
+        (sql[:open_at] + "(" + ", ".join(kept) + ")" + sql[close_at + 1:]).split()
+    ).casefold()
+    return normalized
+
+
 def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     """Return a metadata-only migration preview; never select business rows."""
     schema = build_migration_plan(source, target)
@@ -189,8 +277,42 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         if difference.get("category") != "table_constraints_or_options":
             continue
         table = difference.get("table")
-        # Table SQL drift is conservatively blocked. Even a known column
-        # difference must be reviewed at the live target before row migration.
+        # Allow only the exact, reviewed legacy skills.xp omission: removing
+        # that one column declaration from the source SQL must reproduce the
+        # target SQL byte-for-byte after whitespace normalization.
+        if table == "skills":
+            source_details = {c["name"]: c for c in _columns(source, table)}
+            target_details = {c["name"]: c for c in _columns(target, table)}
+            source_names = set(source_details)
+            target_names = set(target_details)
+            xp = source_details.get("xp", {})
+            common_match = all(
+                source_details[name] == target_details[name]
+                for name in source_names & target_names
+            )
+            source_sql = next(
+                (item["sql"] for item in _objects(source) if item["name"] == table),
+                None,
+            )
+            target_sql = next(
+                (item["sql"] for item in _objects(target) if item["name"] == table),
+                None,
+            )
+            if (
+                source_names - target_names == {"xp"}
+                and not (target_names - source_names)
+                and common_match
+                and xp.get("type", "").upper() == "REAL"
+                and xp.get("notnull") == 1
+                and str(xp.get("default")) in {"0.0", "0"}
+                and xp.get("pk") == 0
+                and xp.get("hidden") == 0
+                and source_sql
+                and target_sql
+                and _remove_column_from_create_sql(source_sql, "xp")
+                    == " ".join(str(target_sql).split()).casefold()
+            ):
+                continue
         table_sql_blockers.append(
             f"{table}: définition SQL de table différente ; revue manuelle requise."
         )

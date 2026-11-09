@@ -1993,6 +1993,32 @@ Sélectionne une catégorie pour consulter les données.
           </div>
           <p id="storageDiagnosticCopyStatus" class="muted" role="status" aria-live="polite"></p>
           <pre id="storageDiagnosticOutput" class="output" style="min-height:80px">Aucun rapport pour le moment.</pre>
+
+          <div class="divider" style="margin:18px 0"></div>
+          <h4>🔐 Migration contrôlée de la mémoire vers Turso</h4>
+          <p class="muted" style="margin-bottom:12px">
+            Parcours sécurisé : aperçu sans écriture, téléchargement des deux sauvegardes chiffrées,
+            puis transfert transactionnel après confirmation. Le basculement Render reste manuel.
+          </p>
+          <p class="muted" style="margin-bottom:12px">
+            Avant l'application, l'aperçu doit indiquer PRÊT et l'archive des sauvegardes doit être conservée
+            hors de Render. L'API exige temporairement CHAPPIE_ALLOW_TURSO_MIGRATION=1.
+          </p>
+          <div class="row-btns">
+            <button type="button" onclick="runTursoMigrationPreview()">
+              1. Prévisualiser la migration
+            </button>
+            <button type="button" class="secondary" id="downloadTursoMigrationBackups" onclick="downloadTursoMigrationBackups()" disabled>
+              2. Télécharger les deux sauvegardes
+            </button>
+            <button type="button" class="danger" id="applyTursoMigration" onclick="applyTursoMigration()" disabled>
+              3. Migrer les données vers Turso
+            </button>
+          </div>
+          <p id="tursoMigrationStatus" class="status" role="status" aria-live="polite">
+            En attente de prévisualisation.
+          </p>
+          <pre id="tursoMigrationOutput" class="output" style="min-height:80px">Aucun rapport de migration pour le moment.</pre>
         </div>
 
         <div class="panel danger-zone">
@@ -2181,7 +2207,7 @@ Sélectionne une catégorie pour consulter les données.
 
 <script type="module">
   // index.html is served from "/", so static assets must use the mounted /static path.
-  import { apiCall } from "/static/js/api.js";
+  import { apiCall, apiDownload } from "/static/js/api.js";
 
 
   const storageDiagnosticEndpoints = {
@@ -2391,6 +2417,146 @@ Sélectionne une catégorie pour consulter les données.
         "Aucun contenu de souvenir ou de conversation n'a été affiché.";
     } finally {
       buttons.forEach(button => { button.disabled = false; });
+    }
+  };
+
+  window.tursoMigrationState = {
+    previewReady: false,
+    backupDownloaded: false,
+    applied: false
+  };
+
+  function updateTursoMigrationButtons() {
+    const backupButton = document.getElementById("downloadTursoMigrationBackups");
+    const applyButton = document.getElementById("applyTursoMigration");
+    if (backupButton) {
+      backupButton.disabled = !window.tursoMigrationState.previewReceived ||
+        window.tursoMigrationState.applied;
+    }
+    if (applyButton) {
+      applyButton.disabled = !window.tursoMigrationState.previewReady ||
+        !window.tursoMigrationState.backupDownloaded ||
+        window.tursoMigrationState.applied;
+    }
+  }
+
+  window.runTursoMigrationPreview = async function () {
+    const status = document.getElementById("tursoMigrationStatus");
+    const output = document.getElementById("tursoMigrationOutput");
+    const buttons = document.querySelectorAll(
+      '[onclick="runTursoMigrationPreview()"], [onclick="downloadTursoMigrationBackups()"], [onclick="applyTursoMigration()"]'
+    );
+    if (!status || !output) return;
+    buttons.forEach(button => { button.disabled = true; });
+    window.tursoMigrationState = {
+      previewReady: false,
+      previewReceived: false,
+      backupDownloaded: false,
+      applied: false
+    };
+    status.textContent = "Prévisualisation en lecture seule…";
+    output.textContent = "Comparaison du schéma et des volumes, sans lecture du contenu des souvenirs.";
+    try {
+      const report = await apiCall("/api/storage/migration/preview");
+      window.tursoMigrationState.previewReady = report?.ready === true;
+      window.tursoMigrationState.previewReceived = true;
+      output.textContent = JSON.stringify(report, null, 2);
+      status.textContent = report?.ready === true
+        ? "PRÊT — aucun bloqueur détecté. Télécharge maintenant les deux sauvegardes."
+        : "BLOQUÉ — examine les bloqueurs avant toute tentative de migration.";
+    } catch (error) {
+      status.textContent = "Prévisualisation impossible : " + (error?.message || "erreur inconnue");
+      output.textContent = "Aucune donnée métier n'a été affichée ou modifiée.";
+    } finally {
+      updateTursoMigrationButtons();
+      buttons.forEach(button => {
+        if (button.id === "downloadTursoMigrationBackups") {
+          button.disabled = !window.tursoMigrationState.previewReceived;
+        }
+        if (button.id === "applyTursoMigration") {
+          button.disabled = !window.tursoMigrationState.previewReady ||
+            !window.tursoMigrationState.backupDownloaded;
+        }
+      });
+    }
+  };
+
+  window.downloadTursoMigrationBackups = async function () {
+    const status = document.getElementById("tursoMigrationStatus");
+    const output = document.getElementById("tursoMigrationOutput");
+    const button = document.getElementById("downloadTursoMigrationBackups");
+    if (!status || !output || !window.tursoMigrationState.previewReceived) return;
+    if (button) button.disabled = true;
+    status.textContent = "Création et vérification des sauvegardes chiffrées…";
+    try {
+      const report = await apiDownload(
+        "/api/storage/migration/backup",
+        "chappie-pre-migration-backups.zip"
+      );
+      if (report.verified !== true || !String(report.encrypted).includes("AES-256-GCM")) {
+        throw new Error("L'archive n'a pas confirmé son chiffrement et sa vérification.");
+      }
+      window.tursoMigrationState.backupDownloaded = true;
+      output.textContent = JSON.stringify({
+        backup_verified: report.verified,
+        encryption: report.encrypted,
+        archive_size_bytes: report.size_bytes,
+        sqlite_rows: report.sqlite_rows,
+        turso_rows: report.turso_rows,
+        sqlite_sha256: report.sqlite_sha256,
+        turso_sha256: report.turso_sha256
+      }, null, 2);
+      status.textContent = "Archive chiffrée générée et téléchargement lancé. Vérifie qu'elle est bien enregistrée sur ton appareil.";
+    } catch (error) {
+      window.tursoMigrationState.backupDownloaded = false;
+      status.textContent = "Sauvegardes non validées : " + (error?.message || "erreur inconnue");
+    } finally {
+      updateTursoMigrationButtons();
+    }
+  };
+
+  window.applyTursoMigration = async function () {
+    const status = document.getElementById("tursoMigrationStatus");
+    const output = document.getElementById("tursoMigrationOutput");
+    const button = document.getElementById("applyTursoMigration");
+    if (!status || !output) return;
+    if (!window.tursoMigrationState.previewReady ||
+        !window.tursoMigrationState.backupDownloaded) {
+      status.textContent = "Migration refusée côté interface : aperçu et sauvegardes vérifiées obligatoires.";
+      return;
+    }
+    const saved = window.confirm(
+      "As-tu bien téléchargé et conservé hors de Render le fichier chappie-pre-migration-backups.zip ?"
+    );
+    if (!saved) {
+      status.textContent = "Migration annulée : conserve d'abord l'archive de sauvegarde.";
+      return;
+    }
+    const phrase = window.prompt('Pour confirmer le transfert, saisis exactement : MIGRER VERS TURSO');
+    if (phrase !== "MIGRER VERS TURSO") {
+      status.textContent = "Migration annulée : phrase de confirmation incorrecte.";
+      return;
+    }
+    if (button) button.disabled = true;
+    status.textContent = "Transfert transactionnel en cours. Les écritures SQLite sont temporairement verrouillées…";
+    try {
+      const report = await apiCall("/api/storage/migration/apply", {
+        method: "POST",
+        body: {
+          confirmation: phrase,
+          backup_downloaded: true
+        }
+      });
+      window.tursoMigrationState.applied = report?.applied === true;
+      output.textContent = JSON.stringify(report, null, 2);
+      status.textContent = report?.applied === true
+        ? "Transfert terminé et vérifié. Ne réinitialise rien. Le backend Turso n'est pas encore activé : suis les instructions de bascule manuelle."
+        : "Le transfert n'a pas été validé. Consulte le rapport.";
+    } catch (error) {
+      status.textContent = "Migration interrompue : " + (error?.message || "erreur inconnue");
+      output.textContent = "La transaction Turso a été annulée en cas d'échec. SQLite reste le backend actif.";
+    } finally {
+      updateTursoMigrationButtons();
     }
   };
 

@@ -306,23 +306,39 @@ def compare_database_inventories(
             item["name"]: item for item in remote_detail.get("indexes", [])
         }
         for index_name in sorted(set(local_indexes) - set(remote_indexes)):
+            index = local_indexes[index_name]
+            is_constraint = bool(index.get("unique")) or index.get("origin") in ("u", "pk")
             add_difference(
-                "missing_index", "important", table_name, index_name,
-                local_indexes[index_name], None,
-                "Index absent de Turso ; vérifier aussi les contraintes UNIQUE.",
+                "missing_unique_constraint" if is_constraint else "missing_index",
+                "blocking" if is_constraint else "important",
+                table_name, index_name, index, None,
+                "Contrainte UNIQUE / clé primaire absente de Turso." if is_constraint
+                else "Index absent de Turso.",
             )
         for index_name in sorted(set(remote_indexes) - set(local_indexes)):
+            index = remote_indexes[index_name]
+            is_constraint = bool(index.get("unique")) or index.get("origin") in ("u", "pk")
             add_difference(
-                "extra_index", "important", table_name, index_name,
-                None, remote_indexes[index_name],
-                "Index présent uniquement dans Turso.",
+                "extra_unique_constraint" if is_constraint else "extra_index",
+                "blocking" if is_constraint else "important",
+                table_name, index_name, None, index,
+                "Contrainte UNIQUE / clé primaire présente uniquement dans Turso." if is_constraint
+                else "Index présent uniquement dans Turso.",
             )
         for index_name in sorted(set(local_indexes) & set(remote_indexes)):
             if local_indexes[index_name] != remote_indexes[index_name]:
+                left_index = local_indexes[index_name]
+                right_index = remote_indexes[index_name]
+                is_constraint = any(
+                    bool(index.get("unique")) or index.get("origin") in ("u", "pk")
+                    for index in (left_index, right_index)
+                )
                 add_difference(
-                    "index_definition", "important", table_name, index_name,
-                    local_indexes[index_name], remote_indexes[index_name],
-                    "Différence de colonnes, unicité, origine ou définition SQL de l'index.",
+                    "unique_constraint_definition" if is_constraint else "index_definition",
+                    "blocking" if is_constraint else "important",
+                    table_name, index_name, left_index, right_index,
+                    "Définition de contrainte UNIQUE / clé primaire différente." if is_constraint
+                    else "Différence de colonnes, ordre, unicité ou définition SQL de l'index.",
                 )
 
         if local_detail.get("create_sql") != remote_detail.get("create_sql"):
@@ -357,6 +373,15 @@ def compare_database_inventories(
             "Les volumes diffèrent ; cela ne compare pas le contenu des lignes.",
         )
 
+    severity_order = {"blocking": 0, "important": 1, "informational": 2}
+    details.sort(
+        key=lambda item: (
+            severity_order.get(item["severity"], 3),
+            item.get("table") or "",
+            item.get("category") or "",
+            item.get("item") or "",
+        )
+    )
     severity_counts = {
         severity: sum(1 for item in details if item["severity"] == severity)
         for severity in ("blocking", "important", "informational")

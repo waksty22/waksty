@@ -327,18 +327,33 @@ def _quote_sql_identifier(value: str) -> str:
 
 def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
     """Install persistent triggers that reject local writes until Turso is active."""
-    tables = connection.execute(
+    objects = connection.execute(
         """
-        SELECT name FROM sqlite_master
+        SELECT name, sql FROM sqlite_master
         WHERE type='table'
           AND name NOT LIKE 'sqlite_%'
           AND name != 'chappie_storage_migration_state'
         ORDER BY name
         """
     ).fetchall()
+    virtual_names = {
+        str(row[0])
+        for row in objects
+        if str(row[1] or "").lstrip().upper().startswith("CREATE VIRTUAL TABLE")
+    }
+    tables = []
+    for row in objects:
+        table_name = str(row[0])
+        definition = str(row[1] or "").lstrip().upper()
+        is_virtual = definition.startswith("CREATE VIRTUAL TABLE")
+        is_virtual_shadow = any(
+            table_name.startswith(name + "_") for name in virtual_names
+        )
+        if not is_virtual and not is_virtual_shadow:
+            tables.append(table_name)
+
     installed = 0
-    for row in tables:
-        table = str(row[0])
+    for table in tables:
         quoted_table = _quote_sql_identifier(table)
         for operation in ("INSERT", "UPDATE", "DELETE"):
             trigger = _quote_sql_identifier(
@@ -5620,13 +5635,6 @@ async def api_storage_migration_cancel(
                 detail="Aucune migration locale en attente de bascule.",
             )
 
-        remote = libsql.connect(database=remote_url, auth_token=remote_token)
-        remote.execute(
-            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
-            ("sqlite-to-turso-v50.55",),
-        )
-        remote.commit()
-
         guards = local.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' "
             "AND name LIKE 'chappie_migration_guard_%'"
@@ -5641,6 +5649,16 @@ async def api_storage_migration_cancel(
             (utc_now(), "sqlite-to-turso-v50.55"),
         )
         local.commit()
+
+        # Unlock the local source first, but keep the in-process write lock until
+        # the durable Turso marker is removed. If the remote call fails, restart
+        # detection still sees the completed marker and re-locks SQLite.
+        remote = libsql.connect(database=remote_url, auth_token=remote_token)
+        remote.execute(
+            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        )
+        remote.commit()
         STORAGE_MIGRATION_PENDING_CUTOVER = False
         return {
             "cancelled": True,

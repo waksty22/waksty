@@ -1,8 +1,7 @@
 """Read-only compatibility checks for the Turso/libsql driver.
 
-This module deliberately does NOT replace the application's SQLite connection.
-V36.1 first measures the driver's behavior; the production switch is gated on
-all cognitive modules being compatible with the returned connection and rows.
+These probes remain available for deployment diagnostics. The production
+backend is selected separately through the guarded storage connection factory.
 """
 from __future__ import annotations
 

@@ -1,8 +1,7 @@
-"""V50 storage connection factory (pre-cutover).
+"""V50.55 storage connection factory.
 
-This factory is deliberately not wired into server.db_connection yet.
-SQLite remains the production default until the full backend contract,
-schema migration, backup/restore and rollback have passed review.
+SQLite remains the default. Turso is opt-in and must pass the explicit
+pre-cutover and startup gates before it can become the active backend.
 """
 from __future__ import annotations
 
@@ -31,7 +30,11 @@ class StorageSettings:
             backend=backend,
             sqlite_path=os.getenv(
                 "CHAPPIE_SQLITE_PATH",
-                "./chappie_data/chappie_v16.sqlite3",
+                str(
+                    Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data"))
+                    .expanduser()
+                    / "chappie_v16.sqlite3"
+                ),
             ).strip(),
             turso_database_url=os.getenv("TURSO_DATABASE_URL", "").strip(),
             turso_auth_token=os.getenv("TURSO_AUTH_TOKEN", "").strip(),

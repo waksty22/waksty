@@ -167,7 +167,7 @@ Pendant cette période :
 - les contrôles de diagnostic, l'aperçu et les sauvegardes restent accessibles ;
 - le marqueur local est relu au redémarrage ; si le fichier SQLite éphémère a disparu mais que `CHAPPIE_ALLOW_TURSO_MIGRATION=1` est encore actif, le serveur vérifie aussi le marqueur durable Turso et refuse de recréer une mémoire SQLite vide.
 
-Les tables de garde locales et leurs déclencheurs sont exclus du transfert vers Turso.
+Les tables de garde locales et leurs déclencheurs sont exclus du transfert vers Turso. Les tables virtuelles FTS ne sont pas copiées comme des tables ordinaires : si une table FTS3/4/5 est détectée dans la source ou la cible, l'aperçu bloque la migration. Il faut définir et tester une reconstruction FTS dédiée sur Turso avant de relancer l'aperçu ; aucune table d'ombre FTS n'est transférée.
 
 ### Bascule normale
 1. Garder `CHAPPIE_ALLOW_TURSO_MIGRATION=1` pendant la phase de transfert.

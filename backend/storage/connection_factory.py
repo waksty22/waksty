@@ -1,8 +1,7 @@
-"""V50 storage connection factory (pre-cutover).
+"""V50.55 storage connection factory.
 
-This factory is deliberately not wired into server.db_connection yet.
-SQLite remains the production default until the full backend contract,
-schema migration, backup/restore and rollback have passed review.
+SQLite remains the default. Turso is opt-in and must pass the explicit
+pre-cutover and startup gates before it can become the active backend.
 """
 from __future__ import annotations
 

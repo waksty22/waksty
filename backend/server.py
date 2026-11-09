@@ -153,6 +153,10 @@ from cognition.shared_brain import (
 from storage.turso_compat import inspect_turso_driver
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
+from storage.connection_factory import (
+    StorageSettings,
+    open_sqlite_application_connection,
+)
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 from diagnostics.persistence_inventory import inspect_sqlite_database
 
@@ -276,15 +280,20 @@ def local_now() -> str:
         return datetime.now().astimezone().isoformat()
 
 def db_connection() -> sqlite3.Connection:
-    db = sqlite3.connect(
-        DB_PATH,
-        timeout=20,
-        check_same_thread=False,
+    # Keep the exact DB_PATH selected by CHAPPIE_DATA_DIR. The shared factory
+    # refuses Turso until startup, backup, diagnostics and route contracts are
+    # fully backend-neutral.
+    settings = StorageSettings.from_env()
+    # DB_PATH is the server's canonical path. Tests and controlled maintenance
+    # may replace it at runtime; production derives it from CHAPPIE_DATA_DIR.
+    # Keep the selected backend and credentials, but never open a second file.
+    settings = StorageSettings(
+        backend=settings.backend,
+        sqlite_path=str(DB_PATH),
+        turso_database_url=settings.turso_database_url,
+        turso_auth_token=settings.turso_auth_token,
     )
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=20000")
-    return db
+    return open_sqlite_application_connection(settings)
 
 def init_db() -> None:
     with db_connection() as db:
@@ -626,6 +635,10 @@ async def body_size_guard(request: Request, call_next):
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_id: Optional[str] = Field(
+        default=None, min_length=8, max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
     user_id: str = Field(  
         default="creator",  
         min_length=1,  
@@ -1576,60 +1589,52 @@ def save_conversation_turn(
     user_text: str,
     assistant_text: str,
     source: str = "conversation",
-) -> None:
+    turn_id: Optional[str] = None,
+) -> bool:
+    """Persist one complete turn; a supplied turn_id makes replays idempotent."""
+    user_id = valid_user(user_id)
+    user_text = re.sub(r"\s+", " ", str(user_text)).strip()[:MAX_MESSAGE_CHARS]
+    assistant_text = re.sub(r"\s+", " ", str(assistant_text)).strip()[:MAX_MESSAGE_CHARS]
+    if not user_text and not assistant_text:
+        return False
 
-    user_id = valid_user(user_id)  
+    turn_id = str(turn_id).strip()[:128] if turn_id is not None else ""
+    now = utc_now()
+    with db_connection() as db:
+        # Lazy, additive schema change: safe for existing SQLite installations.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_turn_receipts (
+                user_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, turn_id)
+            )
+        """)
+        if turn_id:
+            receipt = db.execute("""
+                INSERT OR IGNORE INTO conversation_turn_receipts
+                    (user_id, turn_id, source, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, turn_id, source[:40], now))
+            if receipt.rowcount == 0:
+                return False
 
-    user_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(user_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    assistant_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(assistant_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    if not user_text and not assistant_text:  
-        return  
-
-    now = utc_now()  
-
-    with db_connection() as db:  
-        if user_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "user", user_text, now),  
-            )  
-
-        if assistant_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "assistant", assistant_text, now),  
-            )  
-
-        db.execute(  
-            """  
-            INSERT INTO journal(user_id, entry, kind, created_at)  
-            VALUES(?,?,?,?)  
-            """,  
-            (  
-                user_id,  
-                f"Tour enregistré dans la mémoire commune (source : {source}).",  
-                source[:40],  
-                now,  
-            ),  
-        )  
-
-        db.commit()  
+        if user_text:
+            db.execute(
+                "INSERT INTO conversations(user_id, role, content, created_at) VALUES(?,?,?,?)",
+                (user_id, "user", user_text, now),
+            )
+        if assistant_text:
+            db.execute(
+                "INSERT INTO conversations(user_id, role, content, created_at) VALUES(?,?,?,?)",
+                (user_id, "assistant", assistant_text, now),
+            )
+        db.execute(
+            "INSERT INTO journal(user_id, entry, kind, created_at) VALUES(?,?,?,?)",
+            (user_id, f"Tour enregistré dans la mémoire commune (source : {source}).", source[:40], now),
+        )
+        db.commit()
 
     try:
         with db_connection() as db:
@@ -1670,6 +1675,8 @@ def save_conversation_turn(
         log.exception(  
             "Échec de consolidation après enregistrement d'un tour"  
         )
+    return True
+
 
 def get_identity_prompt(user_id: str, query: str = "") -> str:
     em = get_emotions(user_id)
@@ -2287,6 +2294,7 @@ async def call_gemini(
 async def run_brain(
     user_id: str,
     message: str,
+    turn_id: Optional[str] = None,
 ) -> dict[str, Any]:
 
     user_id = valid_user(user_id)  
@@ -2509,6 +2517,7 @@ async def run_brain(
         message,
         reply,
         source="conversation",
+        turn_id=turn_id,
     )  
 
     return {  
@@ -3058,7 +3067,9 @@ async def api_chat(
         )  
 
     try:  
-        result = await run_brain(user_id, message)  
+        result = await run_brain(
+            user_id, message, turn_id=_model_value(request, "request_id", None)
+        )  
 
         if isinstance(result, dict):  
             return result  
@@ -4647,7 +4658,10 @@ async def websocket_endpoint(
                 "model": GEMINI_LIVE_MODEL,
             })
 
-            live_turn_state = {"user": "", "assistant": "", "audio": []}
+            live_turn_state = {
+                "user": "", "assistant": "", "audio": [],
+                "turn_id": secrets.token_urlsafe(24),
+            }
 
             async def client_to_gemini():
                 while True:
@@ -4845,6 +4859,7 @@ async def websocket_endpoint(
                                     live_turn_state["user"],
                                     assistant_text if lexical_gate_passed else "",
                                     source="gemini_live",
+                                    turn_id=live_turn_state["turn_id"],
                                 )
                                 log.info(
                                     "[V34] Tour Live enregistré dans le cerveau commun "
@@ -4858,6 +4873,7 @@ async def websocket_endpoint(
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []
+                        live_turn_state["turn_id"] = secrets.token_urlsafe(24)
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

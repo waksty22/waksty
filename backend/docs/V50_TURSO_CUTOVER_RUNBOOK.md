@@ -127,3 +127,31 @@ Chaque écart est classé comme bloquant, important ou informatif. Les définiti
 **Important :** « schéma prêt » ne signifie jamais « migration prête ». La migration des données reste explicitement « non évaluée » par cet audit. Les volumes de lignes et l'absence de violations de clés étrangères ne prouvent pas l'égalité des données ; une phase distincte devra vérifier les identifiants, les relations et des empreintes déterministes avant toute migration. Aucun SQL de modification (CREATE, ALTER, DROP, INSERT, UPDATE ou DELETE) n'est exécuté par cet audit.
 
 L'endpoint existant `GET /api/storage/schema-audit` est étendu sans changement de mode : authentification obligatoire, connexions d'inspection fermées en fin de requête, aucune bascule de backend, aucune écriture SQLite/Turso. SQLite reste le stockage de production tant qu'une procédure de migration séparée n'a pas été approuvée et validée.
+
+
+## Complément V50.55 — Migrateur contrôlé SQLite → Turso
+
+La branche V50.55 ajoute un premier parcours complet, mais volontairement non automatique :
+
+- `GET /api/storage/migration/preview` : audit de compatibilité et volumes uniquement ; aucun contenu de ligne n'est renvoyé.
+- `GET /api/storage/migration/backup` : archive ZIP contenant deux sauvegardes logiques chiffrées AES-256-GCM, une de SQLite et une de Turso, chacune accompagnée de son SHA-256. Les deux restaurations temporaires sont vérifiées avant de fournir l'archive.
+- `POST /api/storage/migration/apply` : copie idempotente des lignes, uniquement si `CHAPPIE_ALLOW_TURSO_MIGRATION=1`, si SQLite est encore le backend actif, si le corps confirme exactement `MIGRER VERS TURSO` et si l'utilisateur confirme avoir téléchargé l'archive de sauvegarde.
+
+Le migrateur :
+- applique dans la même transaction cible les changements de schéma approuvés et la copie des lignes ;
+- conserve les identifiants et les lignes déjà présentes dans Turso ;
+- compare chaque ligne relue et calcule des empreintes SHA-256 déterministes par table ;
+- interrompt et annule la transaction en cas de collision de clé, contrainte unique, dépendance circulaire, différence de définition SQL ou violation de clé étrangère ;
+- ne retourne jamais le contenu des souvenirs ou conversations.
+
+**Limite assumée :** les différences de définition SQL des tables partagées sont bloquantes jusqu'à leur revue. Le migrateur ne tente pas de deviner si une différence de contrainte ou d'option est sans danger.
+
+### Sélection du backend après migration
+
+- SQLite reste le choix par défaut.
+- `db_connection()` passe désormais par la fabrique de stockage ; la configuration SQLite conserve le chemin effectif `DB_PATH`.
+- Si Turso est sélectionné, le démarrage est refusé tant que `CHAPPIE_TURSO_CUTOVER_READY=1` n'a pas été défini explicitement.
+- Les endpoints de diagnostic du fichier SQLite et de sauvegarde physique SQLite refusent de présenter une connexion Turso comme un fichier local.
+- L'audit SQLite/Turso continue d'ouvrir explicitement le fichier SQLite local en lecture seule.
+
+**Important :** la PR ne modifie pas les variables Render, ne lance pas le transfert, ne bascule pas le backend et ne déploie pas l'application. Après migration, le rapport doit être contrôlé avant toute modification manuelle des variables Render.

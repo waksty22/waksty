@@ -47,7 +47,9 @@ def _objects(connection: Any) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
         SELECT type, name, sql FROM sqlite_master
-        WHERE type='table' AND name NOT LIKE 'sqlite_%'
+        WHERE type='table'
+          AND name NOT LIKE 'sqlite_%'
+          AND name != 'chappie_storage_migration_state'
         ORDER BY name
         """
     ).fetchall()

@@ -126,3 +126,44 @@ def test_data_migration_blocks_existing_table_constraint_drift():
     finally:
         source.close()
         target.close()
+
+def test_skills_xp_column_removal_matches_legacy_table_sql():
+    from storage.data_migration import _remove_column_from_create_sql
+
+    source_sql = (
+        "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+        "skill_name TEXT NOT NULL, level REAL NOT NULL DEFAULT 0.0, "
+        "xp REAL NOT NULL DEFAULT 0.0, evidence TEXT NOT NULL DEFAULT '', "
+        "updated_at TEXT NOT NULL, UNIQUE(user_id, skill_name))"
+    )
+    target_sql = (
+        "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+        "skill_name TEXT NOT NULL, level REAL NOT NULL DEFAULT 0.0, "
+        "evidence TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, "
+        "UNIQUE(user_id, skill_name))"
+    )
+
+    assert _remove_column_from_create_sql(source_sql, "xp") == " ".join(target_sql.split()).casefold()
+
+
+def test_table_option_drift_blocks_migration_preview():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    try:
+        source.execute(
+            "CREATE TABLE strict_probe (id INTEGER PRIMARY KEY, label TEXT) STRICT"
+        )
+        target.execute(
+            "CREATE TABLE strict_probe (id INTEGER PRIMARY KEY, label TEXT)"
+        )
+        source.commit()
+        target.commit()
+
+        plan = build_data_migration_plan(source, target)
+
+        assert plan["ready"] is False
+        assert any("strict_probe" in item for item in plan["blockers"])
+        assert target.execute("SELECT COUNT(*) FROM strict_probe").fetchone()[0] == 0
+    finally:
+        source.close()
+        target.close()

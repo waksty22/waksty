@@ -27,12 +27,16 @@ class StorageSettings:
         backend = os.getenv("CHAPPIE_STORAGE_BACKEND", "sqlite").strip().lower()
         if backend not in {"sqlite", "turso"}:
             raise ValueError("CHAPPIE_STORAGE_BACKEND doit être sqlite ou turso.")
+        # Match server.py's existing SQLite path exactly. Until the server
+        # and factory are deliberately wired together, CHAPPIE_DATA_DIR is
+        # the single source of truth; a second path variable could silently
+        # point the factory at a new, empty database.
+        data_dir = Path(
+            os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
+        ).expanduser().resolve()
         return cls(
             backend=backend,
-            sqlite_path=os.getenv(
-                "CHAPPIE_SQLITE_PATH",
-                "./chappie_data/chappie_v16.sqlite3",
-            ).strip(),
+            sqlite_path=str(data_dir / "chappie_v16.sqlite3"),
             turso_database_url=os.getenv("TURSO_DATABASE_URL", "").strip(),
             turso_auth_token=os.getenv("TURSO_AUTH_TOKEN", "").strip(),
         )
@@ -76,3 +80,26 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
         return connection
 
     raise ValueError("Backend de stockage non pris en charge.")
+
+def open_sqlite_application_connection(
+    settings: StorageSettings | None = None,
+) -> sqlite3.Connection:
+    """Open the server's SQLite connection; refuse a partial Turso cutover.
+
+    The application still contains SQLite-specific startup, backup and
+    diagnostics paths. Selecting Turso here would therefore be unsafe until
+    those contracts are migrated and tested together.
+    """
+    selected = settings or StorageSettings.from_env()
+    if selected.backend != "sqlite":
+        raise RuntimeError(
+            "Le backend Turso n'est pas encore activé pour le serveur Chappie."
+        )
+    connection = open_storage_connection(selected)
+    if not isinstance(connection, sqlite3.Connection):
+        try:
+            connection.close()
+        finally:
+            raise TypeError("La fabrique n'a pas retourné une connexion SQLite.")
+    return connection
+

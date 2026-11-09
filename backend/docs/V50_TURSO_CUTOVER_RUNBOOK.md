@@ -109,3 +109,21 @@ Revenir à SQLite si le démarrage échoue, si une table manque, si une écritur
 - [ ] Migrateur de données idempotent avec contrôle d'empreintes.
 - [ ] Répétition de migration/restauration sur environnement isolé.
 - [ ] Cutover et test de retour arrière autorisés séparément.
+
+
+## Complément V50.54 — Audit structurel détaillé (lecture seule)
+
+L'audit détaillé expose, pour chaque table présente des deux côtés :
+
+- les colonnes absentes ou supplémentaires ;
+- les différences de type, nullabilité, valeur par défaut et position de clé primaire ;
+- les clés étrangères, y compris les colonnes liées et les actions ON UPDATE / ON DELETE ;
+- les index, leur unicité, leur origine, leur caractère partiel et leurs colonnes ;
+- les différences de définition SQL des tables, afin de repérer notamment les contraintes CHECK, UNIQUE et options de table ;
+- les différences de définition des vues et déclencheurs.
+
+Chaque écart est classé comme bloquant, important ou informatif. Les définitions SQL renvoyées sont des métadonnées de schéma ; aucun contenu de ligne métier n'est extrait. Les valeurs affichées dans le rapport sont bornées côté interface.
+
+**Important :** « schéma prêt » ne signifie jamais « migration prête ». La migration des données reste explicitement « non évaluée » par cet audit. Les volumes de lignes et l'absence de violations de clés étrangères ne prouvent pas l'égalité des données ; une phase distincte devra vérifier les identifiants, les relations et des empreintes déterministes avant toute migration. Aucun SQL de modification (CREATE, ALTER, DROP, INSERT, UPDATE ou DELETE) n'est exécuté par cet audit.
+
+L'endpoint existant `GET /api/storage/schema-audit` est étendu sans changement de mode : authentification obligatoire, connexions d'inspection fermées en fin de requête, aucune bascule de backend, aucune écriture SQLite/Turso. SQLite reste le stockage de production tant qu'une procédure de migration séparée n'a pas été approuvée et validée.

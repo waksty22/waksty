@@ -381,8 +381,14 @@ def _remote_turso_migration_completed() -> bool:
     """Detect a completed remote transfer if Render's ephemeral SQLite file vanished."""
     database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
     auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    # This function is called only when the migration gate is enabled and
+    # the local SQLite file is absent. In that situation, failing open would
+    # create a fresh empty SQLite database and silently strand the migrated
+    # memories. Every uncertain remote state must therefore stop startup.
     if not database_url or not auth_token:
-        return False
+        raise RuntimeError(
+            "Base SQLite absente et accès Turso incomplet ; démarrage bloqué pour protéger la mémoire."
+        )
     connection = None
     try:
         import libsql
@@ -393,18 +399,23 @@ def _remote_turso_migration_completed() -> bool:
             "AND name='chappie_storage_migrations'"
         ).fetchone()
         if not exists:
-            return False
+            raise RuntimeError(
+                "Base SQLite absente et marqueur de migration Turso introuvable ; démarrage bloqué."
+            )
         row = connection.execute(
             "SELECT status FROM chappie_storage_migrations WHERE migration_key=?",
             ("sqlite-to-turso-v50.55",),
         ).fetchone()
-        return bool(row and row[0] == "completed")
-    except Exception as exc:
-        if os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1":
+        if not row or row[0] != "completed":
             raise RuntimeError(
-                "Vérification du marqueur Turso impossible ; démarrage SQLite bloqué par sécurité."
-            ) from exc
-        return False
+                "Base SQLite absente et migration Turso non confirmée ; démarrage bloqué."
+            )
+        return True
+    except Exception as exc:
+        raise RuntimeError(
+            "Base SQLite absente ; vérification du marqueur Turso impossible ou migration non confirmée. "
+            "Démarrage bloqué pour protéger la mémoire."
+        ) from exc
     finally:
         if connection is not None:
             connection.close()

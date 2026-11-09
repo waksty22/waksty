@@ -161,8 +161,19 @@ def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
     )
     remote.commit()
 
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def commit(self):
+            return remote.commit()
+
+        def close(self):
+            # Keep the in-memory test database available for post-call assertions.
+            return None
+
     fake_libsql = types.SimpleNamespace(
-        connect=lambda **kwargs: remote
+        connect=lambda **kwargs: FakeLibsqlConnection()
     )
     monkeypatch.setitem(sys.modules, "libsql", fake_libsql)
     monkeypatch.setattr(server, "DB_PATH", local_path)

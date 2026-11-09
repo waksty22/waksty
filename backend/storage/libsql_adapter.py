@@ -11,6 +11,9 @@ from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 
+_UNSET = object()
+
+
 class CompatRow(Sequence[Any]):
     """Tuple-like row with sqlite3.Row-style indexed and named lookup."""
 
@@ -45,8 +48,9 @@ class CompatRow(Sequence[Any]):
 class CompatCursor:
     """Normalize cursor rows and expose the attributes used by Chappie."""
 
-    def __init__(self, cursor: Any) -> None:
+    def __init__(self, cursor: Any, lastrowid: Any = _UNSET) -> None:
         self._cursor = cursor
+        self._lastrowid_override = lastrowid
         description = getattr(cursor, "description", None) or ()
         self.description = tuple(description)
         self._names = tuple(
@@ -56,6 +60,8 @@ class CompatCursor:
 
     @property
     def lastrowid(self) -> int | None:
+        if self._lastrowid_override is not _UNSET:
+            return self._lastrowid_override
         return getattr(self._cursor, "lastrowid", None)
 
     @property
@@ -141,6 +147,20 @@ def _raise_sqlite_compatible_error(exc: Exception) -> None:
     raise exc
 
 
+def _is_insert_statement(sql: str) -> bool:
+    """Recognize the simple INSERT/REPLACE forms used by the application.
+
+    Native libSQL cursors can expose a stale lastrowid after SELECT/UPDATE.
+    Match sqlite3's useful contract for ordinary statements by publishing it
+    only for INSERT and REPLACE statements. CTE-prefixed writes are not inferred.
+    """
+    statement = str(sql or "").lstrip()
+    if not statement:
+        return False
+    keyword = statement.split(None, 1)[0].upper()
+    return keyword in {"INSERT", "REPLACE"}
+
+
 class LibSQLConnectionAdapter:
     """Provide the subset of sqlite3.Connection used by the current backend."""
 
@@ -155,7 +175,12 @@ class LibSQLConnectionAdapter:
     def execute(self, sql: str, parameters: Any = ()) -> CompatCursor:
         self._ensure_open()
         try:
-            return CompatCursor(self._connection.execute(sql, parameters))
+            cursor = self._connection.execute(sql, parameters)
+            lastrowid = (
+                getattr(cursor, "lastrowid", None)
+                if _is_insert_statement(sql) else None
+            )
+            return CompatCursor(cursor, lastrowid=lastrowid)
         except Exception as exc:
             _raise_sqlite_compatible_error(exc)
 
@@ -164,9 +189,9 @@ class LibSQLConnectionAdapter:
     ) -> CompatCursor:
         self._ensure_open()
         try:
-            return CompatCursor(
-                self._connection.executemany(sql, seq_of_parameters)
-            )
+            cursor = self._connection.executemany(sql, seq_of_parameters)
+            # sqlite3 does not update lastrowid for executemany().
+            return CompatCursor(cursor, lastrowid=None)
         except Exception as exc:
             _raise_sqlite_compatible_error(exc)
 

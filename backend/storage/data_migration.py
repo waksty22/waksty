@@ -189,16 +189,8 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         if difference.get("category") != "table_constraints_or_options":
             continue
         table = difference.get("table")
-        source_columns = {
-            column["name"] for column in _columns(source, table)
-        } if table else set()
-        target_columns = {
-            column["name"] for column in _columns(target, table)
-        } if table and table in {item["name"] for item in _objects(target)} else set()
-        # The only approved table-definition drift is the known legacy skills.xp
-        # column, which the schema planner adds with an explicit default.
-        if table == "skills" and "xp" in source_columns and "xp" not in target_columns:
-            continue
+        # Table SQL drift is conservatively blocked. Even a known column
+        # difference must be reviewed at the live target before row migration.
         table_sql_blockers.append(
             f"{table}: définition SQL de table différente ; revue manuelle requise."
         )

@@ -1,8 +1,7 @@
-"""Small DB-API compatibility wrappers for the synchronous libsql driver.
+"""DB-API compatibility wrappers used by the opt-in Turso storage backend.
 
-This module is intentionally not wired into the production connection factory yet.
-V36.3 validates the adapter in isolation; switching the live database is a
-separate, explicitly reviewed step.
+The adapter normalizes libsql rows, cursors, transactions and common database
+errors to the subset of sqlite3 behavior used by Chappie's backend.
 """
 from __future__ import annotations
 

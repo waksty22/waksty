@@ -1986,6 +1986,12 @@ Sélectionne une catégorie pour consulter les données.
           <p id="storageDiagnosticStatus" class="status" role="status" aria-live="polite">
             En attente d'un diagnostic.
           </p>
+          <div class="row-btns">
+            <button type="button" class="secondary" id="copyStorageDiagnosticSummary" onclick="copyStorageDiagnosticSummary()" disabled>
+              📋 Copier le résumé
+            </button>
+          </div>
+          <p id="storageDiagnosticCopyStatus" class="muted" role="status" aria-live="polite"></p>
           <pre id="storageDiagnosticOutput" class="output" style="min-height:80px">Aucun rapport pour le moment.</pre>
         </div>
 
@@ -2197,21 +2203,137 @@ Sélectionne une catégorie pour consulter les données.
     }
   };
 
+  function compactList(label, values, limit = 12) {
+    const items = Array.isArray(values) ? values : [];
+    if (!items.length) return label + " : aucun";
+    const shown = items.slice(0, limit).map(item =>
+      typeof item === "string" ? item : JSON.stringify(item)
+    );
+    const remainder = items.length > limit
+      ? "\\n  … et " + (items.length - limit) + " autre(s)"
+      : "";
+    return label + " (" + items.length + ") :\\n  " +
+      shown.join("\\n  ") + remainder;
+  }
+
+  function formatSchemaAuditSummary(report) {
+    const local = report?.local || {};
+    const remote = report?.remote || {};
+    const comparison = report?.comparison || {};
+    const schema = comparison?.schema || {};
+    const localTables = Object.keys(local?.tables || {});
+    const remoteTables = Object.keys(remote?.tables || {});
+    const missingRemote = (schema.missing_from_right || [])
+      .filter(item => item.startsWith("table:"))
+      .map(item => item.slice(6));
+    const missingLocal = (schema.missing_from_left || [])
+      .filter(item => item.startsWith("table:"))
+      .map(item => item.slice(6));
+    const missingIndexesRemote = (schema.missing_from_right || [])
+      .filter(item => item.startsWith("index:"))
+      .map(item => item.slice(6));
+    const missingIndexesLocal = (schema.missing_from_left || [])
+      .filter(item => item.startsWith("index:"))
+      .map(item => item.slice(6));
+    const rowDiffs = Object.entries(comparison.row_count_differences || {});
+    const lines = [
+      "CHAPPIE — RÉSUMÉ COMPARAISON SQLITE / TURSO",
+      "Lecture seule : " + (report?.read_only === true ? "oui" : "non confirmé"),
+      "Contenu des souvenirs/conversations exposé : " +
+        (report?.data_contents_exposed === false ? "non" : "non confirmé"),
+      "",
+      "SQLite local : " + (local.table_count ?? localTables.length) +
+        " tables, " + (local.object_count ?? Object.keys(local?.schema?.objects || {}).length) +
+        " objets, " + (local.total_rows ?? "?") + " lignes",
+      "Turso : " + (remote.table_count ?? remoteTables.length) +
+        " tables, " + (remote.object_count ?? Object.keys(remote?.schema?.objects || {}).length) +
+        " objets, " + (remote.total_rows ?? "?") + " lignes",
+      "Compatibilité du schéma : " +
+        (schema.compatible === true ? "compatible" :
+          schema.compatible === false ? "différences détectées" : "non déterminée"),
+      "Compatibilité globale (schéma + volumes) : " +
+        (comparison.compatible === true ? "compatible" :
+          comparison.compatible === false ? "différences détectées" : "non déterminée"),
+      "",
+      compactList("Tables présentes en SQLite mais absentes de Turso", missingRemote),
+      compactList("Tables présentes dans Turso mais absentes de SQLite", missingLocal),
+      compactList("Index/objets absents de Turso", missingIndexesRemote),
+      compactList("Index/objets absents de SQLite", missingIndexesLocal),
+      compactList("Colonnes différentes", schema.changed_columns || []),
+      compactList("Objets SQL modifiés", schema.changed_objects || []),
+      "Tables avec un nombre de lignes différent : " + rowDiffs.length
+    ];
+    if (rowDiffs.length) {
+      lines.push(...rowDiffs.slice(0, 12).map(([name, counts]) =>
+        "  " + name + " — SQLite : " + counts.local +
+        " / Turso : " + counts.remote
+      ));
+      if (rowDiffs.length > 12) {
+        lines.push("  … et " + (rowDiffs.length - 12) + " autre(s)");
+      }
+    }
+    lines.push(
+      "",
+      "Violations de clés étrangères — SQLite : " +
+        (comparison.local_foreign_key_violations ?? "non vérifié") +
+        " ; Turso : " + (comparison.remote_foreign_key_violations ?? "non vérifié")
+    );
+    return lines.join("\\n");
+  }
+
+  window.latestStorageDiagnosticSummary = "";
+
+  window.copyStorageDiagnosticSummary = async function () {
+    const summary = window.latestStorageDiagnosticSummary;
+    const feedback = document.getElementById("storageDiagnosticCopyStatus");
+    if (!summary || !feedback) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(summary);
+      } else {
+        const helper = document.createElement("textarea");
+        helper.value = summary;
+        helper.setAttribute("readonly", "");
+        helper.style.position = "fixed";
+        helper.style.opacity = "0";
+        document.body.appendChild(helper);
+        helper.select();
+        const copied = document.execCommand("copy");
+        helper.remove();
+        if (!copied) throw new Error("Copie non prise en charge par ce navigateur.");
+      }
+      feedback.textContent = "Résumé copié. Tu peux le coller directement dans ChatGPT.";
+    } catch (error) {
+      feedback.textContent = "Copie impossible : sélectionne le résumé affiché et copie-le manuellement.";
+    }
+  };
+
   window.runStorageDiagnostic = async function (kind) {
     const config = storageDiagnosticEndpoints[kind];
     const status = document.getElementById("storageDiagnosticStatus");
     const output = document.getElementById("storageDiagnosticOutput");
+    const copyButton = document.getElementById("copyStorageDiagnosticSummary");
+    const copyStatus = document.getElementById("storageDiagnosticCopyStatus");
     const buttons = document.querySelectorAll(
       '[onclick^="runStorageDiagnostic("]'
     );
     if (!config || !status || !output) return;
 
     buttons.forEach(button => { button.disabled = true; });
+    if (copyButton) copyButton.disabled = true;
+    if (copyStatus) copyStatus.textContent = "";
+    window.latestStorageDiagnosticSummary = "";
     status.textContent = config.label + " — contrôle en lecture seule…";
     output.textContent = "Interrogation du serveur…";
     try {
       const report = await apiCall(config.url);
-      output.textContent = JSON.stringify(report, null, 2);
+      if (kind === "schema") {
+        window.latestStorageDiagnosticSummary = formatSchemaAuditSummary(report);
+        output.textContent = window.latestStorageDiagnosticSummary;
+        if (copyButton) copyButton.disabled = false;
+      } else {
+        output.textContent = JSON.stringify(report, null, 2);
+      }
       const safe = report?.read_only === true ||
         report?.configured === false ||
         report?.connected === true ||

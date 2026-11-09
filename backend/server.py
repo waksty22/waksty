@@ -4874,6 +4874,12 @@ async def websocket_endpoint(
 
             async def client_to_gemini():
                 while True:
+                    if STORAGE_MIGRATION_PENDING_CUTOVER:
+                        await websocket.close(
+                            code=1013,
+                            reason="Migration mémoire en cours de bascule vers Turso.",
+                        )
+                        return
                     payload = await websocket.receive_json()
                     action = payload.get("action")
                     if action == "audio_chunk":
@@ -4920,6 +4926,12 @@ async def websocket_endpoint(
 
             async def gemini_to_client():
                 async for raw_message in gemini_ws:
+                    if STORAGE_MIGRATION_PENDING_CUTOVER:
+                        await websocket.close(
+                            code=1013,
+                            reason="Migration mémoire en cours de bascule vers Turso.",
+                        )
+                        return
                     response = json.loads(raw_message)
                     if "error" in response:
                         error = response["error"]

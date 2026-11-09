@@ -292,6 +292,7 @@ def migrate_sqlite_rows_to_turso(
             inserted = 0
             already_present = 0
             table_digest = hashlib.sha256()
+            verified_digest = hashlib.sha256()
             while True:
                 batch = cursor.fetchmany(200)
                 if not batch:
@@ -308,12 +309,25 @@ def migrate_sqlite_rows_to_turso(
                                 f"Collision de clé dans {table}; aucune ligne n'a été validée."
                             )
                         already_present += 1
-                        continue
-                    insert_values = tuple(
-                        values[names.index(name)] for name in insert_names
+                        verified_values = existing
+                    else:
+                        insert_values = tuple(
+                            values[names.index(name)] for name in insert_names
+                        )
+                        target.execute(insert_sql, insert_values)
+                        inserted += 1
+                        found, verified_values = _row_exists(
+                            target, table, names, values, primary_keys
+                        )
+                        if not found or verified_values != values:
+                            raise ValueError(
+                                f"Relecture après insertion échouée pour {table}."
+                            )
+                    _row_digest_update(
+                        verified_digest, table, names, verified_values
                     )
-                    target.execute(insert_sql, insert_values)
-                    inserted += 1
+            if table_digest.digest() != verified_digest.digest():
+                raise ValueError(f"Empreinte de données différente pour {table}.")
             expected_count = int(source.execute(
                 f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
             ).fetchone()[0])

@@ -301,6 +301,20 @@ def init_db() -> None:
             "Turso sélectionné mais CHAPPIE_TURSO_CUTOVER_READY n'est pas validé. "
             "Le démarrage est bloqué pour éviter d'ouvrir une mémoire distante vide."
         )
+    if settings.backend == "turso":
+        try:
+            with db_connection() as verification_db:
+                marker = verification_db.execute(
+                    "SELECT status FROM chappie_storage_migrations "
+                    "WHERE migration_key=?",
+                    ("sqlite-to-turso-v50.55",),
+                ).fetchone()
+                if marker is None or marker["status"] != "completed":
+                    raise RuntimeError("Marqueur de migration Turso absent ou incomplet.")
+        except Exception as exc:
+            raise RuntimeError(
+                "Démarrage Turso refusé : migration SQLite -> Turso non validée."
+            ) from exc
     with db_connection() as db:
         # WAL is a local SQLite file-journal setting, not a remote libSQL
         # initialization requirement. Do not send it to Turso.
@@ -605,7 +619,12 @@ async def system_diagnostics(_: str = Depends(require_auth)):
 
 @app.get("/api/system/persistence-inventory")
 def system_persistence_inventory(_: str = Depends(require_auth)):
-    """Authenticated read-only inventory of the active SQLite database."""
+    """Authenticated read-only inventory of the local SQLite database."""
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            409,
+            "Le stockage actif est Turso ; cet inventaire concerne uniquement SQLite local.",
+        )
     try:
         return inspect_sqlite_database(DB_PATH)
     except (OSError, sqlite3.Error, ValueError):
@@ -5284,8 +5303,13 @@ async def api_storage_migration_apply(
         import libsql
         from storage.data_migration import migrate_sqlite_rows_to_turso
 
-        source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
+        # Acquire SQLite's writer reservation before reading, then make this
+        # connection query-only. This pins one consistent source snapshot and
+        # pauses concurrent app writes until the transfer finishes.
+        source = sqlite3.connect(str(DB_PATH), timeout=30)
         source.row_factory = sqlite3.Row
+        source.execute("BEGIN IMMEDIATE")
+        source.execute("PRAGMA query_only=ON")
         target = libsql.connect(database=remote_url, auth_token=remote_token)
         target.execute("PRAGMA foreign_keys=ON")
 

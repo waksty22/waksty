@@ -5629,10 +5629,16 @@ async def api_storage_migration_cancel(
 
         local = sqlite3.connect(str(DB_PATH), timeout=30)
         local.execute("BEGIN IMMEDIATE")
-        marker = local.execute(
-            "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
-            ("sqlite-to-turso-v50.55",),
+        marker_table = local.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='chappie_storage_migration_state'"
         ).fetchone()
+        marker = None
+        if marker_table:
+            marker = local.execute(
+                "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
+                ("sqlite-to-turso-v50.55",),
+            ).fetchone()
         local_pending = bool(marker and marker[0] == "pending_cutover")
         if marker is not None and marker[0] != "pending_cutover":
             local.rollback()

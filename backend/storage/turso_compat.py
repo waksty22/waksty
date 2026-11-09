@@ -1,21 +1,14 @@
-"""Read-only compatibility checks for the Turso/libsql driver.
-
-These probes remain available for deployment diagnostics. The production
-backend is selected separately through the guarded storage connection factory.
-"""
+"""Read-only compatibility checks for Chappie's actual Turso DB-API adapter."""
 from __future__ import annotations
 
 import os
-import sqlite3
 from typing import Any
+
+from storage.libsql_adapter import LibSQLConnectionAdapter, adapt_libsql_connection
 
 
 def inspect_turso_driver() -> dict[str, Any]:
-    """Probe the configured remote driver without changing remote data.
-
-    The probe performs SELECT/PRAGMA statements only. It never creates tables,
-    writes rows, or changes the current Chappie database.
-    """
+    """Probe the same adapter used by production, without changing remote data."""
     database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
     auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
     if not database_url or not auth_token:
@@ -24,6 +17,7 @@ def inspect_turso_driver() -> dict[str, Any]:
             "connected": False,
             "compatible": False,
             "blockers": ["TURSO_DATABASE_URL ou TURSO_AUTH_TOKEN manquant"],
+            "read_only": True,
         }
 
     connection = None
@@ -32,27 +26,18 @@ def inspect_turso_driver() -> dict[str, Any]:
     try:
         import libsql
 
-        connection = libsql.connect(
-            database=database_url,
-            auth_token=auth_token,
-        )
+        native = libsql.connect(database=database_url, auth_token=auth_token)
+        connection = adapt_libsql_connection(native)
         checks["select"] = connection.execute("SELECT 1").fetchone()[0] == 1
-        checks["sqlite_connection_type"] = isinstance(
-            connection, sqlite3.Connection
+        checks["production_adapter"] = isinstance(
+            connection, LibSQLConnectionAdapter
         )
-
-        try:
-            connection.row_factory = sqlite3.Row
-            row = connection.execute(
-                "SELECT 7 AS probe_value"
-            ).fetchone()
-            checks["sqlite_row_factory"] = (
-                isinstance(row, sqlite3.Row)
-                and row["probe_value"] == 7
-            )
-        except Exception:
-            checks["sqlite_row_factory"] = False
-
+        row = connection.execute("SELECT 7 AS probe_value").fetchone()
+        checks["named_row_access"] = (
+            row is not None
+            and row["probe_value"] == 7
+            and row[0] == 7
+        )
         checks["executescript"] = callable(
             getattr(connection, "executescript", None)
         )
@@ -65,8 +50,8 @@ def inspect_turso_driver() -> dict[str, Any]:
 
         required = (
             "select",
-            "sqlite_connection_type",
-            "sqlite_row_factory",
+            "production_adapter",
+            "named_row_access",
             "executescript",
             "lastrowid_attribute",
             "pragma_table_info",
@@ -79,15 +64,17 @@ def inspect_turso_driver() -> dict[str, Any]:
             "checks": checks,
             "blockers": blockers,
             "read_only": True,
+            "data_contents_exposed": False,
+            "compatibility_basis": "production_libsql_adapter",
         }
     except Exception as exc:
-        # Do not return connection strings, credentials, or driver internals.
         return {
             "configured": True,
             "connected": False,
             "compatible": False,
             "blockers": ["Échec de la sonde distante: " + type(exc).__name__],
             "read_only": True,
+            "data_contents_exposed": False,
         }
     finally:
         if connection is not None:

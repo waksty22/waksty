@@ -690,6 +690,13 @@ class MemorySearchRequest(BaseModel):
     query: str = Field(default="", max_length=500)  
     limit: int = Field(default=10, ge=1, le=30)
 
+class TursoMigrationApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: Literal["MIGRER VERS TURSO"]
+    backup_downloaded: bool
+
+
 class SpeakRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -5231,6 +5238,86 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
         raise HTTPException(
             status_code=503,
             detail="Sauvegarde pré-migration impossible : " + type(exc).__name__,
+        )
+    finally:
+        for connection in (source, target):
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+
+@app.post("/api/storage/migration/apply")
+async def api_storage_migration_apply(
+    payload: TursoMigrationApplyRequest,
+    auth=Depends(require_auth),
+):
+    """Apply the reviewed SQLite -> Turso migration after explicit safeguards."""
+    _authenticated_user(auth)
+    if os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() != "1":
+        raise HTTPException(
+            status_code=403,
+            detail="Migration désactivée. Activez explicitement CHAPPIE_ALLOW_TURSO_MIGRATION=1 après revue.",
+        )
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="La source active doit encore être SQLite pendant le transfert.",
+        )
+    if payload.confirmation != "MIGRER VERS TURSO" or not payload.backup_downloaded:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirmez la phrase exacte et le téléchargement des deux sauvegardes chiffrées.",
+        )
+    if not DB_PATH.is_file():
+        raise HTTPException(status_code=503, detail="La base SQLite source est introuvable.")
+
+    remote_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    remote_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not remote_url or not remote_token:
+        raise HTTPException(status_code=503, detail="Turso n'est pas entièrement configuré.")
+
+    source = None
+    target = None
+    try:
+        import libsql
+        from storage.data_migration import migrate_sqlite_rows_to_turso
+
+        source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
+        source.row_factory = sqlite3.Row
+        target = libsql.connect(database=remote_url, auth_token=remote_token)
+        target.execute("PRAGMA foreign_keys=ON")
+
+        report = migrate_sqlite_rows_to_turso(source, target, apply=True)
+        if not report.get("applied"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Migration bloquée par le contrôle de compatibilité.",
+                    "blockers": report.get("blockers", []),
+                },
+            )
+        log.info(
+            "[MIGRATION] SQLite -> Turso completed: %s inserted, %s already present, %s tables.",
+            report["inserted_rows"],
+            report["already_present_rows"],
+            len(report["tables"]),
+        )
+        return {
+            **report,
+            "source_database": "SQLite local",
+            "target_database_host": remote_url.split("://", 1)[-1].split("/", 1)[0],
+            "automatic_cutover": False,
+            "next_step": "Vérifier le rapport, puis seulement ensuite autoriser le backend Turso et redéployer.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("[MIGRATION] SQLite -> Turso aborted; target transaction rolled back.")
+        raise HTTPException(
+            status_code=503,
+            detail="Migration interrompue et transaction annulée : " + type(exc).__name__,
         )
     finally:
         for connection in (source, target):

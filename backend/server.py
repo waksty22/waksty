@@ -321,6 +321,47 @@ def _local_migration_pending_cutover() -> bool:
             connection.close()
 
 
+def _quote_sql_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
+    """Install persistent triggers that reject local writes until Turso is active."""
+    tables = connection.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type='table'
+          AND name NOT LIKE 'sqlite_%'
+          AND name != 'chappie_storage_migration_state'
+        ORDER BY name
+        """
+    ).fetchall()
+    installed = 0
+    for row in tables:
+        table = str(row[0])
+        quoted_table = _quote_sql_identifier(table)
+        for operation in ("INSERT", "UPDATE", "DELETE"):
+            trigger = _quote_sql_identifier(
+                f"chappie_migration_guard_{table}_{operation.lower()}"
+            )
+            connection.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS {trigger}
+                BEFORE {operation} ON {quoted_table}
+                WHEN EXISTS (
+                    SELECT 1 FROM chappie_storage_migration_state
+                    WHERE migration_key='sqlite-to-turso-v50.55'
+                      AND status='pending_cutover'
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'Chappie storage migration pending Turso cutover');
+                END
+                """
+            )
+            installed += 1
+    return installed
+
+
 def init_db() -> None:
     global STORAGE_MIGRATION_PENDING_CUTOVER
     settings = StorageSettings.from_env()
@@ -5430,8 +5471,13 @@ async def api_storage_migration_apply(
             """,
             ("sqlite-to-turso-v50.55", utc_now()),
         )
+        trigger_count = _install_sqlite_cutover_write_guards(source)
         STORAGE_MIGRATION_PENDING_CUTOVER = True
         source.commit()
+        log.info(
+            "[MIGRATION] SQLite write guards installed: %s triggers.",
+            trigger_count,
+        )
 
         log.info(
             "[MIGRATION] SQLite -> Turso completed: %s inserted, %s already present, %s tables.",

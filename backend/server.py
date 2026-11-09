@@ -5341,7 +5341,10 @@ async def api_storage_path_diagnostics(auth=Depends(require_auth)):
 
 
 @app.get("/api/storage/migration/preview")
-async def api_storage_migration_preview(auth=Depends(require_auth)):
+async def api_storage_migration_preview(
+    compact: bool = False,
+    auth=Depends(require_auth),
+):
     """Read-only SQLite -> Turso migration preview; no row contents are returned."""
     _authenticated_user(auth)
     if StorageSettings.from_env().backend != "sqlite":
@@ -5360,12 +5363,16 @@ async def api_storage_migration_preview(auth=Depends(require_auth)):
     target = None
     try:
         import libsql
-        from storage.data_migration import build_data_migration_plan
+        from storage.data_migration import build_data_migration_plan, summarize_data_migration_plan
 
         source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
         source.row_factory = sqlite3.Row
         target = libsql.connect(database=remote_url, auth_token=remote_token)
         report = build_data_migration_plan(source, target)
+        if compact:
+            compact_report = summarize_data_migration_plan(report)
+            compact_report["target_database_host"] = remote_url.split("://", 1)[-1].split("/", 1)[0]
+            return compact_report
         return {
             **report,
             "source_database": "SQLite local",

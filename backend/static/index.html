@@ -1995,6 +1995,31 @@ Sélectionne une catégorie pour consulter les données.
           <pre id="storageDiagnosticOutput" class="output" style="min-height:80px">Aucun rapport pour le moment.</pre>
         </div>
 
+        <div class="panel">
+          <h3>🚚 Migration contrôlée vers Turso</h3>
+          <p class="muted" style="margin-bottom:12px">
+            Commence par l'aperçu en lecture seule, puis télécharge l'archive chiffrée
+            des deux bases. Le transfert final exige une confirmation distincte.
+          </p>
+          <div class="row-btns">
+            <button type="button" onclick="runTursoMigrationPreview()">1️⃣ Prévisualiser la migration</button>
+            <button type="button" class="secondary" onclick="downloadTursoMigrationBackup()">2️⃣ Télécharger les sauvegardes chiffrées</button>
+          </div>
+          <p id="tursoMigrationStatus" class="status" role="status" aria-live="polite">En attente. Aucun transfert n'a été lancé.</p>
+          <pre id="tursoMigrationOutput" class="output" style="min-height:70px">Aucun aperçu pour le moment.</pre>
+          <label for="tursoMigrationPhrase" class="small-label">Confirmation exacte pour le transfert</label>
+          <input id="tursoMigrationPhrase" type="text" autocomplete="off" placeholder="MIGRER VERS TURSO">
+          <label style="display:flex;gap:10px;align-items:flex-start;margin:12px 0">
+            <input id="tursoMigrationBackupConfirmed" type="checkbox" style="width:auto;margin-top:3px">
+            <span class="muted">J'ai téléchargé et conservé l'archive chiffrée contenant les sauvegardes SQLite et Turso.</span>
+          </label>
+          <button type="button" class="danger" onclick="applyTursoMigration()">3️⃣ Confirmer et transférer les données vers Turso</button>
+          <p class="muted" style="margin-top:10px">
+            Le transfert reste bloqué tant que CHAPPIE_ALLOW_TURSO_MIGRATION n'est pas activée sur Render.
+            Aucun basculement automatique du stockage n'est effectué après la copie.
+          </p>
+        </div>
+
         <div class="panel danger-zone">
           <h3>⚠️ Zone de réinitialisation</h3>
 
@@ -2181,8 +2206,78 @@ Sélectionne une catégorie pour consulter les données.
 
 <script type="module">
   // index.html is served from "/", so static assets must use the mounted /static path.
-  import { apiCall } from "/static/js/api.js";
+  import { apiCall, apiDownload } from "/static/js/api.js";
 
+
+  window.runTursoMigrationPreview = async function () {
+    const status = document.getElementById("tursoMigrationStatus");
+    const output = document.getElementById("tursoMigrationOutput");
+    status.textContent = "Aperçu en lecture seule en cours…";
+    output.textContent = "Comparaison des structures et volumes…";
+    try {
+      const report = await apiCall("/api/storage/migration/preview");
+      output.textContent = JSON.stringify(report, null, 2);
+      status.textContent = report.ready
+        ? "Aperçu terminé : transfert techniquement prêt, sous réserve des sauvegardes."
+        : "Migration bloquée : consulte les points bloquants dans le rapport.";
+      window.tursoMigrationPreviewReady = report.ready === true;
+    } catch (error) {
+      status.textContent = "Aperçu impossible : " + (error?.message || "erreur inconnue");
+      output.textContent = "Aucun contenu de souvenir ou de conversation n'a été affiché.";
+      window.tursoMigrationPreviewReady = false;
+    }
+  };
+
+  window.downloadTursoMigrationBackup = async function () {
+    const status = document.getElementById("tursoMigrationStatus");
+    status.textContent = "Création et vérification des deux sauvegardes chiffrées…";
+    try {
+      await apiDownload("/api/storage/migration/backup", "chappie-pre-migration-backups.zip");
+      window.tursoMigrationBackupDownloaded = true;
+      status.textContent = "Archive téléchargée. Conserve-la en lieu sûr avant de poursuivre.";
+      document.getElementById("tursoMigrationBackupConfirmed").checked = true;
+    } catch (error) {
+      window.tursoMigrationBackupDownloaded = false;
+      status.textContent = "Sauvegarde impossible : " + (error?.message || "erreur inconnue");
+    }
+  };
+
+  window.applyTursoMigration = async function () {
+    const status = document.getElementById("tursoMigrationStatus");
+    const phrase = document.getElementById("tursoMigrationPhrase").value.trim();
+    const backupConfirmed = document.getElementById("tursoMigrationBackupConfirmed").checked;
+    if (phrase !== "MIGRER VERS TURSO") {
+      status.textContent = "Confirmation refusée : saisis exactement MIGRER VERS TURSO.";
+      return;
+    }
+    if (!backupConfirmed || window.tursoMigrationBackupDownloaded !== true) {
+      status.textContent = "Transfert refusé : télécharge d'abord l'archive depuis ce panneau.";
+      return;
+    }
+    if (window.tursoMigrationPreviewReady !== true) {
+      status.textContent = "Transfert refusé : un aperçu récent doit indiquer ready=true.";
+      return;
+    }
+    if (!window.confirm("Dernière confirmation : copier maintenant toutes les données SQLite vers Turso ? SQLite restera inchangée et aucun basculement automatique ne sera effectué.")) {
+      status.textContent = "Transfert annulé.";
+      return;
+    }
+    status.textContent = "Transfert transactionnel en cours. Ne ferme pas cette page…";
+    try {
+      const report = await apiCall("/api/storage/migration/apply", {
+        method: "POST",
+        body: { confirmation: "MIGRER VERS TURSO", backup_downloaded: true }
+      });
+      document.getElementById("tursoMigrationOutput").textContent = JSON.stringify(report, null, 2);
+      status.textContent = report.applied
+        ? "Transfert terminé. Contrôle le rapport avant tout basculement."
+        : "Transfert non validé. Consulte le rapport.";
+      window.tursoMigrationApplied = report.applied === true;
+    } catch (error) {
+      status.textContent = "Transfert refusé ou interrompu : " + (error?.message || "erreur inconnue");
+      window.tursoMigrationApplied = false;
+    }
+  };
 
   const storageDiagnosticEndpoints = {
     turso: {

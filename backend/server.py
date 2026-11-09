@@ -362,15 +362,56 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
     return installed
 
 
+def _remote_turso_migration_completed() -> bool:
+    """Detect a completed remote transfer if Render's ephemeral SQLite file vanished."""
+    database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not database_url or not auth_token:
+        return False
+    connection = None
+    try:
+        import libsql
+
+        connection = libsql.connect(database=database_url, auth_token=auth_token)
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='chappie_storage_migrations'"
+        ).fetchone()
+        if not exists:
+            return False
+        row = connection.execute(
+            "SELECT status FROM chappie_storage_migrations WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        ).fetchone()
+        return bool(row and row[0] == "completed")
+    except Exception as exc:
+        if os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1":
+            raise RuntimeError(
+                "Vérification du marqueur Turso impossible ; démarrage SQLite bloqué par sécurité."
+            ) from exc
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 def init_db() -> None:
     global STORAGE_MIGRATION_PENDING_CUTOVER
     settings = StorageSettings.from_env()
-    if settings.backend == "sqlite" and _local_migration_pending_cutover():
-        STORAGE_MIGRATION_PENDING_CUTOVER = True
-        log.warning(
-            "[STORAGE] SQLite migration is complete; writes are paused until Turso cutover."
-        )
-        return
+    if settings.backend == "sqlite":
+        local_pending = _local_migration_pending_cutover()
+        remote_pending = False
+        if (
+            not local_pending
+            and os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1"
+        ):
+            remote_pending = _remote_turso_migration_completed()
+        if local_pending or remote_pending:
+            STORAGE_MIGRATION_PENDING_CUTOVER = True
+            log.warning(
+                "[STORAGE] SQLite migration is complete; writes are paused until Turso cutover."
+            )
+            return
     if (
         settings.backend == "turso"
         and os.getenv("CHAPPIE_TURSO_CUTOVER_READY", "").strip() != "1"
@@ -3071,8 +3112,11 @@ async def autonomous_maintenance_loop() -> None:
             if dream_due and uid:  
                 generate_dream(uid)  
 
-            if rumination_due and uid:  
-                generate_rumination(uid)  
+            if STORAGE_MIGRATION_PENDING_CUTOVER:
+                return
+
+            if rumination_due and uid:
+                generate_rumination(uid)
 
         except asyncio.CancelledError:  
             raise  

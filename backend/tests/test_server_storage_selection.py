@@ -45,6 +45,7 @@ def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete():
     connection = sqlite3.connect(":memory:")
     try:
         connection.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+        connection.execute("INSERT INTO probe(id, label) VALUES (1, 'existing')")
         connection.execute(
             "CREATE TABLE chappie_storage_migration_state "
             "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
@@ -58,8 +59,6 @@ def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete():
 
         with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
             connection.execute("INSERT INTO probe(label) VALUES ('new')")
-        connection.execute("INSERT INTO probe(id, label) VALUES (1, 'existing')")
-        connection.execute("UPDATE chappie_storage_migration_state SET status='pending_cutover'")
         with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
             connection.execute("UPDATE probe SET label='changed' WHERE id=1")
         with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):

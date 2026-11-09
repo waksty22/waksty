@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
 from storage.connection_factory import (
     StorageSettings,
     open_storage_connection,
+    open_sqlite_application_connection,
 )
 
 
@@ -72,3 +73,46 @@ def test_sqlite_factory_does_not_read_turso_secrets(monkeypatch, tmp_path):
         assert db.execute("SELECT 1").fetchone()[0] == 1
     finally:
         db.close()
+
+def test_factory_uses_the_same_data_dir_and_filename_as_server(monkeypatch, tmp_path):
+    active_dir = tmp_path / "active-chappie-data"
+    competing_path = tmp_path / "different-empty-database.sqlite3"
+    monkeypatch.setenv("CHAPPIE_DATA_DIR", str(active_dir))
+    # A legacy/accidental second path variable must not split the app and
+    # factory onto different SQLite files.
+    monkeypatch.setenv("CHAPPIE_SQLITE_PATH", str(competing_path))
+    monkeypatch.delenv("CHAPPIE_STORAGE_BACKEND", raising=False)
+
+    settings = StorageSettings.from_env()
+
+    assert settings.backend == "sqlite"
+    assert Path(settings.sqlite_path) == (
+        active_dir.resolve() / "chappie_v16.sqlite3"
+    )
+    assert Path(settings.sqlite_path) != competing_path
+
+def test_application_connection_helper_opens_sqlite_only(tmp_path):
+    settings = StorageSettings(
+        backend="sqlite",
+        sqlite_path=str(tmp_path / "server.sqlite3"),
+    )
+    db = open_sqlite_application_connection(settings)
+    try:
+        assert isinstance(db, sqlite3.Connection)
+        assert db.row_factory is sqlite3.Row
+        assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        assert db.execute("PRAGMA busy_timeout").fetchone()[0] == 20000
+        assert db.execute("SELECT 1 AS value").fetchone()["value"] == 1
+    finally:
+        db.close()
+
+
+def test_application_connection_helper_fails_closed_for_turso():
+    settings = StorageSettings(
+        backend="turso",
+        turso_database_url="libsql://example.turso.io",
+        turso_auth_token="test-token",
+    )
+    with pytest.raises(RuntimeError, match="Turso n'est pas encore activé"):
+        open_sqlite_application_connection(settings)
+

@@ -2002,8 +2002,9 @@ Sélectionne une catégorie pour consulter les données.
           </p>
           <p class="muted" style="margin-bottom:12px">
             Avant l'application, l'aperçu doit indiquer PRÊT et l'archive des sauvegardes doit être conservée
-            hors de Render. Sur Render, active temporairement CHAPPIE_ALLOW_TURSO_MIGRATION=1 puis redéploie
-            avant de lancer le transfert. Après réussite, le backend Turso devra être activé séparément.
+            hors de Render. Sur Render, active CHAPPIE_ALLOW_TURSO_MIGRATION=1 puis redéploie avant le transfert.
+            Conserve ce réglage jusqu'à la bascule. Après réussite, définis CHAPPIE_STORAGE_BACKEND=turso
+            et CHAPPIE_TURSO_CUTOVER_READY=1, puis redéploie ; tu pourras ensuite retirer CHAPPIE_ALLOW_TURSO_MIGRATION.
           </p>
           <div class="row-btns">
             <button type="button" onclick="runTursoMigrationPreview()">
@@ -2547,7 +2548,7 @@ Sélectionne une catégorie pour consulter les données.
       window.tursoMigrationState.applied = report?.applied === true;
       output.textContent = JSON.stringify(report, null, 2);
       status.textContent = report?.applied === true
-        ? "Transfert terminé et vérifié. Ne réinitialise rien. Le backend Turso n'est pas encore activé : suis les instructions de bascule manuelle."
+        ? "Transfert terminé et vérifié. Les écritures SQLite sont maintenant bloquées, même après redémarrage. Ne réinitialise rien : bascule maintenant le backend Render vers Turso."
         : "Le transfert n'a pas été validé. Consulte le rapport.";
     } catch (error) {
       status.textContent = "Migration interrompue : " + (error?.message || "erreur inconnue");

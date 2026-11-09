@@ -781,7 +781,10 @@ async def body_size_guard(request: Request, call_next):
             or path in readonly_paths
             or path.startswith("/static/")
             or (
-                path == "/api/storage/migration/apply"
+                path in {
+                    "/api/storage/migration/apply",
+                    "/api/storage/migration/cancel",
+                }
                 and request.method == "POST"
             )
         )
@@ -874,6 +877,12 @@ class TursoMigrationApplyRequest(BaseModel):
 
     confirmation: Literal["MIGRER VERS TURSO"]
     backup_downloaded: bool
+
+
+class TursoMigrationCancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: Literal["ANNULER LA BASCULE TURSO"]
 
 
 class SpeakRequest(BaseModel):
@@ -5546,6 +5555,103 @@ async def api_storage_migration_apply(
         )
     finally:
         for connection in (source, target):
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+
+@app.post("/api/storage/migration/cancel")
+async def api_storage_migration_cancel(
+    payload: TursoMigrationCancelRequest,
+    auth=Depends(require_auth),
+):
+    """Cancel a pre-cutover migration and explicitly unlock the SQLite source."""
+    global STORAGE_MIGRATION_PENDING_CUTOVER
+    _authenticated_user(auth)
+    if os.getenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "").strip() != "1":
+        raise HTTPException(
+            status_code=403,
+            detail="Annulation désactivée. Activez explicitement CHAPPIE_ALLOW_SQLITE_ROLLBACK=1 après revue.",
+        )
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="Cette annulation est réservée à la phase pré-bascule ; le backend actif n'est plus SQLite.",
+        )
+    if payload.confirmation != "ANNULER LA BASCULE TURSO":
+        raise HTTPException(status_code=400, detail="Phrase de confirmation incorrecte.")
+    if not DB_PATH.is_file():
+        raise HTTPException(status_code=503, detail="La base SQLite source est introuvable.")
+
+    remote_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    remote_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not remote_url or not remote_token:
+        raise HTTPException(status_code=503, detail="Turso n'est pas entièrement configuré.")
+
+    local = None
+    remote = None
+    try:
+        import libsql
+
+        remote = libsql.connect(database=remote_url, auth_token=remote_token)
+        remote.execute(
+            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        )
+        remote.commit()
+
+        local = sqlite3.connect(str(DB_PATH), timeout=30)
+        local.execute("BEGIN IMMEDIATE")
+        marker = local.execute(
+            "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        ).fetchone()
+        if marker is None or marker[0] != "pending_cutover":
+            local.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Aucune migration locale en attente de bascule.",
+            )
+        guards = local.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchall()
+        for row in guards:
+            local.execute(
+                "DROP TRIGGER IF EXISTS " + _quote_sql_identifier(str(row[0]))
+            )
+        local.execute(
+            "UPDATE chappie_storage_migration_state SET status='cancelled', updated_at=? "
+            "WHERE migration_key=?",
+            (utc_now(), "sqlite-to-turso-v50.55"),
+        )
+        local.commit()
+        STORAGE_MIGRATION_PENDING_CUTOVER = False
+        return {
+            "cancelled": True,
+            "sqlite_unlocked": True,
+            "turso_migration_marker_removed": True,
+            "turso_data_preserved": True,
+            "restart_recommended": True,
+            "message": "SQLite est réactivé. Les données copiées dans Turso ne sont pas supprimées.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if local is not None:
+            try:
+                local.rollback()
+            except Exception:
+                pass
+        log.exception("[MIGRATION] Pre-cutover cancellation failed.")
+        raise HTTPException(
+            status_code=503,
+            detail="Annulation incomplète : " + type(exc).__name__,
+        )
+    finally:
+        for connection in (local, remote):
             if connection is not None:
                 try:
                     connection.close()

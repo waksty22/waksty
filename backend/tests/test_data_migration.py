@@ -167,3 +167,45 @@ def test_table_option_drift_blocks_migration_preview():
     finally:
         source.close()
         target.close()
+
+
+def test_approved_legacy_skills_xp_difference_is_migrated_and_marked():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    try:
+        source.execute(
+            "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+            "skill_name TEXT NOT NULL, level REAL NOT NULL DEFAULT 0.0, "
+            "xp REAL NOT NULL DEFAULT 0.0, evidence TEXT NOT NULL DEFAULT '', "
+            "updated_at TEXT NOT NULL, UNIQUE(user_id, skill_name))"
+        )
+        target.execute(
+            "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+            "skill_name TEXT NOT NULL, level REAL NOT NULL DEFAULT 0.0, "
+            "evidence TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, "
+            "UNIQUE(user_id, skill_name))"
+        )
+        source.execute(
+            "INSERT INTO skills(id, user_id, skill_name, level, xp, evidence, updated_at) "
+            "VALUES (7, 'creator', 'mots', 1.5, 12.0, 'preuve', 't1')"
+        )
+        source.commit()
+        target.commit()
+
+        plan = build_data_migration_plan(source, target)
+        assert plan["ready"] is True
+
+        report = migrate_sqlite_rows_to_turso(source, target, apply=True)
+        assert report["applied"] is True
+        row = target.execute(
+            "SELECT id, xp FROM skills WHERE id=7"
+        ).fetchone()
+        assert row == (7, 12.0)
+        marker = target.execute(
+            "SELECT status, source_row_count FROM chappie_storage_migrations "
+            "WHERE migration_key='sqlite-to-turso-v50.55'"
+        ).fetchone()
+        assert marker == ("completed", 1)
+    finally:
+        source.close()
+        target.close()

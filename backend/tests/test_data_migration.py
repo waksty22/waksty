@@ -198,3 +198,30 @@ def test_local_cutover_marker_and_guard_triggers_are_not_transferred():
     finally:
         source.close()
         target.close()
+
+
+def test_migration_preserves_duplicate_rows_in_tables_without_primary_keys():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    try:
+        source.execute("CREATE TABLE events (label TEXT NOT NULL, value INTEGER NOT NULL)")
+        target.execute("CREATE TABLE events (label TEXT NOT NULL, value INTEGER NOT NULL)")
+        source.executemany(
+            "INSERT INTO events(label, value) VALUES (?, ?)",
+            [("same", 1), ("same", 1)],
+        )
+        target.execute(
+            "INSERT INTO events(label, value) VALUES ('same', 1)"
+        )
+        source.commit()
+        target.commit()
+
+        report = migrate_sqlite_rows_to_turso(source, target, apply=True)
+
+        assert report["applied"] is True
+        assert report["inserted_rows"] == 1
+        assert report["already_present_rows"] == 1
+        assert target.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
+    finally:
+        source.close()
+        target.close()

@@ -12,7 +12,11 @@ import json
 import math
 from typing import Any
 
-from storage.schema_audit import _quote_identifier
+from storage.schema_audit import (
+    _quote_identifier,
+    compare_database_inventories,
+    inspect_database,
+)
 from storage.schema_migration import build_migration_plan, _row_value
 
 
@@ -170,6 +174,42 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
             "ready": False,
             "schema_plan": schema,
             "blockers": list(schema.get("blockers", [])),
+            "tables": [],
+        }
+
+    # The schema planner intentionally supports only reviewed additive changes.
+    # Also consult the detailed audit for table-level options/generated-column
+    # drift that a simple column comparison could otherwise miss.
+    detailed = compare_database_inventories(
+        inspect_database(source),
+        inspect_database(target),
+    ).get("detailed_audit", {})
+    table_sql_blockers = []
+    for difference in detailed.get("differences", []):
+        if difference.get("category") != "table_constraints_or_options":
+            continue
+        table = difference.get("table")
+        source_columns = {
+            column["name"] for column in _columns(source, table)
+        } if table else set()
+        target_columns = {
+            column["name"] for column in _columns(target, table)
+        } if table and table in {item["name"] for item in _objects(target)} else set()
+        # The only approved table-definition drift is the known legacy skills.xp
+        # column, which the schema planner adds with an explicit default.
+        if table == "skills" and "xp" in source_columns and "xp" not in target_columns:
+            continue
+        table_sql_blockers.append(
+            f"{table}: définition SQL de table différente ; revue manuelle requise."
+        )
+    if table_sql_blockers:
+        return {
+            "version": "50.55",
+            "read_only": True,
+            "data_contents_exposed": False,
+            "ready": False,
+            "schema_plan": schema,
+            "blockers": table_sql_blockers,
             "tables": [],
         }
 

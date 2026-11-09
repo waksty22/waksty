@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Chappie — Résumé migration Turso V50.57</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#e8f4ff}
+    *{box-sizing:border-box}
+    body{margin:0;padding:22px 15px;max-width:760px;margin-inline:auto}
+    h1{font-size:1.35rem;color:#7dd3fc}
+    p{color:#b6c9dc;line-height:1.5}
+    .panel{background:#102238;border:1px solid #24445f;border-radius:14px;padding:17px;margin:14px 0}
+    label{display:block;margin:12px 0 7px;font-weight:650}
+    input{width:100%;padding:13px;border-radius:9px;border:1px solid #41617c;background:#071827;color:white;font-size:16px}
+    button{width:100%;margin-top:14px;padding:13px;border:0;border-radius:9px;background:#087eaa;color:white;font-weight:750;font-size:16px}
+    button:disabled{opacity:.55}
+    .muted{font-size:.88rem;color:#91a8be}
+    .ok{color:#86efac}.bad{color:#fca5a5}.warn{color:#fcd34d}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+    .metric{background:#0a1a2b;border:1px solid #24445f;border-radius:10px;padding:12px}
+    .metric strong{display:block;font-size:1.45rem;color:#bae6fd}
+    .metric span{font-size:.82rem;color:#a9bfd2}
+    ul{padding-left:20px;line-height:1.5;overflow-wrap:anywhere}
+    li{margin:5px 0}
+    code{color:#bae6fd;overflow-wrap:anywhere}
+    [hidden]{display:none!important}
+  </style>
+</head>
+<body>
+  <h1>🔎 Résumé compact — Migration SQLite / Turso</h1>
+  <p>Ce rapport réduit le diagnostic pour qu'il soit facile à consulter et à partager. Il ne lit ni n'affiche le contenu des souvenirs ou des conversations.</p>
+  <section class="panel">
+    <p><strong class="ok">Lecture seule garantie.</strong> Ce bouton lance uniquement la prévisualisation. Il ne transfère aucune donnée et ne modifie aucune base.</p>
+    <label for="apiToken">Jeton API Chappie</label>
+    <input id="apiToken" type="password" autocomplete="off" placeholder="Saisis ton jeton API">
+    <button id="run" type="button">Afficher le résumé compact</button>
+    <p class="muted">Le jeton est utilisé uniquement pour cette requête puis effacé. Ne le partage jamais.</p>
+    <p id="status" role="status"></p>
+  </section>
+  <section id="report" hidden>
+    <div class="panel">
+      <h2 id="resultTitle">État du diagnostic</h2>
+      <div class="grid" id="metrics"></div>
+    </div>
+    <div class="panel">
+      <h2>Structure des bases</h2>
+      <p id="schema"></p>
+      <ul id="missing"></ul>
+    </div>
+    <div class="panel">
+      <h2>Blocages</h2>
+      <ul id="blockers"></ul>
+    </div>
+    <div class="panel">
+      <h2>Différences détectées</h2>
+      <ul id="differences"></ul>
+    </div>
+    <p class="muted" id="safety"></p>
+  </section>
+  <script>
+    const button=document.getElementById("run");
+    const tokenInput=document.getElementById("apiToken");
+    const statusBox=document.getElementById("status");
+    const reportBox=document.getElementById("report");
+    const el=id=>document.getElementById(id);
+    function list(id,items,empty){
+      const node=el(id);node.replaceChildren();
+      if(!items||!items.length){const li=document.createElement("li");li.textContent=empty;node.append(li);return;}
+      for(const value of items){const li=document.createElement("li");li.textContent=value;node.append(li);}
+    }
+    function metric(label,value){
+      const box=document.createElement("div");box.className="metric";
+      const strong=document.createElement("strong");strong.textContent=value??"—";
+      const span=document.createElement("span");span.textContent=label;
+      box.append(strong,span);el("metrics").append(box);
+    }
+    button.addEventListener("click",async()=>{
+      const token=tokenInput.value.trim();
+      if(!token){statusBox.textContent="Saisis ton jeton API Chappie.";statusBox.className="bad";return;}
+      button.disabled=true;reportBox.hidden=true;
+      statusBox.textContent="Prévisualisation en lecture seule…";statusBox.className="";
+      try{
+        const response=await fetch("/api/storage/migration/preview?compact=true",{headers:{Authorization:"Bearer "+token}});
+        const data=await response.json();
+        if(!response.ok){const detail=data.detail||data;throw new Error(typeof detail==="string"?detail:JSON.stringify(detail));}
+        el("metrics").replaceChildren();
+        metric("Tables SQLite",data.schema?.source_table_count);
+        metric("Tables Turso",data.schema?.target_table_count);
+        metric("Tables manquantes",data.schema?.missing_table_count??0);
+        metric("Blocages",data.counts?.blockers??0);
+        metric("Différences",data.counts?.differences??0);
+        metric("Migration prête",data.ready?"Oui":"Non");
+        el("resultTitle").textContent=data.ready?"Compatibilité validée par la prévisualisation":"Migration encore bloquée";
+        el("resultTitle").className=data.ready?"ok":"warn";
+        el("schema").textContent="SQLite : "+(data.schema?.source_table_count??"—")+" tables · Turso : "+(data.schema?.target_table_count??"—")+" tables.";
+        list("missing",data.schema?.missing_tables?.map(x=>"Table absente : "+x),data.schema?.missing_table_count?"Liste tronquée ou indisponible":"Aucune table manquante signalée.");
+        list("blockers",data.blockers_preview,data.counts?.blockers?"Aucun détail de blocage fourni":"Aucun blocage signalé.");
+        const diffs=(data.differences_preview||[]).map(x=>[x.severity,x.category,x.table,x.item,x.message].filter(Boolean).join(" — "));
+        list("differences",diffs,data.counts?.differences?"Détails non disponibles dans ce résumé":"Aucune différence détaillée signalée.");
+        el("safety").textContent="Version "+data.version+" · Lecture seule : "+data.read_only+" · Contenu métier exposé : "+data.data_contents_exposed+" · Migration exécutée : "+data.migration_executed+".";
+        reportBox.hidden=false;statusBox.textContent="Résumé chargé. Tu peux me copier les nombres et les listes affichés.";statusBox.className="ok";
+      }catch(error){statusBox.textContent=error.message||"Échec du diagnostic.";statusBox.className="bad";}
+      finally{tokenInput.value="";button.disabled=false;}
+    });
+  </script>
+</body>
+</html>

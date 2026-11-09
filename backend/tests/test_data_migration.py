@@ -48,6 +48,55 @@ def _databases(target_parent_label="same"):
     return source, target
 
 
+
+def test_compact_migration_summary_exposes_only_safe_metadata():
+    from storage.data_migration import summarize_data_migration_plan
+
+    plan = {
+        "version": "50.56",
+        "ready": False,
+        "blockers": ["guarded: définition SQL de table différente"],
+        "schema_plan": {
+            "source_table_count": 41,
+            "target_table_count": 13,
+            "missing_tables": ["memories_v19", "thoughts"],
+        },
+        "schema_diagnostics": {
+            "severity_counts": {"blocking": 2, "important": 1, "informational": 3},
+            "differences": [
+                {
+                    "severity": "blocking",
+                    "category": "table_constraints_or_options",
+                    "table": "guarded",
+                    "item": "CREATE TABLE",
+                    "message": "Définition SQL différente",
+                    "local": "CREATE TABLE guarded (private_sql TEXT)",
+                    "remote": "CREATE TABLE guarded (private_sql TEXT CHECK(...))",
+                },
+                {
+                    "severity": "important",
+                    "category": "column",
+                    "table": "skills",
+                    "item": "xp",
+                    "message": "Colonne absente",
+                },
+            ],
+        },
+    }
+
+    summary = summarize_data_migration_plan(plan)
+
+    assert summary["read_only"] is True
+    assert summary["data_contents_exposed"] is False
+    assert summary["migration_executed"] is False
+    assert summary["schema"]["missing_table_count"] == 2
+    assert summary["counts"]["blockers"] == 1
+    assert summary["counts"]["differences"] == 2
+    assert "local" not in summary["differences_preview"][0]
+    assert "remote" not in summary["differences_preview"][0]
+    assert "private_sql" not in str(summary)
+
+
 def test_data_migration_preview_is_read_only_and_reports_no_content():
     source, target = _databases()
     try:

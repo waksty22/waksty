@@ -448,6 +448,63 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     }
 
 
+def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, metadata-only migration report without SQL or row contents."""
+    schema = plan.get("schema_plan") or {}
+    diagnostics = plan.get("schema_diagnostics") or {}
+    differences = diagnostics.get("differences") or []
+    severity_counts = diagnostics.get("severity_counts") or {}
+
+    by_category: dict[str, int] = {}
+    for item in differences:
+        category = str(item.get("category") or "other")
+        by_category[category] = by_category.get(category, 0) + 1
+
+    missing_tables = list(schema.get("missing_tables") or [])
+    blockers = [str(item) for item in (plan.get("blockers") or [])]
+    difference_preview = [
+        {
+            "severity": item.get("severity"),
+            "category": item.get("category"),
+            "table": item.get("table"),
+            "item": item.get("item"),
+            "message": item.get("message"),
+        }
+        for item in differences[:12]
+    ]
+    return {
+        "version": plan.get("version", "unknown"),
+        "read_only": True,
+        "data_contents_exposed": False,
+        "migration_executed": False,
+        "ready": bool(plan.get("ready")),
+        "source_database": "SQLite local",
+        "target_database": "Turso",
+        "schema": {
+            "source_table_count": schema.get("source_table_count"),
+            "target_table_count": schema.get("target_table_count"),
+            "missing_table_count": len(missing_tables),
+            "missing_tables": missing_tables[:30],
+            "missing_tables_truncated": len(missing_tables) > 30,
+        },
+        "counts": {
+            "blockers": len(blockers),
+            "differences": len(differences),
+            "differences_by_severity": severity_counts,
+            "differences_by_category": by_category,
+        },
+        "blockers_preview": blockers[:12],
+        "blockers_truncated": len(blockers) > 12,
+        "differences_preview": difference_preview,
+        "differences_truncated": len(differences) > len(difference_preview),
+        "notes": [
+            "Rapport compact : aucune définition SQL ni donnée métier n'est exposée.",
+            "Les différences de volumes de lignes ne sont pas détaillées dans cette vue.",
+            "Aucune migration ni écriture en base n'a été exécutée.",
+        ],
+    }
+
+
 def migrate_sqlite_rows_to_turso(
     source: Any,
     target: Any,

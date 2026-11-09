@@ -151,6 +151,7 @@ from cognition.shared_brain import (
     merge_live_transcript,
 )
 from storage.turso_compat import inspect_turso_driver
+from storage.connection_factory import StorageSettings, open_storage_connection
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
@@ -275,20 +276,28 @@ def local_now() -> str:
     except Exception:
         return datetime.now().astimezone().isoformat()
 
-def db_connection() -> sqlite3.Connection:
-    db = sqlite3.connect(
-        DB_PATH,
-        timeout=20,
-        check_same_thread=False,
-    )
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=20000")
-    return db
+def db_connection() -> Any:
+    """Open the explicitly selected application database.
+
+    SQLite remains the default. Turso is selected only when the deployment
+    explicitly sets CHAPPIE_STORAGE_BACKEND=turso and both Turso credentials
+    are present. The local SQLite path remains aligned with DB_PATH.
+    """
+    settings = StorageSettings.from_env()
+    if settings.backend == "sqlite":
+        settings = StorageSettings(
+            backend="sqlite",
+            sqlite_path=str(DB_PATH),
+        )
+    return open_storage_connection(settings)
 
 def init_db() -> None:
+    settings = StorageSettings.from_env()
     with db_connection() as db:
-        db.execute("PRAGMA journal_mode=WAL")
+        # WAL is a local SQLite file-journal setting, not a remote libSQL
+        # initialization requirement. Do not send it to Turso.
+        if settings.backend == "sqlite":
+            db.execute("PRAGMA journal_mode=WAL")
 
         db.executescript("""  
             CREATE TABLE IF NOT EXISTS voice_profiles (  

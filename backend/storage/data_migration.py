@@ -61,7 +61,6 @@ def _foreign_key_dependencies(connection: Any, table: str) -> set[str]:
     return {
         str(_row_value(row, "table", 2))
         for row in rows
-        if str(_row_value(row, "table", 2)) != table
     }
 
 
@@ -131,8 +130,10 @@ def _row_exists(
         f"{_quote_identifier(name)} IS ?" for name in lookup_columns
     )
     lookup_values = tuple(values[columns.index(name)] for name in lookup_columns)
+    selected = ", ".join(_quote_identifier(name) for name in columns)
     cursor = target.execute(
-        f"SELECT * FROM {_quote_identifier(table)} WHERE {predicates} LIMIT 1",
+        f"SELECT {selected} FROM {_quote_identifier(table)} "
+        f"WHERE {predicates} LIMIT 1",
         lookup_values,
     )
     row = cursor.fetchone()
@@ -264,7 +265,12 @@ def migrate_sqlite_rows_to_turso(
         for table in plan["table_order"]:
             source_columns = _columns(source, table)
             target_columns = _columns(target, table)
-            names = [column["name"] for column in source_columns]
+            if any(column["hidden"] == 1 for column in source_columns):
+                raise ValueError(
+                    f"Table virtuelle non prise en charge pour migration sûre : {table}."
+                )
+            selectable_columns = [column for column in source_columns if column["hidden"] != 1]
+            names = [column["name"] for column in selectable_columns]
             insertable = [column for column in source_columns if column["hidden"] == 0]
             insert_names = [column["name"] for column in insertable]
             primary_keys = [

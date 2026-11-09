@@ -99,3 +99,30 @@ def test_conflicting_primary_key_aborts_and_rolls_back_all_changes():
     finally:
         source.close()
         target.close()
+
+
+
+def test_data_migration_blocks_existing_table_constraint_drift():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    try:
+        source.execute(
+            "CREATE TABLE guarded (id INTEGER PRIMARY KEY, label TEXT NOT NULL CHECK(length(label) > 0))"
+        )
+        target.execute(
+            "CREATE TABLE guarded (id INTEGER PRIMARY KEY, label TEXT NOT NULL CHECK(length(label) > 1))"
+        )
+        source.commit()
+        target.commit()
+
+        plan = build_data_migration_plan(source, target)
+
+        assert plan["ready"] is False
+        assert plan["read_only"] is True
+        assert plan["blockers"]
+        assert target.execute(
+            "SELECT sql FROM sqlite_master WHERE name='guarded'"
+        ).fetchone()[0].endswith("CHECK(length(label) > 1))")
+    finally:
+        source.close()
+        target.close()

@@ -167,3 +167,34 @@ def test_table_option_drift_blocks_migration_preview():
     finally:
         source.close()
         target.close()
+
+
+def test_local_cutover_marker_and_guard_triggers_are_not_transferred():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    try:
+        source.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+        source.execute(
+            "CREATE TABLE chappie_storage_migration_state "
+            "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        source.execute(
+            "INSERT INTO chappie_storage_migration_state VALUES "
+            "('sqlite-to-turso-v50.55', 'pending_cutover', 't1')"
+        )
+        source.execute(
+            "CREATE TRIGGER chappie_migration_guard_probe_insert "
+            "BEFORE INSERT ON probe BEGIN SELECT RAISE(ABORT, 'blocked'); END"
+        )
+        target.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+        source.commit()
+        target.commit()
+
+        plan = build_data_migration_plan(source, target)
+
+        assert plan["ready"] is True
+        assert [item["table"] for item in plan["tables"]] == ["probe"]
+        assert all("chappie_storage_migration_state" not in item["sql"] for item in plan["schema_plan"]["statements"])
+    finally:
+        source.close()
+        target.close()

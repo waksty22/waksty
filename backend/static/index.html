@@ -2146,7 +2146,8 @@ Sélectionne une catégorie pour consulter les données.
   <script type="module" src="/static/js/app.js" defer></script>
 
 <script type="module">
-  import { apiCall } from "./js/api.js";
+  // index.html is served from "/", so static assets must use the mounted /static path.
+  import { apiCall } from "/static/js/api.js";
 
   window.runPersistenceInventory = async function () {
     const button = document.querySelector('button[onclick="runPersistenceInventory()"]');

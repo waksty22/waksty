@@ -36,6 +36,7 @@ def inspect_schema(connection: Any) -> dict[str, Any]:
 
     objects: dict[str, dict[str, Any]] = {}
     tables: dict[str, list[dict[str, Any]]] = {}
+    table_xinfo_supported = True
     for row in rows:
         kind = str(_value(row, "type", 0))
         name = str(_value(row, "name", 1))
@@ -48,9 +49,22 @@ def inspect_schema(connection: Any) -> dict[str, Any]:
             "sql": _normalize_sql(sql),
         }
         if kind == "table":
-            column_rows = connection.execute(
-                f"PRAGMA table_info({_quote_identifier(name)})"
-            ).fetchall()
+            # table_xinfo also includes generated and hidden columns. Some
+            # libSQL builds may not expose it; retain a visible fallback while
+            # reporting that the extended inventory is incomplete.
+            try:
+                column_rows = connection.execute(
+                    f"PRAGMA table_xinfo({_quote_identifier(name)})"
+                ).fetchall()
+                table_xinfo_supported = bool(column_rows) or table_xinfo_supported
+                extended_columns = bool(column_rows)
+            except Exception:
+                column_rows = []
+                extended_columns = False
+            if not column_rows:
+                column_rows = connection.execute(
+                    f"PRAGMA table_info({_quote_identifier(name)})"
+                ).fetchall()
             tables[name] = [
                 {
                     "name": str(_value(column, "name", 1)),
@@ -58,11 +72,22 @@ def inspect_schema(connection: Any) -> dict[str, Any]:
                     "notnull": int(_value(column, "notnull", 3)),
                     "default": _value(column, "dflt_value", 4),
                     "primary_key_position": int(_value(column, "pk", 5)),
+                    "hidden": int(_value(column, "hidden", 6)) if extended_columns else 0,
+                    "generated_or_hidden": bool(
+                        int(_value(column, "hidden", 6)) if extended_columns else 0
+                    ),
+                    "metadata_complete": extended_columns,
                 }
                 for column in column_rows
             ]
 
-    return {"objects": objects, "tables": tables}
+    return {
+        "objects": objects,
+        "tables": tables,
+        "capabilities": {
+            "table_xinfo_supported": table_xinfo_supported,
+        },
+    }
 
 
 def compare_schemas(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
@@ -127,12 +152,23 @@ def inspect_database(connection: Any) -> dict[str, Any]:
         for index_row in indexes:
             index_name = str(_value(index_row, "name", 1))
             index_quoted = _quote_identifier(index_name)
+            index_xinfo_supported = True
             try:
                 index_columns = connection.execute(
-                    f"PRAGMA index_info({index_quoted})"
+                    f"PRAGMA index_xinfo({index_quoted})"
                 ).fetchall()
+                extended_index_columns = bool(index_columns)
             except Exception:
                 index_columns = []
+                extended_index_columns = False
+            if not index_columns:
+                try:
+                    index_columns = connection.execute(
+                        f"PRAGMA index_info({index_quoted})"
+                    ).fetchall()
+                except Exception:
+                    index_columns = []
+                index_xinfo_supported = False
             index_details.append({
                 "name": index_name,
                 "unique": bool(_value(index_row, "unique", 2)),
@@ -142,9 +178,13 @@ def inspect_database(connection: Any) -> dict[str, Any]:
                     {
                         "sequence": int(_value(column, "seqno", 0)),
                         "name": _value(column, "name", 2),
+                        "descending": bool(_value(column, "desc", 3)) if extended_index_columns else None,
+                        "collation": _value(column, "coll", 4) if extended_index_columns else None,
+                        "key_column": bool(_value(column, "key", 5)) if extended_index_columns else None,
                     }
                     for column in index_columns
                 ],
+                "metadata_complete": extended_index_columns,
                 "sql": schema["objects"].get(
                     f"index:{index_name}", {}
                 ).get("sql"),
@@ -152,6 +192,9 @@ def inspect_database(connection: Any) -> dict[str, Any]:
 
         table_details[table_name] = {
             "row_count": row_count,
+            "index_xinfo_supported": all(
+                item.get("metadata_complete", False) for item in index_details
+            ),
             "columns": columns,
             "foreign_keys": [
                 {
@@ -182,6 +225,13 @@ def inspect_database(connection: Any) -> dict[str, Any]:
     return {
         "schema": schema,
         "tables": table_details,
+        "metadata_capabilities": {
+            "table_xinfo_supported": schema.get("capabilities", {}).get("table_xinfo_supported", False),
+            "index_xinfo_supported": all(
+                detail.get("index_xinfo_supported", True)
+                for detail in table_details.values()
+            ),
+        },
         "table_count": len(table_details),
         "object_count": len(schema["objects"]),
         "total_rows": total_rows,

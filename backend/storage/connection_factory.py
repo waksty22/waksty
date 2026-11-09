@@ -27,12 +27,16 @@ class StorageSettings:
         backend = os.getenv("CHAPPIE_STORAGE_BACKEND", "sqlite").strip().lower()
         if backend not in {"sqlite", "turso"}:
             raise ValueError("CHAPPIE_STORAGE_BACKEND doit être sqlite ou turso.")
+        # Match server.py's existing SQLite path exactly. Until the server
+        # and factory are deliberately wired together, CHAPPIE_DATA_DIR is
+        # the single source of truth; a second path variable could silently
+        # point the factory at a new, empty database.
+        data_dir = Path(
+            os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
+        ).expanduser().resolve()
         return cls(
             backend=backend,
-            sqlite_path=os.getenv(
-                "CHAPPIE_SQLITE_PATH",
-                "./chappie_data/chappie_v16.sqlite3",
-            ).strip(),
+            sqlite_path=str(data_dir / "chappie_v16.sqlite3"),
             turso_database_url=os.getenv("TURSO_DATABASE_URL", "").strip(),
             turso_auth_token=os.getenv("TURSO_AUTH_TOKEN", "").strip(),
         )

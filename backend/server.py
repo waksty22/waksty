@@ -293,6 +293,14 @@ def db_connection() -> Any:
 
 def init_db() -> None:
     settings = StorageSettings.from_env()
+    if (
+        settings.backend == "turso"
+        and os.getenv("CHAPPIE_TURSO_CUTOVER_READY", "").strip() != "1"
+    ):
+        raise RuntimeError(
+            "Turso sélectionné mais CHAPPIE_TURSO_CUTOVER_READY n'est pas validé. "
+            "Le démarrage est bloqué pour éviter d'ouvrir une mémoire distante vide."
+        )
     with db_connection() as db:
         # WAL is a local SQLite file-journal setting, not a remote libSQL
         # initialization requirement. Do not send it to Turso.
@@ -4997,7 +5005,16 @@ async def api_storage_schema_audit(auth=Depends(require_auth)):
     try:
         import libsql
 
-        local_connection = db_connection()
+        if not DB_PATH.is_file():
+            raise HTTPException(
+                status_code=503,
+                detail="La base SQLite locale source est introuvable pour l'audit.",
+            )
+        local_connection = sqlite3.connect(
+            f"file:{DB_PATH.as_posix()}?mode=ro",
+            uri=True,
+        )
+        local_connection.row_factory = sqlite3.Row
         remote_connection = libsql.connect(
             database=remote_url,
             auth_token=remote_token,
@@ -5039,6 +5056,11 @@ async def api_storage_schema_audit(auth=Depends(require_auth)):
 async def api_storage_path_diagnostics(auth=Depends(require_auth)):
     """Inspect the exact SQLite file used by the app without changing it."""
     _authenticated_user(auth)
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="Le stockage actif est Turso ; ce diagnostic concerne uniquement le fichier SQLite local.",
+        )
     connection = None
     try:
         # Reuse the same connection factory as application reads/writes.
@@ -5157,6 +5179,11 @@ async def api_turso_backup(auth=Depends(require_auth)):
 async def api_storage_local_backup(auth=Depends(require_auth)):
     """Create an encrypted, read-only snapshot of the active local SQLite database."""
     _authenticated_user(auth)
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="Le stockage actif est Turso ; utilisez /api/turso/backup pour sauvegarder la base active.",
+        )
 
     password = os.getenv("BACKUP_ENCRYPTION_KEY", "")
     if not password:

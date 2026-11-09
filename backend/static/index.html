@@ -2221,6 +2221,7 @@ Sélectionne une catégorie pour consulter les données.
     const remote = report?.remote || {};
     const comparison = report?.comparison || {};
     const schema = comparison?.schema || {};
+    const detail = comparison?.detailed_audit || {};
     const localTables = Object.keys(local?.tables || {});
     const remoteTables = Object.keys(remote?.tables || {});
     const missingRemote = (schema.missing_from_right || [])
@@ -2237,10 +2238,10 @@ Sélectionne une catégorie pour consulter les données.
       .map(item => item.slice(6));
     const rowDiffs = Object.entries(comparison.row_count_differences || {});
     const lines = [
-      "CHAPPIE — RÉSUMÉ COMPARAISON SQLITE / TURSO",
-      "Lecture seule : " + (report?.read_only === true ? "oui" : "non confirmé"),
+      "CHAPPIE — AUDIT DÉTAILLÉ SQLITE / TURSO",
+      "Lecture seule : " + (report?.read_only === true && detail?.read_only === true ? "oui" : "non confirmé"),
       "Contenu des souvenirs/conversations exposé : " +
-        (report?.data_contents_exposed === false ? "non" : "non confirmé"),
+        (report?.data_contents_exposed === false && detail?.data_contents_exposed === false ? "non" : "non confirmé"),
       "",
       "SQLite local : " + (local.table_count ?? localTables.length) +
         " tables, " + (local.object_count ?? Object.keys(local?.schema?.objects || {}).length) +
@@ -2254,6 +2255,14 @@ Sélectionne une catégorie pour consulter les données.
       "Compatibilité globale (schéma + volumes) : " +
         (comparison.compatible === true ? "compatible" :
           comparison.compatible === false ? "différences détectées" : "non déterminée"),
+      "Compatibilité structurelle du schéma : " +
+        (detail.schema_readiness === "ready" ? "PRÊT" :
+          detail.schema_readiness === "blocked" ? "BLOQUÉE" : "non déterminée"),
+      "État de préparation de la migration des données : " +
+        (detail.migration_readiness === "not_assessed" ? "NON ÉVALUÉ — contrôle d'intégrité des données distinct nécessaire" : "non déterminé"),
+      "Écarts bloquants : " + (detail.severity_counts?.blocking ?? "?") +
+        " ; importants : " + (detail.severity_counts?.important ?? "?") +
+        " ; informatifs : " + (detail.severity_counts?.informational ?? "?"),
       "",
       compactList("Tables présentes en SQLite mais absentes de Turso", missingRemote),
       compactList("Tables présentes dans Turso mais absentes de SQLite", missingLocal),
@@ -2272,11 +2281,44 @@ Sélectionne une catégorie pour consulter les données.
         lines.push("  … et " + (rowDiffs.length - 12) + " autre(s)");
       }
     }
+    const differences = Array.isArray(detail.differences) ? detail.differences : [];
+    lines.push("", "DÉTAILS CLASSÉS PAR RISQUE");
+    if (!differences.length) {
+      lines.push("Aucun écart détaillé fourni par le serveur.");
+    } else {
+      const limit = 24;
+      lines.push(...differences.slice(0, limit).map(item => {
+        const where = item.table ? item.table + "." : "";
+        let line = "  [" + String(item.severity || "unknown").toUpperCase() + "] " +
+          String(item.category || "écart") + " — " + where +
+          String(item.item || "") + " : " + String(item.explanation || "");
+        if (item.category === "column_definition" ||
+            item.category === "foreign_keys" ||
+            item.category === "index_definition" ||
+            item.category === "unique_constraint_definition" ||
+            item.category === "missing_unique_constraint" ||
+            item.category === "extra_unique_constraint") {
+          const left = JSON.stringify(item.local);
+          const right = JSON.stringify(item.remote);
+          line += " | SQLite : " + String(left).slice(0, 260) +
+            " | Turso : " + String(right).slice(0, 260);
+        } else if (item.category === "table_constraints_or_options") {
+          line += " | SQL SQLite : " + String(item.local || "absent").slice(0, 180) +
+            " | SQL Turso : " + String(item.remote || "absent").slice(0, 180);
+        }
+        return line;
+      }));
+      if (differences.length > limit) {
+        lines.push("  … et " + (differences.length - limit) + " autre(s) écart(s)");
+      }
+    }
     lines.push(
       "",
       "Violations de clés étrangères — SQLite : " +
         (comparison.local_foreign_key_violations ?? "non vérifié") +
-        " ; Turso : " + (comparison.remote_foreign_key_violations ?? "non vérifié")
+        " ; Turso : " + (comparison.remote_foreign_key_violations ?? "non vérifié"),
+      "",
+      "Note : les volumes ne comparent pas le contenu des lignes. Aucune migration ni écriture n'a été effectuée."
     );
     return lines.join("\n");
   }

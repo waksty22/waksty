@@ -270,8 +270,51 @@ def _remove_column_from_create_sql(sql: str, column_name: str) -> str | None:
     return normalized
 
 
+def _fts_virtual_tables(connection: Any) -> list[str]:
+    """Find FTS virtual tables before treating SQLite shadow tables as ordinary data."""
+    rows = connection.execute(
+        """
+        SELECT name, sql FROM sqlite_master
+        WHERE type='table' AND sql IS NOT NULL
+        ORDER BY name
+        """
+    ).fetchall()
+    return [
+        str(_row_value(row, "name", 0))
+        for row in rows
+        if re.search(r"\bUSING\s+fts[345]\b", str(_row_value(row, "sql", 1) or ""), re.I)
+    ]
+
+
 def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     """Return a metadata-only migration preview; never select business rows."""
+    # FTS virtual tables own implementation-specific shadow tables. Copying
+    # those shadow tables as ordinary rows is unsafe; fail closed until a
+    # dedicated rebuild strategy is implemented and verified for libSQL.
+    source_fts = _fts_virtual_tables(source)
+    target_fts = _fts_virtual_tables(target)
+    if source_fts or target_fts:
+        blockers = []
+        if source_fts:
+            blockers.append(
+                "Tables FTS source détectées : " + ", ".join(source_fts)
+                + ". Migration bloquée ; reconstruire les index FTS séparément."
+            )
+        if target_fts:
+            blockers.append(
+                "Tables FTS cible détectées : " + ", ".join(target_fts)
+                + ". Migration bloquée ; vérifier/reconstruire les index FTS séparément."
+            )
+        return {
+            "version": "50.55",
+            "read_only": True,
+            "data_contents_exposed": False,
+            "ready": False,
+            "schema_plan": None,
+            "blockers": blockers,
+            "tables": [],
+        }
+
     schema = build_migration_plan(source, target)
     if not schema.get("ready"):
         return {

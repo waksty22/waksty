@@ -2210,10 +2210,10 @@ Sélectionne une catégorie pour consulter les données.
       typeof item === "string" ? item : JSON.stringify(item)
     );
     const remainder = items.length > limit
-      ? "\\n  … et " + (items.length - limit) + " autre(s)"
+      ? "\n  … et " + (items.length - limit) + " autre(s)"
       : "";
-    return label + " (" + items.length + ") :\\n  " +
-      shown.join("\\n  ") + remainder;
+    return label + " (" + items.length + ") :\n  " +
+      shown.join("\n  ") + remainder;
   }
 
   function formatSchemaAuditSummary(report) {
@@ -2278,7 +2278,7 @@ Sélectionne une catégorie pour consulter les données.
         (comparison.local_foreign_key_violations ?? "non vérifié") +
         " ; Turso : " + (comparison.remote_foreign_key_violations ?? "non vérifié")
     );
-    return lines.join("\\n");
+    return lines.join("\n");
   }
 
   window.latestStorageDiagnosticSummary = "";

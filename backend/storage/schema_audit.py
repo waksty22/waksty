@@ -56,11 +56,12 @@ def inspect_schema(connection: Any) -> dict[str, Any]:
                 column_rows = connection.execute(
                     f"PRAGMA table_xinfo({_quote_identifier(name)})"
                 ).fetchall()
-                table_xinfo_supported = bool(column_rows) or table_xinfo_supported
                 extended_columns = bool(column_rows)
+                table_xinfo_supported = table_xinfo_supported and extended_columns
             except Exception:
                 column_rows = []
                 extended_columns = False
+                table_xinfo_supported = False
             if not column_rows:
                 column_rows = connection.execute(
                     f"PRAGMA table_info({_quote_identifier(name)})"

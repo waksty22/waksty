@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from storage.schema_audit import (
@@ -513,6 +514,38 @@ def migrate_sqlite_rows_to_turso(
             raise ValueError(
                 f"Vérification des clés étrangères échouée ({len(fk_rows)} violation(s))."
             )
+
+        # Durable proof that this exact migration flow completed. The app
+        # refuses to start on Turso unless this marker exists.
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chappie_storage_migrations (
+                migration_key TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                source_table_count INTEGER NOT NULL,
+                source_row_count INTEGER NOT NULL,
+                inserted_rows INTEGER NOT NULL,
+                already_present_rows INTEGER NOT NULL,
+                completed_at TEXT NOT NULL
+            )
+            """
+        )
+        target.execute(
+            """
+            INSERT OR REPLACE INTO chappie_storage_migrations (
+                migration_key, status, source_table_count, source_row_count,
+                inserted_rows, already_present_rows, completed_at
+            ) VALUES (?, 'completed', ?, ?, ?, ?, ?)
+            """,
+            (
+                "sqlite-to-turso-v50.55",
+                len(table_results),
+                sum(item["source_rows"] for item in table_results),
+                inserted_total,
+                already_present_total,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
         target.commit()
     except Exception:
         target.rollback()

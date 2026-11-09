@@ -5595,13 +5595,6 @@ async def api_storage_migration_cancel(
     try:
         import libsql
 
-        remote = libsql.connect(database=remote_url, auth_token=remote_token)
-        remote.execute(
-            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
-            ("sqlite-to-turso-v50.55",),
-        )
-        remote.commit()
-
         local = sqlite3.connect(str(DB_PATH), timeout=30)
         local.execute("BEGIN IMMEDIATE")
         marker = local.execute(
@@ -5614,6 +5607,14 @@ async def api_storage_migration_cancel(
                 status_code=409,
                 detail="Aucune migration locale en attente de bascule.",
             )
+
+        remote = libsql.connect(database=remote_url, auth_token=remote_token)
+        remote.execute(
+            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        )
+        remote.commit()
+
         guards = local.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' "
             "AND name LIKE 'chappie_migration_guard_%'"

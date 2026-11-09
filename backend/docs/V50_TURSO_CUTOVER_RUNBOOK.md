@@ -142,16 +142,19 @@ Le migrateur :
 - conserve les identifiants et les lignes déjà présentes dans Turso ;
 - compare chaque ligne relue et calcule des empreintes SHA-256 déterministes par table ;
 - interrompt et annule la transaction en cas de collision de clé, contrainte unique, dépendance circulaire, différence de définition SQL ou violation de clé étrangère ;
+- verrouille les écritures SQLite pendant la copie avec une transaction `BEGIN IMMEDIATE`, puis passe la connexion source en `query_only` pour garantir un instantané cohérent ;
+- inscrit dans la même transaction Turso un marqueur durable `chappie_storage_migrations` uniquement après vérification complète ;
 - ne retourne jamais le contenu des souvenirs ou conversations.
 
-**Limite assumée :** les différences de définition SQL des tables partagées sont bloquantes jusqu'à leur revue. Le migrateur ne tente pas de deviner si une différence de contrainte ou d'option est sans danger.
+**Limite assumée :** les différences de définition SQL des tables partagées sont bloquantes jusqu'à leur revue, à l'exception du seul écart historique `skills.xp` si la suppression exacte de cette déclaration reproduit le SQL cible et si toutes les autres propriétés concordent. Le migrateur ne tente pas de deviner si une différence de contrainte ou d'option est sans danger.
 
 ### Sélection du backend après migration
 
 - SQLite reste le choix par défaut.
 - `db_connection()` passe désormais par la fabrique de stockage ; la configuration SQLite conserve le chemin effectif `DB_PATH`.
-- Si Turso est sélectionné, le démarrage est refusé tant que `CHAPPIE_TURSO_CUTOVER_READY=1` n'a pas été défini explicitement.
+- Si Turso est sélectionné, le démarrage est refusé tant que `CHAPPIE_TURSO_CUTOVER_READY=1` n'a pas été défini explicitement **et** que le marqueur durable `sqlite-to-turso-v50.55` n'existe pas avec le statut `completed`.
 - Les endpoints de diagnostic du fichier SQLite et de sauvegarde physique SQLite refusent de présenter une connexion Turso comme un fichier local.
+- L'endpoint de transfert réserve le verrou d'écriture SQLite pendant la copie ; prévoir une courte indisponibilité des écritures pendant cette opération. Après succès, basculer rapidement la configuration pour éviter que de nouvelles écritures soient ajoutées à SQLite après le dernier instantané.
 - L'audit SQLite/Turso continue d'ouvrir explicitement le fichier SQLite local en lecture seule.
 
 **Important :** la PR ne modifie pas les variables Render, ne lance pas le transfert, ne bascule pas le backend et ne déploie pas l'application. Après migration, le rapport doit être contrôlé avant toute modification manuelle des variables Render.

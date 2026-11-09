@@ -262,6 +262,7 @@ log = logging.getLogger("chappie")
 security = HTTPBearer(auto_error=False)
 
 _rate_buckets: dict[str, list[float]] = {}
+STORAGE_MIGRATION_PENDING_CUTOVER = False
 LIVE_WS_TICKET_TTL_SECONDS = 45
 live_ws_tickets = OneTimeTicketStore(LIVE_WS_TICKET_TTL_SECONDS)
 
@@ -291,8 +292,126 @@ def db_connection() -> Any:
         )
     return open_storage_connection(settings)
 
+def _local_migration_pending_cutover() -> bool:
+    """Read the local migration gate without creating or changing the database."""
+    if not DB_PATH.is_file():
+        return False
+    connection = None
+    try:
+        connection = sqlite3.connect(
+            f"file:{DB_PATH.as_posix()}?mode=ro",
+            uri=True,
+        )
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='chappie_storage_migration_state'"
+        ).fetchone()
+        if not exists:
+            return False
+        row = connection.execute(
+            "SELECT status FROM chappie_storage_migration_state "
+            "WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        ).fetchone()
+        return bool(row and row[0] == "pending_cutover")
+    except sqlite3.Error:
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _quote_sql_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
+    """Install persistent triggers that reject local writes until Turso is active."""
+    tables = connection.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type='table'
+          AND name NOT LIKE 'sqlite_%'
+          AND name != 'chappie_storage_migration_state'
+        ORDER BY name
+        """
+    ).fetchall()
+    installed = 0
+    for row in tables:
+        table = str(row[0])
+        quoted_table = _quote_sql_identifier(table)
+        for operation in ("INSERT", "UPDATE", "DELETE"):
+            trigger = _quote_sql_identifier(
+                f"chappie_migration_guard_{table}_{operation.lower()}"
+            )
+            connection.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS {trigger}
+                BEFORE {operation} ON {quoted_table}
+                WHEN EXISTS (
+                    SELECT 1 FROM chappie_storage_migration_state
+                    WHERE migration_key='sqlite-to-turso-v50.55'
+                      AND status='pending_cutover'
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'Chappie storage migration pending Turso cutover');
+                END
+                """
+            )
+            installed += 1
+    return installed
+
+
+def _remote_turso_migration_completed() -> bool:
+    """Detect a completed remote transfer if Render's ephemeral SQLite file vanished."""
+    database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not database_url or not auth_token:
+        return False
+    connection = None
+    try:
+        import libsql
+
+        connection = libsql.connect(database=database_url, auth_token=auth_token)
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='chappie_storage_migrations'"
+        ).fetchone()
+        if not exists:
+            return False
+        row = connection.execute(
+            "SELECT status FROM chappie_storage_migrations WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        ).fetchone()
+        return bool(row and row[0] == "completed")
+    except Exception as exc:
+        if os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1":
+            raise RuntimeError(
+                "Vérification du marqueur Turso impossible ; démarrage SQLite bloqué par sécurité."
+            ) from exc
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 def init_db() -> None:
+    global STORAGE_MIGRATION_PENDING_CUTOVER
     settings = StorageSettings.from_env()
+    if settings.backend == "sqlite":
+        local_pending = _local_migration_pending_cutover()
+        remote_pending = False
+        if (
+            not local_pending
+            and os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1"
+        ):
+            remote_pending = _remote_turso_migration_completed()
+        if local_pending or remote_pending:
+            STORAGE_MIGRATION_PENDING_CUTOVER = True
+            log.warning(
+                "[STORAGE] SQLite migration is complete; writes are paused until Turso cutover."
+            )
+            return
     if (
         settings.backend == "turso"
         and os.getenv("CHAPPIE_TURSO_CUTOVER_READY", "").strip() != "1"
@@ -569,7 +688,13 @@ async def lifespan(app: FastAPI):
         time.monotonic() - startup_started,
         collect_runtime_snapshot(),
     )
-    task = asyncio.create_task(autonomous_maintenance_loop())
+    if STORAGE_MIGRATION_PENDING_CUTOVER:
+        task = None
+        log.warning(
+            "[STORAGE] Autonomous maintenance paused until Turso cutover."
+        )
+    else:
+        task = asyncio.create_task(autonomous_maintenance_loop())
     runtime_task = asyncio.create_task(runtime_monitor_loop(log))
 
     log.info(
@@ -581,6 +706,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         for background_task in (task, runtime_task):
+            if background_task is None:
+                continue
             background_task.cancel()
             try:
                 await background_task
@@ -636,6 +763,42 @@ def system_persistence_inventory(_: str = Depends(require_auth)):
 
 @app.middleware("http")
 async def body_size_guard(request: Request, call_next):
+    if STORAGE_MIGRATION_PENDING_CUTOVER:
+        path = request.url.path
+        readonly_paths = {
+            "/",
+            "/api/system/diagnostics",
+            "/api/system/persistence-inventory",
+            "/api/storage/migration/preview",
+            "/api/storage/migration/backup",
+            "/api/storage/schema-audit",
+            "/api/storage/path-diagnostics",
+            "/api/turso/diagnostics",
+            "/api/turso/compatibility",
+        }
+        allowed = (
+            request.method == "OPTIONS"
+            or path in readonly_paths
+            or path.startswith("/static/")
+            or (
+                path in {
+                    "/api/storage/migration/apply",
+                    "/api/storage/migration/cancel",
+                }
+                and request.method == "POST"
+            )
+        )
+        if not allowed:
+            return JSONResponse(
+                {
+                    "detail": (
+                        "Migration vers Turso terminée : les écritures sont "
+                        "suspendues jusqu'au basculement du backend sur Turso."
+                    )
+                },
+                status_code=503,
+            )
+
     length = request.headers.get("content-length")
 
     if length:  
@@ -714,6 +877,12 @@ class TursoMigrationApplyRequest(BaseModel):
 
     confirmation: Literal["MIGRER VERS TURSO"]
     backup_downloaded: bool
+
+
+class TursoMigrationCancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: Literal["ANNULER LA BASCULE TURSO"]
 
 
 class SpeakRequest(BaseModel):
@@ -2807,6 +2976,8 @@ def generate_rumination(user_id: str) -> dict[str, Any]:
 async def autonomous_maintenance_loop() -> None:
     while True:
         await asyncio.sleep(BACKGROUND_INTERVAL_SECONDS)
+        if STORAGE_MIGRATION_PENDING_CUTOVER:
+            return
 
         try:  
             now = utc_now()  
@@ -2945,13 +3116,16 @@ async def autonomous_maintenance_loop() -> None:
                     ),  
                 )  
 
-                db.commit()  
+                db.commit()
 
-            if dream_due and uid:  
-                generate_dream(uid)  
+            if STORAGE_MIGRATION_PENDING_CUTOVER:
+                return
 
-            if rumination_due and uid:  
-                generate_rumination(uid)  
+            if dream_due and uid:
+                generate_dream(uid)
+
+            if rumination_due and uid:
+                generate_rumination(uid)
 
         except asyncio.CancelledError:  
             raise  
@@ -4580,6 +4754,12 @@ async def websocket_endpoint(
     ticket: Optional[str] = Query(None),
 ):
     """Authenticated bridge using a short-lived, single-use ticket."""
+    if STORAGE_MIGRATION_PENDING_CUTOVER:
+        await websocket.close(
+            code=1013,
+            reason="Migration mémoire en cours de bascule vers Turso.",
+        )
+        return
     ticket_user = live_ws_tickets.consume(str(ticket or "").strip())
     if not ticket_user:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -4694,6 +4874,12 @@ async def websocket_endpoint(
 
             async def client_to_gemini():
                 while True:
+                    if STORAGE_MIGRATION_PENDING_CUTOVER:
+                        await websocket.close(
+                            code=1013,
+                            reason="Migration mémoire en cours de bascule vers Turso.",
+                        )
+                        return
                     payload = await websocket.receive_json()
                     action = payload.get("action")
                     if action == "audio_chunk":
@@ -4740,6 +4926,12 @@ async def websocket_endpoint(
 
             async def gemini_to_client():
                 async for raw_message in gemini_ws:
+                    if STORAGE_MIGRATION_PENDING_CUTOVER:
+                        await websocket.close(
+                            code=1013,
+                            reason="Migration mémoire en cours de bascule vers Turso.",
+                        )
+                        return
                     response = json.loads(raw_message)
                     if "error" in response:
                         error = response["error"]
@@ -5273,6 +5465,7 @@ async def api_storage_migration_apply(
     auth=Depends(require_auth),
 ):
     """Apply the reviewed SQLite -> Turso migration after explicit safeguards."""
+    global STORAGE_MIGRATION_PENDING_CUTOVER
     _authenticated_user(auth)
     if os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() != "1":
         raise HTTPException(
@@ -5322,6 +5515,35 @@ async def api_storage_migration_apply(
                     "blockers": report.get("blockers", []),
                 },
             )
+        # Persist a local cutover gate in the same locked SQLite snapshot.
+        # If Render restarts before the environment switch, startup detects it
+        # and keeps the old backend read-only instead of accepting new memories.
+        source.execute("PRAGMA query_only=OFF")
+        source.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chappie_storage_migration_state (
+                migration_key TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        source.execute(
+            """
+            INSERT OR REPLACE INTO chappie_storage_migration_state (
+                migration_key, status, updated_at
+            ) VALUES (?, 'pending_cutover', ?)
+            """,
+            ("sqlite-to-turso-v50.55", utc_now()),
+        )
+        trigger_count = _install_sqlite_cutover_write_guards(source)
+        STORAGE_MIGRATION_PENDING_CUTOVER = True
+        source.commit()
+        log.info(
+            "[MIGRATION] SQLite write guards installed: %s triggers.",
+            trigger_count,
+        )
+
         log.info(
             "[MIGRATION] SQLite -> Turso completed: %s inserted, %s already present, %s tables.",
             report["inserted_rows"],
@@ -5345,6 +5567,104 @@ async def api_storage_migration_apply(
         )
     finally:
         for connection in (source, target):
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+
+@app.post("/api/storage/migration/cancel")
+async def api_storage_migration_cancel(
+    payload: TursoMigrationCancelRequest,
+    auth=Depends(require_auth),
+):
+    """Cancel a pre-cutover migration and explicitly unlock the SQLite source."""
+    global STORAGE_MIGRATION_PENDING_CUTOVER
+    _authenticated_user(auth)
+    if os.getenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "").strip() != "1":
+        raise HTTPException(
+            status_code=403,
+            detail="Annulation désactivée. Activez explicitement CHAPPIE_ALLOW_SQLITE_ROLLBACK=1 après revue.",
+        )
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="Cette annulation est réservée à la phase pré-bascule ; le backend actif n'est plus SQLite.",
+        )
+    if payload.confirmation != "ANNULER LA BASCULE TURSO":
+        raise HTTPException(status_code=400, detail="Phrase de confirmation incorrecte.")
+    if not DB_PATH.is_file():
+        raise HTTPException(status_code=503, detail="La base SQLite source est introuvable.")
+
+    remote_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    remote_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not remote_url or not remote_token:
+        raise HTTPException(status_code=503, detail="Turso n'est pas entièrement configuré.")
+
+    local = None
+    remote = None
+    try:
+        import libsql
+
+        local = sqlite3.connect(str(DB_PATH), timeout=30)
+        local.execute("BEGIN IMMEDIATE")
+        marker = local.execute(
+            "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        ).fetchone()
+        if marker is None or marker[0] != "pending_cutover":
+            local.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Aucune migration locale en attente de bascule.",
+            )
+
+        remote = libsql.connect(database=remote_url, auth_token=remote_token)
+        remote.execute(
+            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
+            ("sqlite-to-turso-v50.55",),
+        )
+        remote.commit()
+
+        guards = local.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchall()
+        for row in guards:
+            local.execute(
+                "DROP TRIGGER IF EXISTS " + _quote_sql_identifier(str(row[0]))
+            )
+        local.execute(
+            "UPDATE chappie_storage_migration_state SET status='cancelled', updated_at=? "
+            "WHERE migration_key=?",
+            (utc_now(), "sqlite-to-turso-v50.55"),
+        )
+        local.commit()
+        STORAGE_MIGRATION_PENDING_CUTOVER = False
+        return {
+            "cancelled": True,
+            "sqlite_unlocked": True,
+            "turso_migration_marker_removed": True,
+            "turso_data_preserved": True,
+            "restart_recommended": True,
+            "message": "SQLite est réactivé. Les données copiées dans Turso ne sont pas supprimées.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if local is not None:
+            try:
+                local.rollback()
+            except Exception:
+                pass
+        log.exception("[MIGRATION] Pre-cutover cancellation failed.")
+        raise HTTPException(
+            status_code=503,
+            detail="Annulation incomplète : " + type(exc).__name__,
+        )
+    finally:
+        for connection in (local, remote):
             if connection is not None:
                 try:
                     connection.close()

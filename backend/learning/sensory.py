@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from cognition.event_receipts import claim_cognitive_event
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -57,6 +59,7 @@ def record_observation(
     source: str,
     confidence: float = 0.5,
     metadata: dict[str, Any] | None = None,
+    event_id: str | None = None,
 ) -> dict[str, Any]:
     if modality not in {"audio", "vision"}:
         raise ValueError("Modalité sensorielle invalide.")
@@ -67,7 +70,28 @@ def record_observation(
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("La confiance doit être comprise entre 0 et 1.")
     metadata_json = json.dumps(metadata or {}, ensure_ascii=False, allow_nan=False)
-    observation_id = uuid.uuid4().hex
+    observation_id = (
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"chappie:{user_id}:{event_id}:{modality}",
+        ).hex
+        if event_id else uuid.uuid4().hex
+    )
+    if event_id and not claim_cognitive_event(
+        db, user_id, event_id, f"sensory_observation_{modality}"
+    ):
+        row = db.execute(
+            "SELECT observation_id, user_id, modality, content, source, "
+            "confidence, metadata_json, created_at FROM sensory_observations "
+            "WHERE observation_id=? AND user_id=?",
+            (observation_id, user_id),
+        ).fetchone()
+        if row is not None:
+            existing = dict(row)
+            existing["metadata"] = json.loads(existing.pop("metadata_json") or "{}")
+            return existing
+        raise RuntimeError("Reçu sensoriel présent sans observation correspondante")
+
     created_at = utc_now()
     db.execute(
         """INSERT INTO sensory_observations

@@ -1961,6 +1961,34 @@ Sélectionne une catégorie pour consulter les données.
           <pre id="persistenceInventoryOutput" class="output" style="min-height:60px">Aucun rapport pour le moment.</pre>
         </div>
 
+
+        <div class="panel">
+          <h3>🧭 Diagnostic du stockage Chappie</h3>
+          <p class="muted" style="margin-bottom:12px">
+            Vérifie séparément la base SQLite locale, la connexion Turso et
+            les différences de structure entre les deux bases. Tous les contrôles
+            sont en lecture seule : aucun souvenir n'est créé, modifié ou supprimé.
+          </p>
+          <div class="row-btns">
+            <button type="button" onclick="runStorageDiagnostic('turso')">
+              🔌 Tester la connexion Turso
+            </button>
+            <button type="button" onclick="runStorageDiagnostic('compatibility')">
+              🧩 Vérifier la compatibilité
+            </button>
+            <button type="button" onclick="runStorageDiagnostic('schema')">
+              ⚖️ Comparer SQLite et Turso
+            </button>
+            <button type="button" onclick="runStorageDiagnostic('path')">
+              📁 Vérifier le stockage local
+            </button>
+          </div>
+          <p id="storageDiagnosticStatus" class="status" role="status" aria-live="polite">
+            En attente d'un diagnostic.
+          </p>
+          <pre id="storageDiagnosticOutput" class="output" style="min-height:80px">Aucun rapport pour le moment.</pre>
+        </div>
+
         <div class="panel danger-zone">
           <h3>⚠️ Zone de réinitialisation</h3>
 
@@ -2148,6 +2176,59 @@ Sélectionne une catégorie pour consulter les données.
 <script type="module">
   // index.html is served from "/", so static assets must use the mounted /static path.
   import { apiCall } from "/static/js/api.js";
+
+
+  const storageDiagnosticEndpoints = {
+    turso: {
+      url: "/api/turso/diagnostics",
+      label: "Connexion et inventaire Turso"
+    },
+    compatibility: {
+      url: "/api/turso/compatibility",
+      label: "Compatibilité du pilote Turso"
+    },
+    schema: {
+      url: "/api/storage/schema-audit",
+      label: "Comparaison des schémas SQLite / Turso"
+    },
+    path: {
+      url: "/api/storage/path-diagnostics",
+      label: "Chemin et persistance SQLite locale"
+    }
+  };
+
+  window.runStorageDiagnostic = async function (kind) {
+    const config = storageDiagnosticEndpoints[kind];
+    const status = document.getElementById("storageDiagnosticStatus");
+    const output = document.getElementById("storageDiagnosticOutput");
+    const buttons = document.querySelectorAll(
+      '[onclick^="runStorageDiagnostic("]'
+    );
+    if (!config || !status || !output) return;
+
+    buttons.forEach(button => { button.disabled = true; });
+    status.textContent = config.label + " — contrôle en lecture seule…";
+    output.textContent = "Interrogation du serveur…";
+    try {
+      const report = await apiCall(config.url);
+      output.textContent = JSON.stringify(report, null, 2);
+      const safe = report?.read_only === true ||
+        report?.configured === false ||
+        report?.connected === true ||
+        report?.status === "passed" ||
+        report?.ok === true;
+      status.textContent = safe
+        ? config.label + " — réponse reçue. Aucune donnée modifiée."
+        : config.label + " — résultat reçu, vérification nécessaire.";
+    } catch (error) {
+      status.textContent = "Échec du diagnostic : " +
+        (error?.message || "erreur inconnue");
+      output.textContent =
+        "Aucun contenu de souvenir ou de conversation n'a été affiché.";
+    } finally {
+      buttons.forEach(button => { button.disabled = false; });
+    }
+  };
 
   window.runPersistenceInventory = async function () {
     const button = document.querySelector('button[onclick="runPersistenceInventory()"]');

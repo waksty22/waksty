@@ -11,6 +11,8 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
+from cognition.event_receipts import claim_cognitive_event
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -89,6 +91,7 @@ def init_development_tables(db) -> None:
 def record_affective_snapshot(
     db, user_id: str, emotions: dict[str, Any],
     source: str = "conversation", event_label: str = "interaction",
+    event_id: str | None = None,
 ) -> dict[str, Any]:
     allowed = ("joy", "fear", "curiosity", "frustration", "sadness", "energy")
     state = {}
@@ -98,6 +101,11 @@ def record_affective_snapshot(
             state[key] = round(max(0.0, min(100.0, value)), 2) if math.isfinite(value) else 0.0
         except (TypeError, ValueError, OverflowError):
             state[key] = 0.0
+    if event_id and not claim_cognitive_event(
+        db, user_id, event_id, "affective_snapshot"
+    ):
+        return {"duplicate": True, "state": state}
+
     now = _now()
     cursor = db.execute(
         """INSERT INTO affective_history

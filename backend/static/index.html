@@ -2002,7 +2002,8 @@ Sélectionne une catégorie pour consulter les données.
           </p>
           <p class="muted" style="margin-bottom:12px">
             Avant l'application, l'aperçu doit indiquer PRÊT et l'archive des sauvegardes doit être conservée
-            hors de Render. L'API exige temporairement CHAPPIE_ALLOW_TURSO_MIGRATION=1.
+            hors de Render. Sur Render, active temporairement CHAPPIE_ALLOW_TURSO_MIGRATION=1 puis redéploie
+            avant de lancer le transfert. Après réussite, le backend Turso devra être activé séparément.
           </p>
           <div class="row-btns">
             <button type="button" onclick="runTursoMigrationPreview()">
@@ -2427,8 +2428,12 @@ Sélectionne une catégorie pour consulter les données.
   };
 
   function updateTursoMigrationButtons() {
+    const previewButton = document.querySelector(
+      'button[onclick="runTursoMigrationPreview()"]'
+    );
     const backupButton = document.getElementById("downloadTursoMigrationBackups");
     const applyButton = document.getElementById("applyTursoMigration");
+    if (previewButton) previewButton.disabled = window.tursoMigrationState.applied === true;
     if (backupButton) {
       backupButton.disabled = !window.tursoMigrationState.previewReceived ||
         window.tursoMigrationState.applied;
@@ -2469,15 +2474,7 @@ Sélectionne une catégorie pour consulter les données.
       output.textContent = "Aucune donnée métier n'a été affichée ou modifiée.";
     } finally {
       updateTursoMigrationButtons();
-      buttons.forEach(button => {
-        if (button.id === "downloadTursoMigrationBackups") {
-          button.disabled = !window.tursoMigrationState.previewReceived;
-        }
-        if (button.id === "applyTursoMigration") {
-          button.disabled = !window.tursoMigrationState.previewReady ||
-            !window.tursoMigrationState.backupDownloaded;
-        }
-      });
+      updateTursoMigrationButtons();
     }
   };
 

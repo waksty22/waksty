@@ -363,7 +363,7 @@ def compare_database_inventories(
     }
     blocking = severity_counts["blocking"] > 0
     important = severity_counts["important"] > 0
-    ready = not blocking and not important and not row_differences
+    schema_ready = not blocking and not important
 
     return {
         "schema": schema_comparison,
@@ -377,7 +377,9 @@ def compare_database_inventories(
             "version": "50.54",
             "read_only": True,
             "data_contents_exposed": False,
-            "migration_readiness": "ready" if ready else "blocked",
+            "schema_readiness": "ready" if schema_ready else "blocked",
+            "migration_readiness": "not_assessed",
+            "migration_blocked_by_schema": not schema_ready,
             "severity_counts": severity_counts,
             "differences": details,
             "notes": [

@@ -5530,6 +5530,11 @@ async def api_storage_migration_apply(
                     "blockers": report.get("blockers", []),
                 },
             )
+
+        # The remote transaction is now committed. Block all new app activity
+        # immediately, before attempting any further local bookkeeping.
+        STORAGE_MIGRATION_PENDING_CUTOVER = True
+
         # Persist a local cutover gate in the same locked SQLite snapshot.
         # If Render restarts before the environment switch, startup detects it
         # and keeps the old backend read-only instead of accepting new memories.
@@ -5628,13 +5633,16 @@ async def api_storage_migration_cancel(
             "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
             ("sqlite-to-turso-v50.55",),
         ).fetchone()
-        if marker is None or marker[0] != "pending_cutover":
+        local_pending = bool(marker and marker[0] == "pending_cutover")
+        if marker is not None and marker[0] != "pending_cutover":
             local.rollback()
             raise HTTPException(
                 status_code=409,
-                detail="Aucune migration locale en attente de bascule.",
+                detail="Le marqueur local n'est pas dans l'état pending_cutover.",
             )
 
+        # If remote commit succeeded but local gate creation failed, the durable
+        # Turso marker is sufficient proof of a pre-cutover migration to cancel.
         guards = local.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' "
             "AND name LIKE 'chappie_migration_guard_%'"
@@ -5643,11 +5651,12 @@ async def api_storage_migration_cancel(
             local.execute(
                 "DROP TRIGGER IF EXISTS " + _quote_sql_identifier(str(row[0]))
             )
-        local.execute(
-            "UPDATE chappie_storage_migration_state SET status='cancelled', updated_at=? "
-            "WHERE migration_key=?",
-            (utc_now(), "sqlite-to-turso-v50.55"),
-        )
+        if local_pending:
+            local.execute(
+                "UPDATE chappie_storage_migration_state SET status='cancelled', updated_at=? "
+                "WHERE migration_key=?",
+                (utc_now(), "sqlite-to-turso-v50.55"),
+            )
         local.commit()
 
         # Unlock the local source first, but keep the in-process write lock until

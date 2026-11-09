@@ -286,8 +286,12 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
             source_names = set(source_details)
             target_names = set(target_details)
             xp = source_details.get("xp", {})
+            common_fields = ("type", "notnull", "default", "pk", "hidden")
             common_match = all(
-                source_details[name] == target_details[name]
+                all(
+                    source_details[name].get(field) == target_details[name].get(field)
+                    for field in common_fields
+                )
                 for name in source_names & target_names
             )
             source_sql = next(

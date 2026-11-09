@@ -2294,7 +2294,10 @@ Sélectionne une catégorie pour consulter les données.
           String(item.item || "") + " : " + String(item.explanation || "");
         if (item.category === "column_definition" ||
             item.category === "foreign_keys" ||
-            item.category === "index_definition") {
+            item.category === "index_definition" ||
+            item.category === "unique_constraint_definition" ||
+            item.category === "missing_unique_constraint" ||
+            item.category === "extra_unique_constraint") {
           const left = JSON.stringify(item.local);
           const right = JSON.stringify(item.remote);
           line += " | SQLite : " + String(left).slice(0, 260) +

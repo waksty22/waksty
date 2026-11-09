@@ -2287,9 +2287,21 @@ Sélectionne une catégorie pour consulter les données.
       const limit = 24;
       lines.push(...differences.slice(0, limit).map(item => {
         const where = item.table ? item.table + "." : "";
-        return "  [" + String(item.severity || "unknown").toUpperCase() + "] " +
+        let line = "  [" + String(item.severity || "unknown").toUpperCase() + "] " +
           String(item.category || "écart") + " — " + where +
           String(item.item || "") + " : " + String(item.explanation || "");
+        if (item.category === "column_definition" ||
+            item.category === "foreign_keys" ||
+            item.category === "index_definition") {
+          const left = JSON.stringify(item.local);
+          const right = JSON.stringify(item.remote);
+          line += " | SQLite : " + String(left).slice(0, 260) +
+            " | Turso : " + String(right).slice(0, 260);
+        } else if (item.category === "table_constraints_or_options") {
+          line += " | SQL SQLite : " + String(item.local || "absent").slice(0, 180) +
+            " | SQL Turso : " + String(item.remote || "absent").slice(0, 180);
+        }
+        return line;
       }));
       if (differences.length > limit) {
         lines.push("  … et " + (differences.length - limit) + " autre(s) écart(s)");
@@ -2303,7 +2315,7 @@ Sélectionne une catégorie pour consulter les données.
       "",
       "Note : les volumes ne comparent pas le contenu des lignes. Aucune migration ni écriture n'a été effectuée."
     );
-    return lines.join("\\n");
+    return lines.join("\n");
   }
 
   window.latestStorageDiagnosticSummary = "";

@@ -225,3 +225,32 @@ def test_migration_preserves_duplicate_rows_in_tables_without_primary_keys():
     finally:
         source.close()
         target.close()
+
+
+def test_fts_virtual_tables_block_migration_before_shadow_tables_are_copied():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    try:
+        try:
+            source.execute("CREATE VIRTUAL TABLE memories_fts USING fts5(content)")
+        except sqlite3.OperationalError as exc:
+            pytest.skip(f"SQLite FTS5 indisponible dans cet environnement : {exc}")
+        target.execute("CREATE TABLE ordinary_probe (id INTEGER PRIMARY KEY)")
+        source.commit()
+        target.commit()
+
+        plan = build_data_migration_plan(source, target)
+        applied = migrate_sqlite_rows_to_turso(source, target, apply=True)
+
+        assert plan["ready"] is False
+        assert any("memories_fts" in item and "FTS" in item for item in plan["blockers"])
+        assert applied["applied"] is False
+        assert target.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='ordinary_probe'"
+        ).fetchone()[0] == 1
+        assert target.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='memories_fts'"
+        ).fetchone()[0] == 0
+    finally:
+        source.close()
+        target.close()

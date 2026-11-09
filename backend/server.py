@@ -139,6 +139,7 @@ from cognition.development import (
     list_preferences,
     development_statistics,
 )
+from cognition.event_receipts import claim_cognitive_event
 from cognition.engine import cognitive_engine
 from cognition.catalog import COGNITIVE_CATALOG
 from cognition.skill_evidence import build_validated_skill_data
@@ -153,6 +154,10 @@ from cognition.shared_brain import (
 from storage.turso_compat import inspect_turso_driver
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
+from storage.connection_factory import (
+    StorageSettings,
+    open_sqlite_application_connection,
+)
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 from diagnostics.persistence_inventory import inspect_sqlite_database
 
@@ -276,15 +281,20 @@ def local_now() -> str:
         return datetime.now().astimezone().isoformat()
 
 def db_connection() -> sqlite3.Connection:
-    db = sqlite3.connect(
-        DB_PATH,
-        timeout=20,
-        check_same_thread=False,
+    # Keep the exact DB_PATH selected by CHAPPIE_DATA_DIR. The shared factory
+    # refuses Turso until startup, backup, diagnostics and route contracts are
+    # fully backend-neutral.
+    settings = StorageSettings.from_env()
+    # DB_PATH is the server's canonical path. Tests and controlled maintenance
+    # may replace it at runtime; production derives it from CHAPPIE_DATA_DIR.
+    # Keep the selected backend and credentials, but never open a second file.
+    settings = StorageSettings(
+        backend=settings.backend,
+        sqlite_path=str(DB_PATH),
+        turso_database_url=settings.turso_database_url,
+        turso_auth_token=settings.turso_auth_token,
     )
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=20000")
-    return db
+    return open_sqlite_application_connection(settings)
 
 def init_db() -> None:
     with db_connection() as db:
@@ -626,6 +636,10 @@ async def body_size_guard(request: Request, call_next):
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_id: Optional[str] = Field(
+        default=None, min_length=8, max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
     user_id: str = Field(  
         default="creator",  
         min_length=1,  
@@ -1128,6 +1142,7 @@ def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
 def update_emotions_once(
     user_id: str,
     message: str,
+    event_id: Optional[str] = None,
 ) -> dict[str, float]:
 
     em = get_emotions(user_id)  
@@ -1263,9 +1278,15 @@ def update_emotions_once(
 
     now = utc_now()  
 
-    with db_connection() as db:  
-        db.execute(  
-            """  
+    with db_connection() as db:
+        if event_id and not claim_cognitive_event(
+            db, user_id, event_id, "emotion_state_update"
+        ):
+            db.rollback()
+            return get_emotions(user_id)
+
+        db.execute(
+            """
             UPDATE emotional_state  
             SET joy=?, fear=?, curiosity=?, frustration=?,  
                 sadness=?, energy=?, updated_at=?  
@@ -1576,60 +1597,52 @@ def save_conversation_turn(
     user_text: str,
     assistant_text: str,
     source: str = "conversation",
-) -> None:
+    turn_id: Optional[str] = None,
+) -> bool:
+    """Persist one complete turn; a supplied turn_id makes replays idempotent."""
+    user_id = valid_user(user_id)
+    user_text = re.sub(r"\s+", " ", str(user_text)).strip()[:MAX_MESSAGE_CHARS]
+    assistant_text = re.sub(r"\s+", " ", str(assistant_text)).strip()[:MAX_MESSAGE_CHARS]
+    if not user_text and not assistant_text:
+        return False
 
-    user_id = valid_user(user_id)  
+    turn_id = str(turn_id).strip()[:128] if turn_id is not None else ""
+    now = utc_now()
+    with db_connection() as db:
+        # Lazy, additive schema change: safe for existing SQLite installations.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_turn_receipts (
+                user_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, turn_id)
+            )
+        """)
+        if turn_id:
+            receipt = db.execute("""
+                INSERT OR IGNORE INTO conversation_turn_receipts
+                    (user_id, turn_id, source, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, turn_id, source[:40], now))
+            if receipt.rowcount == 0:
+                return False
 
-    user_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(user_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    assistant_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(assistant_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    if not user_text and not assistant_text:  
-        return  
-
-    now = utc_now()  
-
-    with db_connection() as db:  
-        if user_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "user", user_text, now),  
-            )  
-
-        if assistant_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "assistant", assistant_text, now),  
-            )  
-
-        db.execute(  
-            """  
-            INSERT INTO journal(user_id, entry, kind, created_at)  
-            VALUES(?,?,?,?)  
-            """,  
-            (  
-                user_id,  
-                f"Tour enregistré dans la mémoire commune (source : {source}).",  
-                source[:40],  
-                now,  
-            ),  
-        )  
-
-        db.commit()  
+        if user_text:
+            db.execute(
+                "INSERT INTO conversations(user_id, role, content, created_at) VALUES(?,?,?,?)",
+                (user_id, "user", user_text, now),
+            )
+        if assistant_text:
+            db.execute(
+                "INSERT INTO conversations(user_id, role, content, created_at) VALUES(?,?,?,?)",
+                (user_id, "assistant", assistant_text, now),
+            )
+        db.execute(
+            "INSERT INTO journal(user_id, entry, kind, created_at) VALUES(?,?,?,?)",
+            (user_id, f"Tour enregistré dans la mémoire commune (source : {source}).", source[:40], now),
+        )
+        db.commit()
 
     try:
         with db_connection() as db:
@@ -1670,6 +1683,8 @@ def save_conversation_turn(
         log.exception(  
             "Échec de consolidation après enregistrement d'un tour"  
         )
+    return True
+
 
 def get_identity_prompt(user_id: str, query: str = "") -> str:
     em = get_emotions(user_id)
@@ -2287,6 +2302,7 @@ async def call_gemini(
 async def run_brain(
     user_id: str,
     message: str,
+    turn_id: Optional[str] = None,
 ) -> dict[str, Any]:
 
     user_id = valid_user(user_id)  
@@ -2304,12 +2320,16 @@ async def run_brain(
             f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).",  
         )  
 
-    emotion_state = update_emotions_once(user_id, message)
+    cognitive_event_id = str(turn_id or secrets.token_urlsafe(24))
+    emotion_state = update_emotions_once(
+        user_id, message, event_id=cognitive_event_id
+    )
     try:
         with db_connection() as affect_db:
             record_affective_snapshot(
                 affect_db, user_id, emotion_state,
                 source="classic_chat", event_label="message utilisateur",
+                event_id=cognitive_event_id,
             )
             affect_db.commit()
     except Exception:
@@ -2321,6 +2341,7 @@ async def run_brain(
             taught = record_explicit_word_teaching(
                 teaching_db, user_id, message,
                 evidence="Enseignement explicite via le chat classique",
+                event_id=cognitive_event_id,
             )
             if taught:
                 teaching_db.commit()
@@ -2509,6 +2530,7 @@ async def run_brain(
         message,
         reply,
         source="conversation",
+        turn_id=cognitive_event_id,
     )  
 
     return {  
@@ -3058,7 +3080,9 @@ async def api_chat(
         )  
 
     try:  
-        result = await run_brain(user_id, message)  
+        result = await run_brain(
+            user_id, message, turn_id=_model_value(request, "request_id", None)
+        )  
 
         if isinstance(result, dict):  
             return result  
@@ -4647,7 +4671,10 @@ async def websocket_endpoint(
                 "model": GEMINI_LIVE_MODEL,
             })
 
-            live_turn_state = {"user": "", "assistant": "", "audio": []}
+            live_turn_state = {
+                "user": "", "assistant": "", "audio": [],
+                "turn_id": secrets.token_urlsafe(24),
+            }
 
             async def client_to_gemini():
                 while True:
@@ -4749,29 +4776,6 @@ async def websocket_endpoint(
                             live_turn_state["user"] = merge_live_transcript(
                                 live_turn_state["user"], heard_text
                             )
-                            try:
-                                with db_connection() as sensory_db:
-                                    live_emotions = update_emotions_once(user_id, heard_text)
-                                    record_affective_snapshot(
-                                        sensory_db, user_id, live_emotions,
-                                        source="gemini_live", event_label="transcription utilisateur",
-                                    )
-                                    record_heard_text(
-                                        sensory_db, user_id, heard_text,
-                                        evidence="Transcription confirmée par Gemini Live",
-                                    )
-                                    audio_observation = record_observation(
-                                        sensory_db, user_id, "audio", heard_text,
-                                        "gemini_live_transcription",
-                                        confidence=0.8,
-                                        metadata={"language": "fr"},
-                                    )
-                                    link_temporally_cooccurring_observation(
-                                        sensory_db, user_id, audio_observation["observation_id"]
-                                    )
-                                    sensory_db.commit()
-                            except Exception:
-                                log.exception("[GEMINI LIVE] Échec mémorisation transcription")
                             await websocket.send_json({"type": "user_text", "text": heard_text})
 
                     output_transcription = server_content.get("outputTranscription") or {}
@@ -4829,22 +4833,56 @@ async def websocket_endpoint(
 
                         if live_turn_state["user"] or assistant_text:
                             try:
-                                with db_connection() as teaching_db:
-                                    taught = record_explicit_word_teaching(
-                                        teaching_db, user_id, live_turn_state["user"],
-                                        evidence="Enseignement explicite via Gemini Live",
+                                completed_user_text = live_turn_state["user"].strip()
+                                if completed_user_text:
+                                    live_emotions = update_emotions_once(
+                                        user_id, completed_user_text,
+                                        event_id=live_turn_state["turn_id"],
                                     )
-                                    if taught:
-                                        teaching_db.commit()
-                                        log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live", len(taught))
+                                    with db_connection() as cognitive_db:
+                                        record_affective_snapshot(
+                                            cognitive_db, user_id, live_emotions,
+                                            source="gemini_live",
+                                            event_label="tour utilisateur terminé",
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        record_heard_text(
+                                            cognitive_db, user_id, completed_user_text,
+                                            evidence="Transcription confirmée par Gemini Live",
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        audio_observation = record_observation(
+                                            cognitive_db, user_id, "audio",
+                                            completed_user_text,
+                                            "gemini_live_transcription",
+                                            confidence=0.8,
+                                            metadata={"language": "fr"},
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        link_temporally_cooccurring_observation(
+                                            cognitive_db, user_id,
+                                            audio_observation["observation_id"],
+                                        )
+                                        taught = record_explicit_word_teaching(
+                                            cognitive_db, user_id, completed_user_text,
+                                            evidence="Enseignement explicite via Gemini Live",
+                                            event_id=live_turn_state["turn_id"],
+                                        )
+                                        cognitive_db.commit()
+                                        if taught:
+                                            log.info(
+                                                "[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live",
+                                                len(taught),
+                                            )
                             except Exception:
-                                log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")
+                                log.exception("[GEMINI LIVE] Échec mémorisation cognitive du tour terminé")
                             try:
                                 save_conversation_turn(
                                     user_id,
                                     live_turn_state["user"],
                                     assistant_text if lexical_gate_passed else "",
                                     source="gemini_live",
+                                    turn_id=live_turn_state["turn_id"],
                                 )
                                 log.info(
                                     "[V34] Tour Live enregistré dans le cerveau commun "
@@ -4858,6 +4896,7 @@ async def websocket_endpoint(
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []
+                        live_turn_state["turn_id"] = secrets.token_urlsafe(24)
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

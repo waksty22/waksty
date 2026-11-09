@@ -47,7 +47,9 @@ def _objects(connection: Any) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
         SELECT type, name, sql FROM sqlite_master
-        WHERE type='table' AND name NOT LIKE 'sqlite_%'
+        WHERE type='table'
+          AND name NOT LIKE 'sqlite_%'
+          AND name != 'chappie_storage_migration_state'
         ORDER BY name
         """
     ).fetchall()
@@ -144,6 +146,22 @@ def _row_exists(
     )
     row = cursor.fetchone()
     return row is not None, tuple(row) if row is not None else None
+
+
+def _row_match_count(
+    target: Any,
+    table: str,
+    columns: list[str],
+    values: tuple[Any, ...],
+) -> int:
+    """Count identical rows for tables without a primary key, preserving duplicates."""
+    predicates = " AND ".join(
+        f"{_quote_identifier(name)} IS ?" for name in columns
+    )
+    return int(target.execute(
+        f"SELECT COUNT(*) FROM {_quote_identifier(table)} WHERE {predicates}",
+        values,
+    ).fetchone()[0])
 
 
 def _preflight_extra_columns(
@@ -252,8 +270,51 @@ def _remove_column_from_create_sql(sql: str, column_name: str) -> str | None:
     return normalized
 
 
+def _fts_virtual_tables(connection: Any) -> list[str]:
+    """Find FTS virtual tables before treating SQLite shadow tables as ordinary data."""
+    rows = connection.execute(
+        """
+        SELECT name, sql FROM sqlite_master
+        WHERE type='table' AND sql IS NOT NULL
+        ORDER BY name
+        """
+    ).fetchall()
+    return [
+        str(_row_value(row, "name", 0))
+        for row in rows
+        if re.search(r"\bUSING\s+fts[345]\b", str(_row_value(row, "sql", 1) or ""), re.I)
+    ]
+
+
 def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     """Return a metadata-only migration preview; never select business rows."""
+    # FTS virtual tables own implementation-specific shadow tables. Copying
+    # those shadow tables as ordinary rows is unsafe; fail closed until a
+    # dedicated rebuild strategy is implemented and verified for libSQL.
+    source_fts = _fts_virtual_tables(source)
+    target_fts = _fts_virtual_tables(target)
+    if source_fts or target_fts:
+        blockers = []
+        if source_fts:
+            blockers.append(
+                "Tables FTS source détectées : " + ", ".join(source_fts)
+                + ". Migration bloquée ; reconstruire les index FTS séparément."
+            )
+        if target_fts:
+            blockers.append(
+                "Tables FTS cible détectées : " + ", ".join(target_fts)
+                + ". Migration bloquée ; vérifier/reconstruire les index FTS séparément."
+            )
+        return {
+            "version": "50.55",
+            "read_only": True,
+            "data_contents_exposed": False,
+            "ready": False,
+            "schema_plan": None,
+            "blockers": blockers,
+            "tables": [],
+        }
+
     schema = build_migration_plan(source, target)
     if not schema.get("ready"):
         return {
@@ -450,6 +511,7 @@ def migrate_sqlite_rows_to_turso(
             )
             inserted = 0
             already_present = 0
+            seen_without_pk: dict[str, int] = {}
             table_digest = hashlib.sha256()
             verified_digest = hashlib.sha256()
             while True:
@@ -459,29 +521,56 @@ def migrate_sqlite_rows_to_turso(
                 for raw_row in batch:
                     values = tuple(raw_row)
                     _row_digest_update(table_digest, table, names, values)
-                    exists, existing = _row_exists(
-                        target, table, names, values, primary_keys
-                    )
-                    if exists:
-                        if existing != values:
-                            raise ValueError(
-                                f"Collision de clé dans {table}; aucune ligne n'a été validée."
-                            )
-                        already_present += 1
-                        verified_values = existing
-                    else:
-                        insert_values = tuple(
-                            values[names.index(name)] for name in insert_names
-                        )
-                        target.execute(insert_sql, insert_values)
-                        inserted += 1
-                        found, verified_values = _row_exists(
+                    if primary_keys:
+                        exists, existing = _row_exists(
                             target, table, names, values, primary_keys
                         )
-                        if not found or verified_values != values:
-                            raise ValueError(
-                                f"Relecture après insertion échouée pour {table}."
+                        if exists:
+                            if existing != values:
+                                raise ValueError(
+                                    f"Collision de clé dans {table}; aucune ligne n'a été validée."
+                                )
+                            already_present += 1
+                            verified_values = existing
+                        else:
+                            insert_values = tuple(
+                                values[names.index(name)] for name in insert_names
                             )
+                            target.execute(insert_sql, insert_values)
+                            inserted += 1
+                            found, verified_values = _row_exists(
+                                target, table, names, values, primary_keys
+                            )
+                            if not found or verified_values != values:
+                                raise ValueError(
+                                    f"Relecture après insertion échouée pour {table}."
+                                )
+                    else:
+                        identity = json.dumps(
+                            [_normalize(value) for value in values],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        occurrence = seen_without_pk.get(identity, 0) + 1
+                        seen_without_pk[identity] = occurrence
+                        matching_rows = _row_match_count(
+                            target, table, names, values
+                        )
+                        if matching_rows >= occurrence:
+                            already_present += 1
+                            verified_values = values
+                        else:
+                            insert_values = tuple(
+                                values[names.index(name)] for name in insert_names
+                            )
+                            target.execute(insert_sql, insert_values)
+                            inserted += 1
+                            if _row_match_count(target, table, names, values) < occurrence:
+                                raise ValueError(
+                                    f"Relecture après insertion échouée pour {table}."
+                                )
+                            verified_values = values
                     _row_digest_update(
                         verified_digest, table, names, verified_values
                     )

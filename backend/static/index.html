@@ -2002,8 +2002,10 @@ Sélectionne une catégorie pour consulter les données.
           </p>
           <p class="muted" style="margin-bottom:12px">
             Avant l'application, l'aperçu doit indiquer PRÊT et l'archive des sauvegardes doit être conservée
-            hors de Render. Sur Render, active temporairement CHAPPIE_ALLOW_TURSO_MIGRATION=1 puis redéploie
-            avant de lancer le transfert. Après réussite, le backend Turso devra être activé séparément.
+            hors de Render. Sur Render, active CHAPPIE_ALLOW_TURSO_MIGRATION=1 puis redéploie avant le transfert.
+            Conserve ce réglage jusqu'à la bascule. Après réussite, définis CHAPPIE_STORAGE_BACKEND=turso
+            et CHAPPIE_TURSO_CUTOVER_READY=1, puis redéploie ; tu pourras ensuite retirer CHAPPIE_ALLOW_TURSO_MIGRATION.
+            Pour annuler avant la bascule, active temporairement CHAPPIE_ALLOW_SQLITE_ROLLBACK=1 et utilise le bouton d'annulation.
           </p>
           <div class="row-btns">
             <button type="button" onclick="runTursoMigrationPreview()">
@@ -2014,6 +2016,9 @@ Sélectionne une catégorie pour consulter les données.
             </button>
             <button type="button" class="danger" id="applyTursoMigration" onclick="applyTursoMigration()" disabled>
               3. Migrer les données vers Turso
+            </button>
+            <button type="button" class="secondary" id="cancelTursoMigration" onclick="cancelTursoMigration()">
+              Annuler avant bascule et réactiver SQLite
             </button>
           </div>
           <p id="tursoMigrationStatus" class="status" role="status" aria-live="polite">
@@ -2547,13 +2552,50 @@ Sélectionne une catégorie pour consulter les données.
       window.tursoMigrationState.applied = report?.applied === true;
       output.textContent = JSON.stringify(report, null, 2);
       status.textContent = report?.applied === true
-        ? "Transfert terminé et vérifié. Ne réinitialise rien. Le backend Turso n'est pas encore activé : suis les instructions de bascule manuelle."
+        ? "Transfert terminé et vérifié. Les écritures SQLite sont maintenant bloquées, même après redémarrage. Ne réinitialise rien : bascule maintenant le backend Render vers Turso."
         : "Le transfert n'a pas été validé. Consulte le rapport.";
     } catch (error) {
       status.textContent = "Migration interrompue : " + (error?.message || "erreur inconnue");
       output.textContent = "La transaction Turso a été annulée en cas d'échec. SQLite reste le backend actif.";
     } finally {
       updateTursoMigrationButtons();
+    }
+  };
+
+  window.cancelTursoMigration = async function () {
+    const status = document.getElementById("tursoMigrationStatus");
+    const output = document.getElementById("tursoMigrationOutput");
+    if (!status || !output) return;
+    const confirmed = window.confirm(
+      "Cette action annule uniquement la bascule AVANT activation de Turso. Elle ne supprime aucune ligne de Turso. Continuer ?"
+    );
+    if (!confirmed) return;
+    const phrase = window.prompt(
+      'Pour réactiver SQLite, saisis exactement : ANNULER LA BASCULE TURSO'
+    );
+    if (phrase !== "ANNULER LA BASCULE TURSO") {
+      status.textContent = "Annulation abandonnée : phrase incorrecte.";
+      return;
+    }
+    status.textContent = "Annulation pré-bascule en cours…";
+    try {
+      const report = await apiCall("/api/storage/migration/cancel", {
+        method: "POST",
+        body: { confirmation: phrase }
+      });
+      window.tursoMigrationState = {
+        previewReady: false,
+        previewReceived: false,
+        backupDownloaded: false,
+        applied: false
+      };
+      output.textContent = JSON.stringify(report, null, 2);
+      status.textContent = report?.cancelled === true
+        ? "SQLite est réactivé. Les données copiées dans Turso sont conservées. Redémarre Render pour relancer la maintenance autonome."
+        : "Annulation non confirmée.";
+      updateTursoMigrationButtons();
+    } catch (error) {
+      status.textContent = "Annulation impossible : " + (error?.message || "erreur inconnue");
     }
   };
 

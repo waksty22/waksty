@@ -155,3 +155,27 @@ Le migrateur :
 - L'audit SQLite/Turso continue d'ouvrir explicitement le fichier SQLite local en lecture seule.
 
 **Important :** la PR ne modifie pas les variables Render, ne lance pas le transfert, ne bascule pas le backend et ne déploie pas l'application. Après migration, le rapport doit être contrôlé avant toute modification manuelle des variables Render.
+
+## Complément V50.55.1 — Verrou persistant entre transfert et bascule
+
+Après la validation de la copie vers Turso, le serveur écrit un marqueur local `chappie_storage_migration_state` avec l'état `pending_cutover`, puis installe des déclencheurs SQLite qui refusent INSERT / UPDATE / DELETE sur les tables applicatives.
+
+Pendant cette période :
+- les requêtes applicatives d'écriture sont bloquées par le middleware ;
+- les sessions WebSocket Gemini Live sont refusées ;
+- la maintenance autonome s'arrête ;
+- les contrôles de diagnostic, l'aperçu et les sauvegardes restent accessibles ;
+- le marqueur local est relu au redémarrage ; si le fichier SQLite éphémère a disparu mais que `CHAPPIE_ALLOW_TURSO_MIGRATION=1` est encore actif, le serveur vérifie aussi le marqueur durable Turso et refuse de recréer une mémoire SQLite vide.
+
+Les tables de garde locales et leurs déclencheurs sont exclus du transfert vers Turso. Les tables virtuelles FTS ne sont pas copiées comme des tables ordinaires : si une table FTS3/4/5 est détectée dans la source ou la cible, l'aperçu bloque la migration. Il faut définir et tester une reconstruction FTS dédiée sur Turso avant de relancer l'aperçu ; aucune table d'ombre FTS n'est transférée.
+
+### Bascule normale
+1. Garder `CHAPPIE_ALLOW_TURSO_MIGRATION=1` pendant la phase de transfert.
+2. Après succès, définir `CHAPPIE_STORAGE_BACKEND=turso` et `CHAPPIE_TURSO_CUTOVER_READY=1`.
+3. Redéployer Render ; le démarrage vérifie le marqueur `completed` dans Turso.
+4. Après confirmation du bon fonctionnement, retirer `CHAPPIE_ALLOW_TURSO_MIGRATION`.
+
+### Annulation avant bascule
+Si Turso n'est pas activé et que l'on souhaite revenir à SQLite, définir temporairement `CHAPPIE_ALLOW_SQLITE_ROLLBACK=1`, puis appeler `POST /api/storage/migration/cancel` avec la phrase exacte `ANNULER LA BASCULE TURSO`. Cette opération retire le marqueur de migration Turso, enlève les déclencheurs locaux et réactive SQLite ; elle ne supprime aucune donnée applicative dans Turso. Redémarrer Render pour relancer la maintenance autonome.
+
+Cette annulation n'est pas un retour arrière après activation de Turso : après le cutover, SQLite peut être obsolète et doit être restauré/synchronisé depuis une sauvegarde avant tout retour.

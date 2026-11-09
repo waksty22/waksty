@@ -31,7 +31,11 @@ class StorageSettings:
             backend=backend,
             sqlite_path=os.getenv(
                 "CHAPPIE_SQLITE_PATH",
-                "./chappie_data/chappie_v16.sqlite3",
+                str(
+                    Path(os.getenv("CHAPPIE_DATA_DIR", "./chappie_data"))
+                    .expanduser()
+                    / "chappie_v16.sqlite3"
+                ),
             ).strip(),
             turso_database_url=os.getenv("TURSO_DATABASE_URL", "").strip(),
             turso_auth_token=os.getenv("TURSO_AUTH_TOKEN", "").strip(),

@@ -5096,6 +5096,151 @@ async def api_storage_path_diagnostics(auth=Depends(require_auth)):
                 pass
 
 
+@app.get("/api/storage/migration/preview")
+async def api_storage_migration_preview(auth=Depends(require_auth)):
+    """Read-only SQLite -> Turso migration preview; no row contents are returned."""
+    _authenticated_user(auth)
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="La prévisualisation doit être lancée avant le basculement, depuis SQLite.",
+        )
+    if not DB_PATH.is_file():
+        raise HTTPException(status_code=503, detail="La base SQLite source est introuvable.")
+    remote_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    remote_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not remote_url or not remote_token:
+        raise HTTPException(status_code=503, detail="Turso n'est pas entièrement configuré.")
+
+    source = None
+    target = None
+    try:
+        import libsql
+        from storage.data_migration import build_data_migration_plan
+
+        source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
+        source.row_factory = sqlite3.Row
+        target = libsql.connect(database=remote_url, auth_token=remote_token)
+        report = build_data_migration_plan(source, target)
+        return {
+            **report,
+            "source_database": "SQLite local",
+            "target_database_host": remote_url.split("://", 1)[-1].split("/", 1)[0],
+            "migration_executed": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("[MIGRATION] Read-only preview failed.")
+        raise HTTPException(
+            status_code=503,
+            detail="Prévisualisation impossible : " + type(exc).__name__,
+        )
+    finally:
+        for connection in (source, target):
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+
+@app.get("/api/storage/migration/backup")
+async def api_storage_migration_backup(auth=Depends(require_auth)):
+    """Download verified encrypted snapshots of both databases before migration."""
+    _authenticated_user(auth)
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="Les sauvegardes pré-migration doivent être créées avant le basculement.",
+        )
+    if not DB_PATH.is_file():
+        raise HTTPException(status_code=503, detail="La base SQLite source est introuvable.")
+    remote_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    remote_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    encryption_key = os.getenv("BACKUP_ENCRYPTION_KEY", "")
+    if not remote_url or not remote_token:
+        raise HTTPException(status_code=503, detail="Turso n'est pas entièrement configuré.")
+    if len(encryption_key) < 12:
+        raise HTTPException(
+            status_code=503,
+            detail="BACKUP_ENCRYPTION_KEY doit être configurée (12 caractères minimum).",
+        )
+
+    source = None
+    target = None
+    try:
+        import libsql
+        import zipfile
+        from storage.logical_backup import export_encrypted_logical_backup
+
+        source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
+        source.row_factory = sqlite3.Row
+        target = libsql.connect(database=remote_url, auth_token=remote_token)
+
+        with tempfile.TemporaryDirectory(prefix="chappie-migration-backups-") as work:
+            root = Path(work)
+            sqlite_path = root / "sqlite-source.json.enc"
+            turso_path = root / "turso-target.json.enc"
+            sqlite_report = export_encrypted_logical_backup(
+                source, sqlite_path, encryption_key
+            )
+            turso_report = export_encrypted_logical_backup(
+                target, turso_path, encryption_key
+            )
+            archive_path = root / "chappie-pre-migration-backups.zip"
+            with zipfile.ZipFile(
+                archive_path, mode="w", compression=zipfile.ZIP_STORED
+            ) as archive:
+                for path in (
+                    sqlite_path,
+                    sqlite_path.with_suffix(sqlite_path.suffix + ".sha256"),
+                    turso_path,
+                    turso_path.with_suffix(turso_path.suffix + ".sha256"),
+                ):
+                    archive.write(path, arcname=path.name)
+            payload = archive_path.read_bytes()
+
+        log.info(
+            "[MIGRATION] Both encrypted backups verified: SQLite=%s rows, Turso=%s rows.",
+            sqlite_report["total_rows"],
+            turso_report["total_rows"],
+        )
+        filename = "chappie-pre-migration-backups.zip"
+        return Response(
+            content=payload,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "X-SQLite-Backup-SHA256": sqlite_report["sha256"],
+                "X-Turso-Backup-SHA256": turso_report["sha256"],
+                "X-Backups-Verified": "true",
+                "X-Backups-Encrypted": "AES-256-GCM",
+                "X-SQLite-Table-Count": str(sqlite_report["table_count"]),
+                "X-SQLite-Row-Count": str(sqlite_report["total_rows"]),
+                "X-Turso-Table-Count": str(turso_report["table_count"]),
+                "X-Turso-Row-Count": str(turso_report["total_rows"]),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("[MIGRATION] Encrypted pre-migration backups failed.")
+        raise HTTPException(
+            status_code=503,
+            detail="Sauvegarde pré-migration impossible : " + type(exc).__name__,
+        )
+    finally:
+        for connection in (source, target):
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+
 @app.get("/api/turso/backup")
 
 async def api_turso_backup(auth=Depends(require_auth)):

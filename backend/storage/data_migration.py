@@ -148,6 +148,22 @@ def _row_exists(
     return row is not None, tuple(row) if row is not None else None
 
 
+def _row_match_count(
+    target: Any,
+    table: str,
+    columns: list[str],
+    values: tuple[Any, ...],
+) -> int:
+    """Count identical rows for tables without a primary key, preserving duplicates."""
+    predicates = " AND ".join(
+        f"{_quote_identifier(name)} IS ?" for name in columns
+    )
+    return int(target.execute(
+        f"SELECT COUNT(*) FROM {_quote_identifier(table)} WHERE {predicates}",
+        values,
+    ).fetchone()[0])
+
+
 def _preflight_extra_columns(
     source_columns: list[dict[str, Any]],
     target_columns: list[dict[str, Any]],
@@ -452,6 +468,7 @@ def migrate_sqlite_rows_to_turso(
             )
             inserted = 0
             already_present = 0
+            seen_without_pk: dict[str, int] = {}
             table_digest = hashlib.sha256()
             verified_digest = hashlib.sha256()
             while True:
@@ -461,29 +478,56 @@ def migrate_sqlite_rows_to_turso(
                 for raw_row in batch:
                     values = tuple(raw_row)
                     _row_digest_update(table_digest, table, names, values)
-                    exists, existing = _row_exists(
-                        target, table, names, values, primary_keys
-                    )
-                    if exists:
-                        if existing != values:
-                            raise ValueError(
-                                f"Collision de clé dans {table}; aucune ligne n'a été validée."
-                            )
-                        already_present += 1
-                        verified_values = existing
-                    else:
-                        insert_values = tuple(
-                            values[names.index(name)] for name in insert_names
-                        )
-                        target.execute(insert_sql, insert_values)
-                        inserted += 1
-                        found, verified_values = _row_exists(
+                    if primary_keys:
+                        exists, existing = _row_exists(
                             target, table, names, values, primary_keys
                         )
-                        if not found or verified_values != values:
-                            raise ValueError(
-                                f"Relecture après insertion échouée pour {table}."
+                        if exists:
+                            if existing != values:
+                                raise ValueError(
+                                    f"Collision de clé dans {table}; aucune ligne n'a été validée."
+                                )
+                            already_present += 1
+                            verified_values = existing
+                        else:
+                            insert_values = tuple(
+                                values[names.index(name)] for name in insert_names
                             )
+                            target.execute(insert_sql, insert_values)
+                            inserted += 1
+                            found, verified_values = _row_exists(
+                                target, table, names, values, primary_keys
+                            )
+                            if not found or verified_values != values:
+                                raise ValueError(
+                                    f"Relecture après insertion échouée pour {table}."
+                                )
+                    else:
+                        identity = json.dumps(
+                            [_normalize(value) for value in values],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        occurrence = seen_without_pk.get(identity, 0) + 1
+                        seen_without_pk[identity] = occurrence
+                        matching_rows = _row_match_count(
+                            target, table, names, values
+                        )
+                        if matching_rows >= occurrence:
+                            already_present += 1
+                            verified_values = values
+                        else:
+                            insert_values = tuple(
+                                values[names.index(name)] for name in insert_names
+                            )
+                            target.execute(insert_sql, insert_values)
+                            inserted += 1
+                            if _row_match_count(target, table, names, values) < occurrence:
+                                raise ValueError(
+                                    f"Relecture après insertion échouée pour {table}."
+                                )
+                            verified_values = values
                     _row_digest_update(
                         verified_digest, table, names, verified_values
                     )

@@ -2255,9 +2255,11 @@ Sélectionne une catégorie pour consulter les données.
       "Compatibilité globale (schéma + volumes) : " +
         (comparison.compatible === true ? "compatible" :
           comparison.compatible === false ? "différences détectées" : "non déterminée"),
-      "Décision de préparation migration : " +
-        (detail.migration_readiness === "ready" ? "PRÊT" :
-          detail.migration_readiness === "blocked" ? "BLOQUÉE" : "non déterminée"),
+      "Compatibilité structurelle du schéma : " +
+        (detail.schema_readiness === "ready" ? "PRÊT" :
+          detail.schema_readiness === "blocked" ? "BLOQUÉE" : "non déterminée"),
+      "État de préparation de la migration des données : " +
+        (detail.migration_readiness === "not_assessed" ? "NON ÉVALUÉ — contrôle d'intégrité des données distinct nécessaire" : "non déterminé"),
       "Écarts bloquants : " + (detail.severity_counts?.blocking ?? "?") +
         " ; importants : " + (detail.severity_counts?.important ?? "?") +
         " ; informatifs : " + (detail.severity_counts?.informational ?? "?"),

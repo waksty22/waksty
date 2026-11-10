@@ -38,7 +38,7 @@ def test_blocked_table_sql_report_keeps_actionable_read_only_diagnostics():
         assert plan["schema_diagnostics"]["data_contents_exposed"] is False
 
         compact = summarize_data_migration_plan(plan)
-        assert compact["version"] == "50.64"
+        assert compact["version"] == "50.65"
         assert compact["ready"] is False
         assert compact["migration_executed"] is False
         assert compact["table_definition_differences"]

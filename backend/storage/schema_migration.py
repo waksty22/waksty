@@ -154,7 +154,7 @@ def _rebuild_table_spec(
         # Only explicitly allowlisted, ordinary columns with a matching
         # source definition may be introduced during a verified rebuild.
         match = re.fullmatch(
-            r"([A-Z][A-Z0-9_]*(?:\\s*\\([^)]*\\))?)(?:\\s+(NOT NULL))?(?:\\s+DEFAULT\\s+(.+))?",
+            r"([A-Z][A-Z0-9_]*(?:\s*\([^)]*\))?)(?:\s+(NOT NULL))?(?:\s+DEFAULT\s+(.+))?",
             declaration,
         )
         if (

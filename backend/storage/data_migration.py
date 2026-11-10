@@ -488,22 +488,62 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         }
         for item in differences[:12]
     ]
-    # Keep raw CREATE TABLE statements and column identifiers out of the
-    # compact report. Emit non-reversible fingerprints and lengths so the
-    # mismatch can be tracked without exposing schema text.
+    # Expose actionable schema metadata only. Never include SQL text, default
+    # expressions, row values, or arbitrary driver objects in this compact view.
     definition_differences = []
+    structural_differences = []
     for item in differences:
-        if item.get("category") != "table_constraints_or_options":
+        category = item.get("category")
+        table = item.get("table")
+        if category == "table_constraints_or_options":
+            source_sql = str(item.get("local") or "")
+            target_sql = str(item.get("remote") or "")
+            definition_differences.append({
+                "table": table,
+                "source_sha256": hashlib.sha256(source_sql.encode("utf-8")).hexdigest(),
+                "target_sha256": hashlib.sha256(target_sql.encode("utf-8")).hexdigest(),
+                "source_length": len(source_sql),
+                "target_length": len(target_sql),
+                "requires_manual_review": True,
+            })
             continue
-        source_sql = str(item.get("local") or "")
-        target_sql = str(item.get("remote") or "")
-        definition_differences.append({
-            "table": item.get("table"),
-            "source_sha256": hashlib.sha256(source_sql.encode("utf-8")).hexdigest(),
-            "target_sha256": hashlib.sha256(target_sql.encode("utf-8")).hexdigest(),
-            "source_length": len(source_sql),
-            "target_length": len(target_sql),
-            "requires_manual_review": True,
+        if category not in {
+            "missing_column", "extra_column", "column_definition",
+            "foreign_keys", "missing_unique_constraint",
+            "extra_unique_constraint", "missing_index", "extra_index",
+            "unique_constraint_definition", "index_definition",
+        }:
+            continue
+
+        def safe_metadata(value: Any) -> Any:
+            if not isinstance(value, dict):
+                return None
+            allowed = (
+                "name", "type", "notnull", "primary_key_position",
+                "generated_or_hidden", "metadata_complete", "hidden",
+                "referenced_table", "from_column", "to_column",
+                "on_update", "on_delete", "match", "sequence", "id",
+                "unique", "origin", "partial",
+            )
+            result = {key: value[key] for key in allowed if key in value}
+            if isinstance(value.get("columns"), list):
+                result["columns"] = [
+                    {
+                        key: column.get(key)
+                        for key in ("name", "sequence", "descending", "key_column")
+                        if key in column
+                    }
+                    for column in value["columns"] if isinstance(column, dict)
+                ]
+            return result
+
+        structural_differences.append({
+            "category": category,
+            "table": table,
+            "item": item.get("item"),
+            "source": safe_metadata(item.get("local")),
+            "target": safe_metadata(item.get("remote")),
+            "explanation": item.get("explanation"),
         })
     return {
         "version": plan.get("version", "50.62"),
@@ -532,8 +572,10 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "differences_truncated": len(differences) > len(difference_preview),
         "table_definition_differences": definition_differences[:10],
         "table_definition_differences_truncated": len(definition_differences) > 10,
+        "structural_differences": structural_differences[:100],
+        "structural_differences_truncated": len(structural_differences) > 100,
         "notes": [
-            "Rapport compact : aucun SQL brut, nom de colonne ni contenu métier n'est exposé.",
+            "Rapport compact : métadonnées de schéma autorisées uniquement ; aucun SQL brut, valeur par défaut ni contenu métier n'est exposé.",
             "Les différences de volumes de lignes ne sont pas détaillées dans cette vue.",
             "Aucune migration ni écriture en base n'a été exécutée.",
         ],

@@ -5523,7 +5523,7 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
     try:
         import zipfile
         import libsql_client
-        from storage.hrana_backup import HranaTransactionConnection
+        from storage.hrana_backup import HranaTransactionConnection, describe_hrana_error
         from storage.logical_backup import export_encrypted_logical_backup
 
         source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
@@ -5559,23 +5559,25 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
             except Exception as backup_error:
                 # Log the primary failure before attempting rollback: the rollback
                 # may itself fail and otherwise obscure the useful first traceback.
+                primary_details = describe_hrana_error(backup_error)
                 log.exception(
                     "[MIGRATION] Turso backup failed before rollback; stage=%s "
                     "error_type=%s status=%s reason=%s",
                     backup_stage,
-                    type(backup_error).__name__,
-                    getattr(backup_error, "status", None),
-                    str(getattr(backup_error, "message", ""))[:160],
+                    primary_details["error_type"],
+                    primary_details["status"],
+                    primary_details["reason"],
                 )
                 try:
                     turso_transaction.rollback()
                 except Exception as rollback_error:
+                    rollback_details = describe_hrana_error(rollback_error)
                     log.exception(
                         "[MIGRATION] Turso backup rollback also failed; "
                         "error_type=%s status=%s reason=%s",
-                        type(rollback_error).__name__,
-                        getattr(rollback_error, "status", None),
-                        str(getattr(rollback_error, "message", ""))[:160],
+                        rollback_details["error_type"],
+                        rollback_details["status"],
+                        rollback_details["reason"],
                     )
                 raise
             archive_path = root / "chappie-pre-migration-backups.zip"

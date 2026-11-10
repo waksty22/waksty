@@ -23,7 +23,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade pytest libsql libsql-client==0.3.1 cryptography fastapi uvicorn python-dotenv pydantic httpx "websockets>=12,<16" google-genai edge-tts
+          python -m pip install --upgrade pytest libsql cryptography fastapi uvicorn python-dotenv pydantic httpx "websockets>=12,<16" google-genai edge-tts
 
       - name: Check Python syntax
         run: python -m compileall -q backend

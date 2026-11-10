@@ -488,22 +488,22 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         }
         for item in differences[:12]
     ]
-    # CREATE TABLE statements contain schema metadata, not business rows.
-    # Include bounded source/target excerpts only for table-definition drift.
-    # This makes manual review actionable while keeping mobile reports compact.
+    # Keep raw CREATE TABLE statements and column identifiers out of the
+    # compact report. Emit non-reversible fingerprints and lengths so the
+    # mismatch can be tracked without exposing schema text.
     definition_differences = []
     for item in differences:
         if item.get("category") != "table_constraints_or_options":
             continue
         source_sql = str(item.get("local") or "")
         target_sql = str(item.get("remote") or "")
-        limit = 900
         definition_differences.append({
             "table": item.get("table"),
-            "source_sql": source_sql[:limit],
-            "target_sql": target_sql[:limit],
-            "source_sql_truncated": len(source_sql) > limit,
-            "target_sql_truncated": len(target_sql) > limit,
+            "source_sha256": hashlib.sha256(source_sql.encode("utf-8")).hexdigest(),
+            "target_sha256": hashlib.sha256(target_sql.encode("utf-8")).hexdigest(),
+            "source_length": len(source_sql),
+            "target_length": len(target_sql),
+            "requires_manual_review": True,
         })
     return {
         "version": plan.get("version", "50.62"),
@@ -533,7 +533,7 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "table_definition_differences": definition_differences[:10],
         "table_definition_differences_truncated": len(definition_differences) > 10,
         "notes": [
-            "Rapport compact : aucune définition SQL ni donnée métier n'est exposée.",
+            "Rapport compact : aucun SQL brut, nom de colonne ni contenu métier n'est exposé.",
             "Les différences de volumes de lignes ne sont pas détaillées dans cette vue.",
             "Aucune migration ni écriture en base n'a été exécutée.",
         ],

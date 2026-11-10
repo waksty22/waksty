@@ -43,15 +43,7 @@ def test_blocked_table_sql_report_keeps_actionable_read_only_diagnostics():
         assert compact["migration_executed"] is False
         assert compact["counts"]["blockers"] == 0
         assert compact["table_definition_differences"] == []
-        difference = None
-        assert difference is None
-        assert len(difference["source_sha256"]) == 64
-        assert len(difference["target_sha256"]) == 64
-        assert difference["source_length"] > 0
-        assert difference["target_length"] > 0
-        assert difference["requires_manual_review"] is True
-        assert "source_sql" not in difference
-        assert "target_sql" not in difference
+        assert compact["structural_differences"] == []
         assert "legacy target annotation" not in str(compact)
         assert "private_sql" not in str(compact)
 

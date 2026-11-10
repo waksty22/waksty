@@ -51,6 +51,7 @@ def test_hrana_adapter_normalizes_result_sets_for_logical_backup():
         "UPDATE memories SET note='not allowed'",
         "DELETE FROM memories",
         "PRAGMA query_only=OFF",
+        "SELECT 1; DELETE FROM memories",
     ],
 )
 def test_hrana_backup_adapter_rejects_non_select_sql(sql):
@@ -63,13 +64,13 @@ def test_hrana_backup_adapter_rejects_non_select_sql(sql):
     assert transaction.statements == []
 
 
-def test_hrana_adapter_uses_the_same_caller_owned_transaction():
+def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
     transaction = _Transaction()
     connection = HranaTransactionConnection(transaction)
 
     from storage.logical_backup import export_logical_backup, verify_logical_backup
 
-    destination = Path(__file__).parent / ".hrana-backup-test.json"
+    destination = tmp_path / "hrana-backup-test.json"
     try:
         report = export_logical_backup(
             connection, destination, manage_snapshot=False

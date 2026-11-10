@@ -283,3 +283,78 @@ def test_sqlite_to_turso_flow_uses_verified_rebuild_before_copying_source_rows()
     finally:
         source.close()
         target.close()
+
+
+
+def test_rebuild_runs_on_the_libsql_compatibility_adapter():
+    import libsql
+    from storage.libsql_adapter import adapt_libsql_connection
+
+    source = sqlite3.connect(":memory:")
+    native = libsql.connect(database=":memory:")
+    target = adapt_libsql_connection(native)
+    source.execute("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant')),
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    target.execute("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    target.execute(
+        "INSERT INTO conversations(user_id, role, content, created_at) "
+        "VALUES ('creator', 'assistant', 'keep-on-libsql', 'now')"
+    )
+    target.commit()
+    try:
+        plan = build_migration_plan(source, target)
+        assert plan["ready"], plan["blockers"]
+        result = apply_migration_plan(target, plan, apply=True)
+        assert result["applied"] is True
+        row = target.execute(
+            "SELECT content FROM conversations WHERE user_id='creator'"
+        ).fetchone()
+        assert row[0] == "keep-on-libsql"
+    finally:
+        source.close()
+        target.close()
+
+
+def test_rebuild_refuses_unreviewed_table_options():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    source.execute("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant')),
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        ) WITHOUT ROWID
+    """)
+    target.execute("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    try:
+        plan = build_migration_plan(source, target)
+        assert not plan["ready"]
+        assert any("option ou clause SQL avancée" in item for item in plan["blockers"])
+    finally:
+        source.close()
+        target.close()

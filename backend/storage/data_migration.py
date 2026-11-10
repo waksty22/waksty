@@ -23,6 +23,9 @@ from storage.schema_migration import (
     apply_schema_statement,
     build_migration_plan,
     _row_value,
+    _check_constraint_signature,
+    _foreign_key_signature,
+    _unique_index_signature,
 )
 
 
@@ -290,6 +293,43 @@ def _fts_virtual_tables(connection: Any) -> list[str]:
     ]
 
 
+def _table_definition_component_fingerprints(connection: Any, table: str) -> dict[str, Any]:
+    """Hash semantic schema components without exposing SQL, defaults, or row data."""
+    columns = connection.execute(
+        f"PRAGMA table_xinfo({_quote_identifier(table)})"
+    ).fetchall()
+    column_signature = [
+        (
+            str(_row_value(row, "name", 1)),
+            str(_row_value(row, "type", 2) or "").upper(),
+            int(_row_value(row, "notnull", 3)),
+            hashlib.sha256(str(_row_value(row, "dflt_value", 4)).encode("utf-8")).hexdigest()
+                if _row_value(row, "dflt_value", 4) is not None else None,
+            int(_row_value(row, "pk", 5)),
+            int(_row_value(row, "hidden", 6)),
+        )
+        for row in columns
+    ]
+    objects = {item["name"]: item["sql"] for item in _objects(connection)}
+    create_sql = objects.get(table) or ""
+    advanced = sorted(set(re.findall(
+        r"\b(AUTOINCREMENT|COLLATE|STRICT|WITHOUT\s+ROWID|ON\s+CONFLICT)\b",
+        str(create_sql), re.I,
+    )))
+
+    def digest(value: Any) -> str:
+        payload = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    return {
+        "columns_sha256": digest(column_signature),
+        "foreign_keys_sha256": digest(_foreign_key_signature(connection, table)),
+        "unique_constraints_sha256": digest(_unique_index_signature(connection, table)),
+        "check_constraints_sha256": digest(_check_constraint_signature(create_sql)),
+        "advanced_options": advanced,
+    }
+
+
 def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     """Return a metadata-only migration preview; never select business rows."""
     # FTS virtual tables own implementation-specific shadow tables. Copying
@@ -310,7 +350,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
                 + ". Migration bloquée ; vérifier/reconstruire les index FTS séparément."
             )
         return {
-            "version": "50.63",
+            "version": "50.64",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -327,15 +367,27 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         inspect_database(target),
     ).get("detailed_audit", {})
 
+    table_definition_diagnostics = {}
+    for difference in detailed.get("differences", []):
+        if difference.get("category") != "table_constraints_or_options":
+            continue
+        table = difference.get("table")
+        if table:
+            table_definition_diagnostics[table] = {
+                "source": _table_definition_component_fingerprints(source, table),
+                "target": _table_definition_component_fingerprints(target, table),
+            }
+
     schema = build_migration_plan(source, target)
     if not schema.get("ready"):
         return {
-            "version": "50.63",
+            "version": "50.64",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
             "schema_plan": schema,
             "schema_diagnostics": detailed,
+            "table_definition_diagnostics": table_definition_diagnostics,
             "blockers": list(schema.get("blockers", [])),
             "tables": [],
         }
@@ -402,7 +454,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         )
     if table_sql_blockers:
         return {
-            "version": "50.63",
+            "version": "50.64",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -410,6 +462,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
             # Preserve metadata-only comparison details so the compact report
             # can explain each SQL-definition blocker without exposing rows.
             "schema_diagnostics": detailed,
+            "table_definition_diagnostics": table_definition_diagnostics,
             "blockers": table_sql_blockers,
             "tables": [],
         }
@@ -451,7 +504,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         ordered = []
 
     return {
-        "version": "50.63",
+        "version": "50.64",
         "read_only": True,
         "data_contents_exposed": False,
         "ready": not blockers,
@@ -491,6 +544,7 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
     # Expose actionable schema metadata only. Never include SQL text, default
     # expressions, row values, or arbitrary driver objects in this compact view.
     definition_differences = []
+    table_definition_diagnostics = plan.get("table_definition_diagnostics") or {}
     structural_differences = []
     for item in differences:
         category = item.get("category")
@@ -504,6 +558,7 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 "target_sha256": hashlib.sha256(target_sql.encode("utf-8")).hexdigest(),
                 "source_length": len(source_sql),
                 "target_length": len(target_sql),
+                "semantic_components": table_definition_diagnostics.get(table, {}),
                 "requires_manual_review": True,
             })
             continue
@@ -546,7 +601,7 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "explanation": item.get("explanation"),
         })
     return {
-        "version": plan.get("version", "50.63"),
+        "version": plan.get("version", "50.64"),
         "read_only": True,
         "data_contents_exposed": False,
         "migration_executed": False,
@@ -592,7 +647,7 @@ def migrate_sqlite_rows_to_turso(
     plan = build_data_migration_plan(source, target)
     if not plan["ready"]:
         return {
-            "version": "50.63",
+            "version": "50.64",
             "applied": False,
             "ready": False,
             "read_only": True,
@@ -602,7 +657,7 @@ def migrate_sqlite_rows_to_turso(
         }
     if not apply:
         return {
-            "version": "50.63",
+            "version": "50.64",
             "applied": False,
             "ready": True,
             "read_only": True,
@@ -766,7 +821,7 @@ def migrate_sqlite_rows_to_turso(
             ) VALUES (?, 'completed', ?, ?, ?, ?, ?)
             """,
             (
-                "sqlite-to-turso-v50.63",
+                "sqlite-to-turso-v50.64",
                 len(table_results),
                 sum(item["source_rows"] for item in table_results),
                 inserted_total,
@@ -780,7 +835,7 @@ def migrate_sqlite_rows_to_turso(
         raise
 
     return {
-        "version": "50.63",
+        "version": "50.64",
         "applied": True,
         "ready": True,
         "read_only": False,

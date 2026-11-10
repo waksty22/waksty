@@ -1,4 +1,8 @@
 import sqlite3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from storage.logical_backup import export_logical_backup, verify_logical_backup
 

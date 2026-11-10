@@ -260,7 +260,7 @@ def test_sqlite_to_turso_flow_uses_verified_rebuild_before_copying_source_rows()
     try:
         source.execute(
             "INSERT INTO conversations(id, user_id, role, content, created_at) "
-            "VALUES (1, 'creator', 'user', 'from-source', '2026-01-03')"
+            "VALUES (2, 'creator', 'user', 'from-source', '2026-01-03')"
         )
         target.execute(
             "INSERT INTO conversations(id, user_id, role, content, created_at) "
@@ -278,7 +278,7 @@ def test_sqlite_to_turso_flow_uses_verified_rebuild_before_copying_source_rows()
         rows = target.execute(
             "SELECT id, content FROM conversations ORDER BY id"
         ).fetchall()
-        assert rows == [(1, "from-source"), (5, "target-kept")]
+        assert rows == [(1, "existing"), (2, "from-source"), (5, "target-kept")]
     finally:
         source.close()
         target.close()

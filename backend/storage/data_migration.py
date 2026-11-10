@@ -517,6 +517,8 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         "data_contents_exposed": False,
         "ready": not blockers,
         "schema_plan": schema,
+        "schema_diagnostics": detailed,
+        "table_definition_diagnostics": table_definition_diagnostics,
         "blockers": blockers,
         "table_order": ordered,
         "tables": table_reports,

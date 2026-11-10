@@ -83,6 +83,18 @@ def _normalized_sql(value: Any) -> str:
 
 
 
+def _index_is_unique(connection: Any, table_name: str, index_name: str) -> bool | None:
+    """Return index uniqueness, or None when metadata cannot prove it."""
+    rows = connection.execute(
+        f"PRAGMA index_list({_quote_identifier(table_name)})"
+    ).fetchall()
+    for row in rows:
+        if str(_row_value(row, "name", 1)) == index_name:
+            return bool(_row_value(row, "unique", 2))
+    return None
+
+
+
 def _unique_index_signature(connection: Any, table_name: str) -> list[tuple[Any, ...]]:
     """Return unique-index semantics, including UNIQUE table/column constraints."""
     indexes = connection.execute(
@@ -304,9 +316,40 @@ def build_migration_plan(
             existing = target_objects[key]
             if item["type"] in {"index", "view", "trigger"}:
                 if _normalized_sql(item["sql"]) != _normalized_sql(existing["sql"]):
-                    blockers.append(
-                        f"{item['type']} {item['name']}: définition différente entre source et cible."
-                    )
+                    if item["type"] == "index" and item["sql"] and existing["sql"]:
+                        source_unique = _index_is_unique(
+                            source, item["table"], item["name"]
+                        )
+                        target_unique = _index_is_unique(
+                            target, existing["table"], existing["name"]
+                        )
+                        if (
+                            source_unique is False
+                            and target_unique is False
+                            and item["table"] == existing["table"]
+                        ):
+                            statements.append({
+                                "kind": "drop_index",
+                                "object": item["name"],
+                                "sql": (
+                                    f"DROP INDEX "
+                                    f"{_quote_identifier(item['name'])}"
+                                ),
+                            })
+                            statements.append({
+                                "kind": "create_index",
+                                "object": item["name"],
+                                "sql": str(item["sql"]),
+                            })
+                        else:
+                            blockers.append(
+                                f"{item['type']} {item['name']}: définition différente "
+                                "et remplacement automatique non prouvé sûr."
+                            )
+                    else:
+                        blockers.append(
+                            f"{item['type']} {item['name']}: définition différente entre source et cible."
+                        )
             continue
         if item["type"] == "table":
             continue
@@ -325,7 +368,7 @@ def build_migration_plan(
             )
 
     # Tables first, additive columns second, indexes last.
-    order = {"create_table": 0, "add_column": 1, "create_index": 2}
+    order = {"drop_index": 0, "create_table": 1, "add_column": 2, "create_index": 3}
     statements.sort(key=lambda item: (order[item["kind"]], item["object"]))
 
     return {

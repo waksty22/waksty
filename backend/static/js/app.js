@@ -683,10 +683,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: { user_id: 'creator', message }
             });
 
-            if (data.reply) {
-                if (outDiv) outDiv.textContent = data.reply;
+            const reply = typeof data.reply === 'string' ? data.reply.trim() : "";
+
+            if (reply) {
+                if (outDiv) outDiv.textContent = reply;
                 msgInput.value = "";
-                playTextToSpeech(data.reply);
+                playTextToSpeech(reply);
+            } else {
+                // An empty reply is expected while newborn vocabulary is empty.
+                // Keep Chappie's silence, but never leave the interface in a loading state.
+                if (outDiv) {
+                    outDiv.textContent =
+                        "Je n'ai pas encore appris de mot que je peux utiliser pour répondre. " +
+                        "Tu peux m'enseigner un mot dans l'espace d'apprentissage.";
+                }
             }
         } catch (error) {
             if (outDiv) outDiv.textContent = "Erreur : " + error.message;

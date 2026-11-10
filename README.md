@@ -71,6 +71,8 @@ GitHub Actions exécute la compilation Python, la vérification syntaxique JavaS
 
 ## Déploiement
 
+La révision de durcissement V50.60 est livrée par une pull request et doit passer la CI avant toute fusion.
+
 Le service Render doit utiliser Python 3.11 et installer `backend/requirements.txt`. Les variables secrètes se configurent dans Render, pas dans les fichiers versionnés.
 
 Avant toute mise en production, vérifier les journaux de démarrage, le backend réellement actif, les diagnostics de persistance et les sauvegardes. Une fusion GitHub ne prouve pas que la mémoire a été migrée ni que le nouveau backend est actif.

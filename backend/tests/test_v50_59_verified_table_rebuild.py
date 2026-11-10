@@ -186,7 +186,7 @@ def test_memories_check_and_skills_level_drift_are_rebuilt_safely():
             UNIQUE(user_id, skill_name)
         );
         INSERT INTO memories(user_id, category, content, importance, created_at, updated_at)
-        VALUES ('creator', 'fact', 'existing-memory', 6, 'before', 'before');
+        VALUES ('creator', 'fact', 'existing-memory', 4, 'before', 'before');
         INSERT INTO skills(user_id, skill_name, level, updated_at)
         VALUES ('creator', 'existing-skill', 2, 'before');
     """)

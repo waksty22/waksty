@@ -19,7 +19,11 @@ from storage.schema_audit import (
     compare_database_inventories,
     inspect_database,
 )
-from storage.schema_migration import build_migration_plan, _row_value
+from storage.schema_migration import (
+    apply_schema_statement,
+    build_migration_plan,
+    _row_value,
+)
 
 
 def _columns(connection: Any, table: str) -> list[dict[str, Any]]:
@@ -344,6 +348,15 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         if difference.get("category") != "table_constraints_or_options":
             continue
         table = difference.get("table")
+        planned_rebuilds = {
+            item.get("object")
+            for item in (schema.get("statements") or [])
+            if item.get("kind") == "rebuild_table"
+        }
+        if table in planned_rebuilds:
+            # The schema planner has already checked the exact table-specific
+            # rebuild allowlist, stable PK, FK dependencies, indexes and columns.
+            continue
         # Allow only the exact, reviewed legacy skills.xp omission: removing
         # that one column declaration from the source SQL must reproduce the
         # target SQL byte-for-byte after whitespace normalization.
@@ -542,7 +555,7 @@ def migrate_sqlite_rows_to_turso(
     target.execute("BEGIN")
     try:
         for statement in plan["schema_plan"]["statements"]:
-            target.execute(statement["sql"])
+            apply_schema_statement(target, statement)
 
         for table in plan["table_order"]:
             source_columns = _columns(source, table)

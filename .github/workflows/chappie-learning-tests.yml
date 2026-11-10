@@ -25,6 +25,7 @@ on:
       - feature/chappie-v50-12-knowledge-acquisition
       - feature/chappie-v50-13-knowledge-dashboard
       - feature/chappie-v50-14-contextual-knowledge-recall
+      - feat/v50-59-verified-table-rebuild
   pull_request:
     branches:
       - main

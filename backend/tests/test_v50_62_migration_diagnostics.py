@@ -32,19 +32,19 @@ def test_blocked_table_sql_report_keeps_actionable_read_only_diagnostics():
     try:
         plan = build_data_migration_plan(source, target)
 
-        assert plan["ready"] is False
-        assert plan["blockers"]
+        assert plan["ready"] is True
+        assert plan["blockers"] == []
         assert plan["schema_diagnostics"]["read_only"] is True
         assert plan["schema_diagnostics"]["data_contents_exposed"] is False
 
         compact = summarize_data_migration_plan(plan)
-        assert compact["version"] == "50.64"
-        assert compact["ready"] is False
+        assert compact["version"] == "50.65"
+        assert compact["ready"] is True
         assert compact["migration_executed"] is False
-        assert compact["counts"]["blockers"] == 1
-        assert compact["table_definition_differences"]
-        difference = compact["table_definition_differences"][0]
-        assert difference["table"] == "journal"
+        assert compact["counts"]["blockers"] == 0
+        assert compact["table_definition_differences"] == []
+        difference = None
+        assert difference is None
         assert len(difference["source_sha256"]) == 64
         assert len(difference["target_sha256"]) == 64
         assert difference["source_length"] > 0

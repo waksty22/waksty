@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage.hrana_backup import HranaTransactionConnection
+from storage.hrana_backup import HranaTransactionConnection, describe_hrana_error
 
 
 class _Result:
@@ -110,3 +110,22 @@ def test_pinned_hrana_client_transaction_api_with_local_sqlite(tmp_path):
         raise
     finally:
         client.close()
+
+
+
+def test_hrana_error_summary_exposes_status_without_request_credentials():
+    class HandshakeError(Exception):
+        status = 400
+        message = "Invalid response status"
+
+        def __str__(self):
+            return "wss://user:secret@example.invalid?token=private"
+
+    details = describe_hrana_error(HandshakeError())
+    assert details == {
+        "error_type": "HandshakeError",
+        "status": 400,
+        "reason": "Invalid response status",
+    }
+    assert "secret" not in repr(details)
+    assert "private" not in repr(details)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -89,7 +90,6 @@ class HranaHttpClient:
             raise ValueError("TURSO_AUTH_TOKEN est requis.")
         self._endpoint = _pipeline_url(database_url)
         self._http = http_client or httpx.Client(timeout=timeout)
-        self._owns_http = http_client is None
         self._headers = {
             "Authorization": "Bearer " + auth_token,
             "Content-Type": "application/json",
@@ -120,16 +120,6 @@ class HranaHttpTransaction:
         if not self._baton:
             raise HranaHttpError("Turso Hrana n'a pas conservé le flux de transaction.")
         self._active = True
-
-    def _send(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if self._closed:
-            raise HranaHttpError("Transaction Hrana déjà fermée.")
-        results = self._client._pipeline(self._baton, requests)
-        # The baton is opaque: only pass back the latest value from the server.
-        # A close request intentionally returns null and ends the stream.
-        # _pipeline does not own transaction state, so read it from the response
-        # is handled by the dedicated method below.
-        return results
 
     def _pipeline_with_baton(
         self, requests: list[dict[str, Any]]

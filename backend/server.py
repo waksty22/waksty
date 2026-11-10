@@ -159,7 +159,7 @@ from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.69"
+CHAPPIE_VERSION = "50.70"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -5522,17 +5522,16 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
     target = None
     try:
         import zipfile
-        import libsql_client
         from storage.hrana_backup import HranaTransactionConnection, describe_hrana_error
+        from storage.hrana_http import HranaHttpClient
         from storage.logical_backup import export_encrypted_logical_backup
 
         source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
         source.row_factory = sqlite3.Row
-        # The libsql Python DB-API driver uses stateless remote HTTP requests
-        # and has no transaction() method. Hrana keeps a WebSocket transaction
-        # open across every read in this multi-table export.
-        target = libsql_client.create_client_sync(
-            url=remote_url,
+        # Hrana HTTP v2 keeps one stateful, serialized stream via a baton;
+        # this avoids WebSockets while retaining one read snapshot.
+        target = HranaHttpClient(
+            database_url=remote_url,
             auth_token=remote_token,
         )
 

@@ -83,35 +83,6 @@ def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
         destination.unlink(missing_ok=True)
         destination.with_suffix(destination.suffix + ".sha256").unlink(missing_ok=True)
 
-def test_pinned_hrana_client_transaction_api_with_local_sqlite(tmp_path):
-    import libsql_client
-    from storage.logical_backup import export_logical_backup, verify_logical_backup
-
-    database_path = tmp_path / "hrana-client.db"
-    backup_path = tmp_path / "hrana-client-backup.json"
-    client = libsql_client.create_client_sync(url="file:" + str(database_path))
-    transaction = None
-    try:
-        client.execute("CREATE TABLE memories (id INTEGER PRIMARY KEY, note TEXT)")
-        client.execute("INSERT INTO memories(note) VALUES (?)", ("SDK integration fixture",))
-        transaction = client.transaction()
-        report = export_logical_backup(
-            HranaTransactionConnection(transaction),
-            backup_path,
-            manage_snapshot=False,
-        )
-        transaction.commit()
-        assert report["verified"] is True
-        assert report["total_rows"] == 1
-        assert verify_logical_backup(backup_path)["valid"] is True
-    except Exception:
-        if transaction is not None:
-            transaction.rollback()
-        raise
-    finally:
-        client.close()
-
-
 
 def test_hrana_error_summary_exposes_status_without_request_credentials():
     class HandshakeError(Exception):

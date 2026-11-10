@@ -310,7 +310,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
                 + ". Migration bloquée ; vérifier/reconstruire les index FTS séparément."
             )
         return {
-            "version": "50.62",
+            "version": "50.63",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -330,7 +330,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     schema = build_migration_plan(source, target)
     if not schema.get("ready"):
         return {
-            "version": "50.62",
+            "version": "50.63",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -402,7 +402,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         )
     if table_sql_blockers:
         return {
-            "version": "50.62",
+            "version": "50.63",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -451,7 +451,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         ordered = []
 
     return {
-        "version": "50.62",
+        "version": "50.63",
         "read_only": True,
         "data_contents_exposed": False,
         "ready": not blockers,
@@ -546,7 +546,7 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "explanation": item.get("explanation"),
         })
     return {
-        "version": plan.get("version", "50.62"),
+        "version": plan.get("version", "50.63"),
         "read_only": True,
         "data_contents_exposed": False,
         "migration_executed": False,
@@ -592,7 +592,7 @@ def migrate_sqlite_rows_to_turso(
     plan = build_data_migration_plan(source, target)
     if not plan["ready"]:
         return {
-            "version": "50.62",
+            "version": "50.63",
             "applied": False,
             "ready": False,
             "read_only": True,
@@ -602,7 +602,7 @@ def migrate_sqlite_rows_to_turso(
         }
     if not apply:
         return {
-            "version": "50.62",
+            "version": "50.63",
             "applied": False,
             "ready": True,
             "read_only": True,
@@ -766,7 +766,7 @@ def migrate_sqlite_rows_to_turso(
             ) VALUES (?, 'completed', ?, ?, ?, ?, ?)
             """,
             (
-                "sqlite-to-turso-v50.55",
+                "sqlite-to-turso-v50.63",
                 len(table_results),
                 sum(item["source_rows"] for item in table_results),
                 inserted_total,
@@ -780,7 +780,7 @@ def migrate_sqlite_rows_to_turso(
         raise
 
     return {
-        "version": "50.62",
+        "version": "50.63",
         "applied": True,
         "ready": True,
         "read_only": False,

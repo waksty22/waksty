@@ -6,6 +6,7 @@ normalizes Hrana ResultSet objects to the cursor subset used by logical_backup.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -30,7 +31,11 @@ class HranaTransactionConnection:
         self._transaction = transaction
 
     def execute(self, sql: str) -> HranaBackupCursor:
-        if not isinstance(sql, str) or not sql.lstrip().upper().startswith("SELECT"):
-            raise PermissionError("La sauvegarde Turso n'autorise que les requêtes SELECT.")
+        if (
+            not isinstance(sql, str)
+            or not re.match(r"(?i)^SELECT\\b", sql.lstrip())
+            or ";" in sql
+        ):
+            raise PermissionError("La sauvegarde Turso n'autorise que des requêtes SELECT uniques.")
         result = self._transaction.execute(sql)
         return HranaBackupCursor(result)

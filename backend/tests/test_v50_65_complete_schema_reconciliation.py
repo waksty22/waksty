@@ -122,3 +122,47 @@ def test_unsafe_column_type_drift_remains_blocked_without_writes():
     finally:
         source.close()
         target.close()
+
+
+
+def test_all_missing_learning_tables_are_planned_and_created_empty():
+    source, target = _open_pair()
+    missing = (
+        "affective_history", "autobiographical_events", "autobiographical_links",
+        "causal_experiments", "causal_hypotheses", "causal_observations",
+        "cognitive_milestones", "cognitive_traces", "competency_tests",
+        "decision_journal", "imitation_attempts", "imitation_examples",
+        "memories_v19", "metacognition_logs", "object_experiences",
+        "object_properties", "perception_fusion_candidates", "personal_vocabulary",
+        "place_memories", "preference_evidence", "sensory_observations",
+        "spatial_sessions", "spatial_visits", "thoughts", "user_intentions",
+        "word_visual_associations", "world_entities", "world_relations",
+    )
+    try:
+        for table in missing:
+            source.execute(
+                f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, marker TEXT NOT NULL)"
+            )
+        source.commit()
+        target.commit()
+
+        plan = build_data_migration_plan(source, target)
+        assert plan["ready"] is True, plan["blockers"]
+        assert set(plan["schema_plan"]["missing_tables"]) == set(missing)
+        create_tables = {
+            item["object"] for item in plan["schema_plan"]["statements"]
+            if item["kind"] == "create_table"
+        }
+        assert create_tables == set(missing)
+
+        result = migrate_sqlite_rows_to_turso(source, target, apply=True)
+        assert result["applied"] is True
+        for table in missing:
+            assert target.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()[0] == 1
+            assert target.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+    finally:
+        source.close()
+        target.close()

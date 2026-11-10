@@ -29,10 +29,10 @@ class HranaHttpError(RuntimeError):
 
 def _pipeline_url(database_url: str) -> str:
     parsed = urlsplit(database_url.strip())
-    scheme = {"libsql": "https", "wss": "https", "ws": "http"}.get(
+    scheme = {"libsql": "https", "wss": "https"}.get(
         parsed.scheme.lower(), parsed.scheme.lower()
     )
-    if scheme not in {"https", "http"} or not parsed.hostname:
+    if scheme != "https" or not parsed.hostname:
         raise ValueError("TURSO_DATABASE_URL doit être une URL libsql:// ou HTTPS.")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("TURSO_DATABASE_URL contient des composants non autorisés.")

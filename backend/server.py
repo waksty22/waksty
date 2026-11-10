@@ -159,7 +159,8 @@ from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-APP_NAME = "Chappie V34.0 — consolidation et fiabilisation cognitive"
+CHAPPIE_VERSION = "50.60"
+APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
     os.getenv("CHAPPIE_DATA_DIR", "./chappie_data")
@@ -217,6 +218,11 @@ MAX_CAMERA_IMAGE_BYTES = env_int(
 CHAPPIE_TIMEZONE = os.getenv(
     "CHAPPIE_TIMEZONE", "Europe/Paris"
 ).strip() or "Europe/Paris"
+CORS_ALLOWED_ORIGINS = tuple(
+    origin.strip().rstrip("/")
+    for origin in os.getenv("CHAPPIE_CORS_ORIGINS", "").split(",")
+    if origin.strip()
+)
 
 MAX_MESSAGE_CHARS = env_int(
     "MAX_MESSAGE_CHARS", 8000, 100, 20_000
@@ -705,12 +711,14 @@ async def require_auth(
 async def lifespan(app: FastAPI):
     startup_started = time.monotonic()
     log.info(
-        "V36.2 runtime phase=before_init_db %s",
+        "%s runtime phase=before_init_db %s",
+        CHAPPIE_VERSION,
         collect_runtime_snapshot(),
     )
     init_db()
     log.info(
-        "V36.2 runtime phase=after_init_db elapsed_seconds=%.2f %s",
+        "%s runtime phase=after_init_db elapsed_seconds=%.2f %s",
+        CHAPPIE_VERSION,
         time.monotonic() - startup_started,
         collect_runtime_snapshot(),
     )
@@ -740,9 +748,75 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 pass
 
+class RequestBodyLimitMiddleware:
+    """Bound HTTP request bodies even when sent in chunks without Content-Length."""
+
+    def __init__(self, app, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max(1, int(max_bytes))
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        raw_length = dict(scope.get("headers") or ()).get(b"content-length")
+        if raw_length is not None:
+            try:
+                declared_length = int(raw_length)
+                if declared_length < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                await JSONResponse(
+                    {"detail": "En-tête Content-Length invalide."},
+                    status_code=400,
+                )(scope, receive, send)
+                return
+            if declared_length > self.max_bytes:
+                await JSONResponse(
+                    {"detail": "Corps de requête trop volumineux."},
+                    status_code=413,
+                )(scope, receive, send)
+                return
+
+        chunks: list[dict[str, Any]] = []
+        total_bytes = 0
+        while True:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                return
+            if message.get("type") != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            total_bytes += len(chunk)
+            if total_bytes > self.max_bytes:
+                await JSONResponse(
+                    {"detail": "Corps de requête trop volumineux."},
+                    status_code=413,
+                )(scope, receive, send)
+                return
+            chunks.append({
+                "type": "http.request",
+                "body": chunk,
+                "more_body": bool(message.get("more_body", False)),
+            })
+            if not message.get("more_body", False):
+                break
+
+        if not chunks:
+            chunks.append({"type": "http.request", "body": b"", "more_body": False})
+
+        async def replay_receive():
+            if chunks:
+                return chunks.pop(0)
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+
 app = FastAPI(
     title=APP_NAME,
-    version="34.0.0",
+    version=CHAPPIE_VERSION,
     description=(
         "Compagnon conversationnel Chappie : "
         "architecture cognitive unifiée."
@@ -750,12 +824,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_BODY_BYTES)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(CORS_ALLOWED_ORIGINS),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Montage correct du dossier static situé à la racine du projet
@@ -765,7 +841,7 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent /
 async def system_diagnostics(_: str = Depends(require_auth)):
     """Authenticated, read-only runtime metrics; never returns environment secrets."""
     return {
-        "diagnostics_version": "36.2",
+        "diagnostics_version": CHAPPIE_VERSION,
         "read_only": True,
         **collect_runtime_snapshot(),
     }
@@ -824,21 +900,6 @@ async def body_size_guard(request: Request, call_next):
                 },
                 status_code=503,
             )
-
-    length = request.headers.get("content-length")
-
-    if length:  
-        try:  
-            if int(length) > MAX_BODY_BYTES:  
-                return JSONResponse(  
-                    {"detail": "Corps de requête trop volumineux."},  
-                    status_code=413,  
-                )  
-        except ValueError:  
-            return JSONResponse(  
-                {"detail": "En-tête Content-Length invalide."},  
-                status_code=400,  
-            )  
 
     response = await call_next(request)  
 
@@ -909,6 +970,12 @@ class TursoMigrationCancelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirmation: Literal["ANNULER LA BASCULE TURSO"]
+
+
+class ResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: Literal["REINITIALISER CHAPPIE"]
 
 
 class SpeakRequest(BaseModel):
@@ -1908,6 +1975,21 @@ def save_conversation_turn(
         log.exception(  
             "Échec de consolidation après enregistrement d'un tour"  
         )
+
+def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> bool:
+    """Persist partial confirmed Live transcripts when a session ends unexpectedly."""
+    user_text = str(turn_state.get("user") or "").strip()
+    assistant_text = str(turn_state.get("assistant") or "").strip()
+    if not user_text and not assistant_text:
+        return False
+    save_conversation_turn(
+        user_id, user_text, assistant_text, source="gemini_live_interrupted"
+    )
+    turn_state["user"] = ""
+    turn_state["assistant"] = ""
+    turn_state["audio"] = []
+    return True
+
 
 def get_identity_prompt(user_id: str, query: str = "") -> str:
     em = get_emotions(user_id)
@@ -3247,7 +3329,7 @@ async def health():
     return {
         "status": "ok",
         "application": "Chappie",
-        "version": "34.0.0",
+        "version": CHAPPIE_VERSION,
         "gemini_configured": bool(GEMINI_API_KEY),
     }
 
@@ -3279,7 +3361,7 @@ async def api_status(auth=Depends(require_auth)):
         "emotions": emotions,  
         "skills": skills,  
         "cognition": profile,  
-        "version": "34.0.0",  
+        "version": CHAPPIE_VERSION,  
     }
 
 @app.post("/api/chat")
@@ -3682,7 +3764,7 @@ async def api_world_relations(auth=Depends(require_auth)):
 async def api_world_map(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     with db_connection() as db:
-        return {"version": "34.0.0", "map": get_map_state(db, user_id)}
+        return {"version": CHAPPIE_VERSION, "map": get_map_state(db, user_id)}
 
 
 @app.post("/api/world/location/session")
@@ -3787,7 +3869,7 @@ async def api_diagnostics(auth=Depends(require_auth)):
         tables = {name: name in existing for name in required_tables}
         snapshot = get_shared_brain_snapshot(db, user_id, limit=10)
     return {
-        "version": "34.0.0",
+        "version": CHAPPIE_VERSION,
         "database": {"path_configured": bool(DB_PATH), "required_tables": tables,
                      "all_required_tables_present": all(tables.values())},
         "modules": {
@@ -4454,26 +4536,32 @@ def reset_turso_life(user_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/reset")
-async def api_reset(auth=Depends(require_auth)):
+async def api_reset(payload: ResetRequest, auth=Depends(require_auth)):
+    """Reset only the selected active backend after server-side confirmation."""
     user_id = _authenticated_user(auth)
-
+    if STORAGE_MIGRATION_PENDING_CUTOVER:
+        raise HTTPException(
+            status_code=409,
+            detail="Réinitialisation interdite pendant une bascule de stockage.",
+        )
     try:
-        # Turso is cleared first. If its schema or connection is unexpected,
-        # the local SQLite reset is not started.
-        turso_result = reset_turso_life(user_id)
-        local_result = reset_chappie_life(user_id)
-
+        active_backend = StorageSettings.from_env().backend
+        result = reset_chappie_life(user_id)
         return {
             "success": True,
-            "message": "Chappie est né à nouveau : mémoire distante et locale réinitialisées.",
-            "result": local_result,
-            "turso": turso_result,
+            "database_reset": active_backend,
+            "inactive_database_untouched": True,
+            "message": (
+                "Réinitialisation terminée sur le stockage actif uniquement. "
+                "L'autre base n'a pas été modifiée."
+            ),
+            "result": result,
         }
     except Exception:
-        log.exception("[RESET] Échec de la réinitialisation complète.")
+        log.exception("[RESET] Échec de la réinitialisation du stockage actif.")
         raise HTTPException(
             status_code=500,
-            detail="La réinitialisation complète a échoué. Consulte les logs Render sans partager de secrets."
+            detail="La réinitialisation a échoué. Consulte les logs Render sans partager de secrets.",
         )
 
 @app.get("/api/config")
@@ -4481,7 +4569,7 @@ async def api_config(auth=Depends(require_auth)):
     _authenticated_user(auth)
 
     return {  
-        "version": "34.0.0",
+        "version": CHAPPIE_VERSION,
         "live_model": GEMINI_LIVE_MODEL,
         "supports_native_live_audio": True,
         "supports_causal_learning": True,
@@ -4514,7 +4602,7 @@ async def api_shared_brain_snapshot(auth=Depends(require_auth)):
     with db_connection() as db:
         snapshot = get_shared_brain_snapshot(db, user_id, limit=20)
     return {
-        "version": "34.0.0",
+        "version": CHAPPIE_VERSION,
         "brain": snapshot,
         "context": format_shared_brain_context(snapshot),
     }
@@ -4806,6 +4894,7 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
+    live_turn_state = {"user": "", "assistant": "", "audio": []}
 
     try:
         log.info("[GEMINI LIVE] Ouverture session modèle=%s", GEMINI_LIVE_MODEL)
@@ -4895,8 +4984,6 @@ async def websocket_endpoint(
                 "message": "Gemini Live prêt : microphone et audio de réponse activés.",
                 "model": GEMINI_LIVE_MODEL,
             })
-
-            live_turn_state = {"user": "", "assistant": "", "audio": []}
 
             async def client_to_gemini():
                 while True:
@@ -5147,6 +5234,19 @@ async def websocket_endpoint(
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         except Exception:
             pass
+    finally:
+        try:
+            partial_user_chars = len(live_turn_state.get("user", ""))
+            partial_assistant_chars = len(live_turn_state.get("assistant", ""))
+            if persist_interrupted_live_turn(user_id, live_turn_state):
+                log.warning(
+                    "[GEMINI LIVE] Tour partiel conservé après interruption "
+                    "(user_chars=%s, assistant_chars=%s).",
+                    partial_user_chars,
+                    partial_assistant_chars,
+                )
+        except Exception:
+            log.exception("[GEMINI LIVE] Impossible de conserver le tour interrompu.")
 
 
 @app.get("/api/turso/compatibility")
@@ -5312,7 +5412,7 @@ async def api_storage_path_diagnostics(auth=Depends(require_auth)):
         # misleading empty database if the configured file were missing.
         connection = db_connection()
         return {
-            "diagnostics_version": "50.20",
+            "diagnostics_version": CHAPPIE_VERSION,
             "read_only": True,
             "data_contents_exposed": False,
             "database": inspect_sqlite_path_diagnostics(

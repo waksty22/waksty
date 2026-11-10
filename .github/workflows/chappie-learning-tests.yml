@@ -1,75 +1,55 @@
-name: Chappie learning tests
+name: Chappie quality checks
 
 on:
   push:
     branches:
       - main
-      - v50.49-authenticated-readonly-inventory
-      - v23-causalite-gemini-live
-      - feat/chappie-v29-v33-unified-evolution
-      - feature/v36-3-turso-compatibility
-      - feature/v36-4-libsql-integration-clean
-      - feature/v36-5-episodic-memory-libsql-clean
-      - feature/chappie-v50-integrated-build
-      - feature/chappie-v50-1-safe-turso-schema
-      - feature/chappie-v50-2-context-integrity
-      - feature/chappie-v50-3-relevant-memory-retrieval
-      - feature/chappie-v50-4-autobiographical-recall
-      - feature/chappie-v50-5-experience-connections
-      - feature/chappie-v50-6-learning-from-errors
-      - feature/chappie-v50-7-correction-guided-reasoning
-      - feature/chappie-v50-8-supervised-learning-agenda
-      - feature/chappie-v50-9-learning-center
-      - feature/chappie-v50-10-learning-goals
-      - feature/chappie-v50-11-goal-skill-linking
-      - feature/chappie-v50-12-knowledge-acquisition
-      - feature/chappie-v50-13-knowledge-dashboard
-      - feature/chappie-v50-14-contextual-knowledge-recall
-      - feat/v50-59-verified-table-rebuild
   pull_request:
     branches:
       - main
 
 jobs:
-  learning-tests:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
+
       - name: Install test dependencies
-        run: python -m pip install --upgrade pytest libsql cryptography fastapi uvicorn python-dotenv pydantic httpx websockets google-genai edge-tts
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade pytest libsql cryptography fastapi uvicorn python-dotenv pydantic httpx "websockets>=12,<16" google-genai edge-tts
+
       - name: Check Python syntax
         run: python -m compileall -q backend
+
       - name: Check browser JavaScript syntax
         run: |
-          cp backend/static/js/app.js /tmp/chappie-app.mjs
-          cp backend/static/js/audio.js /tmp/chappie-audio.mjs
-          cp backend/static/js/websocket.js /tmp/chappie-websocket.mjs
-          node --check /tmp/chappie-app.mjs
-          node --check /tmp/chappie-audio.mjs
-          node --check /tmp/chappie-websocket.mjs
-          cp backend/static/js/api.js /tmp/chappie-api.mjs
-          node --check /tmp/chappie-api.mjs
+          for file in app audio websocket api; do
+            cp "backend/static/js/$file.js" "/tmp/chappie-$file.mjs"
+            node --check "/tmp/chappie-$file.mjs"
+          done
           python - <<'PY'
           from pathlib import Path
           import re
+
           html = Path("backend/static/index.html").read_text(encoding="utf-8")
           scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
           Path("/tmp/chappie-inline.mjs").write_text("\n".join(scripts), encoding="utf-8")
-          PY
-          node --check /tmp/chappie-inline.mjs
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          html = Path("backend/static/index.html").read_text(encoding="utf-8")
+
           modules = re.findall(r'<script type="module">(.*?)</script>', html, flags=re.S)
           for index, script in enumerate(modules):
               Path(f"/tmp/chappie-module-{index}.mjs").write_text(script, encoding="utf-8")
           PY
-          for module in /tmp/chappie-module-*.mjs; do node --check "$module"; done
+          node --check /tmp/chappie-inline.mjs
+          for module in /tmp/chappie-module-*.mjs; do
+            node --check "$module"
+          done
+
       - name: Test complete backend test suite
         run: python -m pytest backend/tests -q

@@ -30,4 +30,5 @@ edge-tts
 librosa
 soundfile
 libsql
+libsql-client==0.3.1
 resemblyzer

@@ -200,4 +200,4 @@ def test_http_v2_decodes_null_integer_float_text_and_blob():
         ]],
     })
     assert result.columns == ("n", "i", "f", "t", "b")
-    assert result.rows == [(None, 9223372036854775807, 1.25, "hello", b"\\x00\\x01\\x02")]
+    assert result.rows == [(None, 9223372036854775807, 1.25, "hello", bytes([0, 1, 2]))]

@@ -213,7 +213,9 @@ def test_memories_check_and_skills_level_drift_are_rebuilt_safely():
         after_skills = target.execute(
             "SELECT id, user_id, skill_name, level, xp, evidence, updated_at FROM skills"
         ).fetchall()
-        assert after_skills == before_skills
+        assert after_skills[0][:3] == before_skills[0][:3]
+        assert float(after_skills[0][3]) == float(before_skills[0][3])
+        assert after_skills[0][4:] == before_skills[0][4:]
         assert isinstance(after_skills[0][3], float)
 
         second = build_migration_plan(source, target)

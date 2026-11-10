@@ -260,7 +260,9 @@ def _digest_table_rows(connection: Any, table_name: str, columns: list[str], pri
             for value in tuple(row):
                 if isinstance(value, (bytes, bytearray, memoryview)):
                     values.append({"blob": bytes(value).hex()})
-                elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                elif isinstance(value, int) and not isinstance(value, bool):
+                    values.append({"number": str(value)})
+                elif isinstance(value, float):
                     values.append({"number": format(value, ".17g")})
                 elif value is None or isinstance(value, (str, bool)):
                     values.append(value)

@@ -154,12 +154,13 @@ from storage.turso_compat import inspect_turso_driver
 from storage.connection_factory import StorageSettings, open_storage_connection
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
+from storage.memory_health import inspect_memory_persistence
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.70"
+CHAPPIE_VERSION = "50.71"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -3882,6 +3883,16 @@ async def api_diagnostics(auth=Depends(require_auth)):
         "provider": {"gemini_api_key_configured": bool(GEMINI_API_KEY)},
         "note": "Diagnostic de configuration et de schéma; ne remplace pas un test audio/vidéo réel.",
     }
+
+
+@app.get("/api/memory/persistence")
+async def api_memory_persistence(auth=Depends(require_auth)):
+    """Read-only proof of memory schema and row counts in the active backend."""
+    user_id = _authenticated_user(auth)
+    settings = StorageSettings.from_env()
+    with db_connection() as conn:
+        report = inspect_memory_persistence(conn, user_id, settings.backend)
+    return {"ok": True, "version": CHAPPIE_VERSION, "memory_persistence": report}
 
 
 @app.post("/api/memory/consolidate")

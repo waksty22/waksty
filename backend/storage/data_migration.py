@@ -350,7 +350,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
                 + ". Migration bloquée ; vérifier/reconstruire les index FTS séparément."
             )
         return {
-            "version": "50.64",
+            "version": "50.65",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -406,8 +406,16 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
             if item.get("kind") == "rebuild_table"
         }
         if table in planned_rebuilds:
-            # The schema planner has already checked the exact table-specific
-            # rebuild allowlist, stable PK, FK dependencies, indexes and columns.
+            # The schema planner has already checked the table allowlist,
+            # stable PK, FK dependencies, indexes and column compatibility.
+            continue
+        semantic = table_definition_diagnostics.get(table) or {}
+        source_semantic = semantic.get("source") or {}
+        target_semantic = semantic.get("target") or {}
+        if source_semantic and source_semantic == target_semantic:
+            # sqlite_master SQL may differ in harmless formatting or quoting.
+            # Identical semantic fingerprints prove there is no table rebuild
+            # to perform; index differences are handled independently.
             continue
         # Allow only the exact, reviewed legacy skills.xp omission: removing
         # that one column declaration from the source SQL must reproduce the

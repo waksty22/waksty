@@ -159,7 +159,7 @@ from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.66"
+CHAPPIE_VERSION = "50.67"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -5536,9 +5536,24 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
             sqlite_report = export_encrypted_logical_backup(
                 source, sqlite_path, encryption_key
             )
-            turso_report = export_encrypted_logical_backup(
-                target, turso_path, encryption_key
-            )
+            # Hrana executes individual statements as independent requests;
+            # SAVEPOINT/RELEASE is therefore not a reliable snapshot boundary.
+            # Keep every Turso read inside one explicit libSQL transaction.
+            turso_transaction = target.transaction()
+            try:
+                turso_report = export_encrypted_logical_backup(
+                    turso_transaction,
+                    turso_path,
+                    encryption_key,
+                    manage_snapshot=False,
+                )
+                turso_transaction.commit()
+            except Exception:
+                try:
+                    turso_transaction.rollback()
+                except Exception:
+                    log.exception("[MIGRATION] Could not roll back Turso backup read transaction.")
+                raise
             archive_path = root / "chappie-pre-migration-backups.zip"
             with zipfile.ZipFile(
                 archive_path, mode="w", compression=zipfile.ZIP_STORED

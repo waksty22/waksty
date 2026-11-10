@@ -34,9 +34,9 @@ def test_hrana_adapter_normalizes_result_sets_for_logical_backup():
     transaction = _Transaction()
     connection = HranaTransactionConnection(transaction)
 
-    cursor = connection.execute("SELECT 1 AS probe")
-    assert cursor.description[0][0] == "probe"
-    assert cursor.fetchall() == []
+    cursor = connection.execute("SELECT * FROM sqlite_master")
+    assert cursor.description[0][0] == "type"
+    assert cursor.fetchall()[0][1] == "memories"
 
     result = connection.execute('SELECT * FROM "memories"')
     assert result.description[0][0] == "id"
@@ -67,7 +67,17 @@ def test_hrana_adapter_uses_the_same_caller_owned_transaction():
     transaction = _Transaction()
     connection = HranaTransactionConnection(transaction)
 
-    connection.execute("SELECT * FROM sqlite_master")
-    connection.execute('SELECT * FROM "memories"')
+    from storage.logical_backup import export_logical_backup, verify_logical_backup
 
-    assert len(transaction.statements) == 2
+    destination = Path(__file__).parent / ".hrana-backup-test.json"
+    try:
+        report = export_logical_backup(
+            connection, destination, manage_snapshot=False
+        )
+        assert report["verified"] is True
+        assert report["total_rows"] == 1
+        assert verify_logical_backup(destination)["valid"] is True
+        assert len(transaction.statements) == 2
+    finally:
+        destination.unlink(missing_ok=True)
+        destination.with_suffix(destination.suffix + ".sha256").unlink(missing_ok=True)

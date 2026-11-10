@@ -71,7 +71,7 @@ GitHub Actions exécute la compilation Python, la vérification syntaxique JavaS
 
 ## Déploiement
 
-La révision de durcissement V50.60 est livrée par une pull request et doit passer la CI avant toute fusion. Les numéros affichés par l'API et le tableau de bord sont centralisés.
+La révision de durcissement V50.60 est livrée par une pull request et doit passer la CI avant toute fusion. La CI utilise des actions compatibles Node 24. Les numéros affichés par l'API et le tableau de bord sont centralisés.
 
 Le service Render doit utiliser Python 3.11 et installer `backend/requirements.txt`. Les variables secrètes se configurent dans Render, pas dans les fichiers versionnés.
 

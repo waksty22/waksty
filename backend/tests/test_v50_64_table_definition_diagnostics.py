@@ -28,8 +28,15 @@ def test_table_definition_diagnostics_compare_semantic_components_without_leakin
             created_at TEXT NOT NULL
         )
     """)
+    target.execute("""
+        CREATE TABLE autobiographical_events (
+            id INTEGER PRIMARY KEY,
+            source_conversation_id INTEGER REFERENCES conversations(id)
+        )
+    """)
     source.execute("INSERT INTO conversations VALUES (1, 'u', 'user', 'PRIVATE_SOURCE', 'now')")
     target.execute("INSERT INTO conversations VALUES (2, 'u', 'system', 'PRIVATE_TARGET', 'now')")
+    target.execute("INSERT INTO autobiographical_events VALUES (1, 2)")
     try:
         plan = build_data_migration_plan(source, target)
         compact = summarize_data_migration_plan(plan)

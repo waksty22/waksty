@@ -753,7 +753,7 @@ class RequestBodyLimitMiddleware:
 
     def __init__(self, app, max_bytes: int) -> None:
         self.app = app
-        self.max_bytes = max(1024, int(max_bytes))
+        self.max_bytes = max(1, int(max_bytes))
 
     async def __call__(self, scope, receive, send) -> None:
         if scope.get("type") != "http":

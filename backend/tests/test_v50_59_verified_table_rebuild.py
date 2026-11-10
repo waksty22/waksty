@@ -250,3 +250,35 @@ def test_rebuild_refuses_tables_without_stable_primary_key():
     finally:
         source.close()
         target.close()
+
+
+
+def test_sqlite_to_turso_flow_uses_verified_rebuild_before_copying_source_rows():
+    from storage.data_migration import migrate_sqlite_rows_to_turso
+
+    source, target = _conversation_pair()
+    try:
+        source.execute(
+            "INSERT INTO conversations(id, user_id, role, content, created_at) "
+            "VALUES (1, 'creator', 'user', 'from-source', '2026-01-03')"
+        )
+        target.execute(
+            "INSERT INTO conversations(id, user_id, role, content, created_at) "
+            "VALUES (5, 'creator', 'assistant', 'target-kept', '2026-01-04')"
+        )
+        source.commit()
+        target.commit()
+
+        preview = migrate_sqlite_rows_to_turso(source, target)
+        assert preview["applied"] is False
+        assert preview["ready"] is True
+
+        result = migrate_sqlite_rows_to_turso(source, target, apply=True)
+        assert result["applied"] is True
+        rows = target.execute(
+            "SELECT id, content FROM conversations ORDER BY id"
+        ).fetchall()
+        assert rows == [(1, "from-source"), (5, "target-kept")]
+    finally:
+        source.close()
+        target.close()

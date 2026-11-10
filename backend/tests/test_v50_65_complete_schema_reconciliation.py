@@ -1,4 +1,8 @@
 import sqlite3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from storage.data_migration import build_data_migration_plan, migrate_sqlite_rows_to_turso
 

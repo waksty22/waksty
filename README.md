@@ -19,7 +19,7 @@ Le chat et Gemini Live enregistrent les échanges dans le même stockage applica
 
 ## Démarrage local
 
-Python 3.11 est la version de référence (voir `.python-version`).
+Python 3.11 est la version de référence (voir `.python-version` à la racine et `backend/.python-version` pour le répertoire Render).
 
 ```bash
 python -m venv .venv

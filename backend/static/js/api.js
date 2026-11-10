@@ -3,7 +3,7 @@
 
 export async function apiCall(url, options = {}) {
     const tokenInput = document.getElementById("token") || document.getElementById("tokenMobile") || document.getElementById("tokenMemory");
-    const token = tokenInput?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
+    const token = tokenInput?.value?.trim() || "";
 
     const headers = {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
@@ -50,8 +50,6 @@ export async function apiDownload(url, filename = "download.bin") {
         document.getElementById("tokenMobile") ||
         document.getElementById("tokenMemory");
     const token = tokenInput?.value?.trim() ||
-        window.CHAPPIE_TOKEN ||
-        localStorage.getItem("chappie_token") ||
         "";
     const headers = token
         ? { "Authorization": `Bearer ${token}` }

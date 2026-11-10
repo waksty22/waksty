@@ -13,12 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const mobile = document.getElementById("tokenMobile");
         const memory = document.getElementById("tokenMemory");
         
-        const val = desktop?.value?.trim() || mobile?.value?.trim() || memory?.value?.trim() || window.CHAPPIE_TOKEN || localStorage.getItem("chappie_token") || "";
-        
-        if (val) {
-            localStorage.setItem("chappie_token", val);
-        }
-        return val;
+        return desktop?.value?.trim() || mobile?.value?.trim() || memory?.value?.trim() || "";
     }
 
     // Synchronisation globale des champs de token (appelée par oninput dans le HTML)
@@ -30,19 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 el.value = tokenVal;
             }
         });
-        if (tokenVal) {
-            window.CHAPPIE_TOKEN = tokenVal;
-        }
     };
-
-    // Pré-remplir les champs si un token est déjà en mémoire
-    const savedToken = getToken();
-    if (savedToken) {
-        ["token", "tokenMobile", "tokenMemory"].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.value = savedToken;
-        });
-    }
 
     // ==========================================
     // EXPOSITION GLOBALE DES FONCTIONS (HTML ONCLICK)
@@ -428,13 +411,24 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     window.resetLife = async function() {
-        if (!confirm("Attention : cela va effacer toute la mémoire de Chappie. Continuer ?")) return;
+        if (!confirm("Attention : cette action efface les souvenirs du stockage actuellement actif. Continuer ?")) return;
+        const phrase = prompt('Pour confirmer, saisis exactement : REINITIALISER CHAPPIE');
+        if (phrase !== "REINITIALISER CHAPPIE") {
+            alert("Réinitialisation annulée : phrase incorrecte.");
+            return;
+        }
         const token = getToken();
         try {
-            await apiCall('/api/reset', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
-            alert("Chappie a été réinitialisé.");
+            await apiCall('/api/reset', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: { confirmation: phrase }
+            });
+            alert("Le stockage actif de Chappie a été réinitialisé. L'autre base est restée intacte.");
             window.fetchPsychology();
-        } catch (e) { alert("Erreur lors de la réinitialisation."); }
+        } catch (e) {
+            alert("Erreur lors de la réinitialisation : " + (e?.message || "erreur inconnue"));
+        }
     };
 
     // ==========================================

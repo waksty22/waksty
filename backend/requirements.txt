@@ -19,6 +19,7 @@ mypy>=1.8.0
 python-jose>=3.3.0
 requests>=2.31.0
 httpx>=0.25.0
+websockets>=12,<16
 pandas>=2.2.0
 numpy>=1.26.0
 python-multipart>=0.0.9

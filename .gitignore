@@ -18,6 +18,11 @@ node_modules/
 
 # Testing
 /coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Next.js
 /.next/
@@ -67,6 +72,14 @@ chainlit.md
 .vercel
 
 # Data and databases
+**/chappie_data/
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-*
 agenthub/agents/youtube/db
 
 # Archive files and large assets

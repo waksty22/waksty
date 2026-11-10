@@ -560,6 +560,12 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         category = item.get("category")
         table = item.get("table")
         if category == "table_constraints_or_options":
+            semantic = table_definition_diagnostics.get(table) or {}
+            source_semantic = semantic.get("source") or {}
+            target_semantic = semantic.get("target") or {}
+            if source_semantic and source_semantic == target_semantic:
+                # Ignore formatting/comment-only SQL drift in the compact report.
+                continue
             source_sql = str(item.get("local") or "")
             target_sql = str(item.get("remote") or "")
             definition_differences.append({

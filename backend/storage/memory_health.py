@@ -40,7 +40,7 @@ def inspect_memory_persistence(connection: Any, user_id: str, backend: str) -> d
         ).fetchone()
         tables[table] = {
             "exists": True,
-            "rows": int(count[0] if not hasattr(count, "keys") else next(iter(count.values()))),
+            "rows": int(count[0]),
         }
 
     missing = [name for name, info in tables.items() if not info["exists"]]

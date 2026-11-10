@@ -150,14 +150,17 @@ def _rebuild_table_spec(
     if not source_pk or source_pk != target_pk:
         blockers.append(f"{table_name}: clé primaire stable identique non démontrée.")
 
-    allowed_column_drift = {"skills": {"level"}}
     for name in sorted(set(source_map) & set(target_map)):
         if source_map[name] == target_map[name]:
             continue
         if table_name == "skills" and name == "level":
             # Only the declared storage type may differ; nullability, default,
             # PK position and hidden/generated status must remain identical.
-            if source_map[name][1:] == target_map[name][1:]:
+            if (
+                source_map[name][1] == target_map[name][1]
+                and source_map[name][3] == target_map[name][3]
+                and source_map[name][4] == target_map[name][4]
+            ):
                 continue
         blockers.append(f"{table_name}.{name}: différence non autorisée pour reconstruction.")
 
@@ -248,20 +251,24 @@ def _digest_table_rows(connection: Any, table_name: str, columns: list[str], pri
     )
     digest = hashlib.sha256()
     count = 0
-    for row in cursor.fetchall():
-        values = []
-        for value in tuple(row):
-            if isinstance(value, (bytes, bytearray, memoryview)):
-                values.append({"blob": bytes(value).hex()})
-            elif isinstance(value, float):
-                values.append({"float": value.hex()})
-            elif value is None or isinstance(value, (str, int, bool)):
-                values.append(value)
-            else:
-                values.append({"type": type(value).__name__, "value": str(value)})
-        digest.update(json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-        digest.update(b"\n")
-        count += 1
+    while True:
+        batch = cursor.fetchmany(200)
+        if not batch:
+            break
+        for row in batch:
+            values = []
+            for value in tuple(row):
+                if isinstance(value, (bytes, bytearray, memoryview)):
+                    values.append({"blob": bytes(value).hex()})
+                elif isinstance(value, float):
+                    values.append({"float": value.hex()})
+                elif value is None or isinstance(value, (str, int, bool)):
+                    values.append(value)
+                else:
+                    values.append({"type": type(value).__name__, "value": str(value)})
+            digest.update(json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            digest.update(b"\\n")
+            count += 1
     return count, digest.hexdigest()
 
 

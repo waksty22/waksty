@@ -62,7 +62,17 @@ def test_blocked_table_sql_report_keeps_actionable_read_only_diagnostics():
             and item["item"] == "idx_journal_mood"
             for item in structural
         )
-        assert all("sql" not in json.dumps(item).lower() for item in structural)
+        serialized_structural = json.dumps(structural).lower()
+        assert "create table" not in serialized_structural
+        assert "private_default" not in serialized_structural
+        assert "private_source_content" not in serialized_structural
+        assert "private_target_content" not in serialized_structural
+        assert "private_mood" not in serialized_structural
+        assert all(
+            not key.endswith("_sql")
+            for item in structural
+            for key in item
+        )
         serialized = json.dumps(compact)
         for private_value in (
             "PRIVATE_SOURCE_CONTENT", "PRIVATE_TARGET_CONTENT",

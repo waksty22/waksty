@@ -1,0 +1,250 @@
+import sqlite3
+
+import pytest
+
+from storage.schema_migration import apply_migration_plan, build_migration_plan
+
+
+def _conversation_pair(*, target_has_invalid_role=False, inbound_fk=False):
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    source.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant')),
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversations_user_id
+            ON conversations(user_id, id DESC);
+        INSERT INTO conversations(user_id, role, content, created_at)
+        VALUES ('creator', 'user', 'hello', '2026-01-01');
+    """)
+    target.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversations_user_id
+            ON conversations(user_id);
+    """)
+    role = "system" if target_has_invalid_role else "assistant"
+    target.execute(
+        "INSERT INTO conversations(user_id, role, content, created_at) "
+        "VALUES ('creator', ?, 'existing', '2026-01-02')",
+        (role,),
+    )
+    if inbound_fk:
+        source.execute("""
+            CREATE TABLE conversation_refs (
+                id INTEGER PRIMARY KEY,
+                conversation_id INTEGER REFERENCES conversations(id)
+            )
+        """)
+        target.execute("""
+            CREATE TABLE conversation_refs (
+                id INTEGER PRIMARY KEY,
+                conversation_id INTEGER REFERENCES conversations(id)
+            )
+        """)
+    source.commit()
+    target.commit()
+    return source, target
+
+
+def test_check_constraint_rebuild_preserves_rows_and_indexes():
+    source, target = _conversation_pair()
+    try:
+        before = target.execute(
+            "SELECT id, user_id, role, content, created_at FROM conversations ORDER BY id"
+        ).fetchall()
+        plan = build_migration_plan(source, target)
+
+        assert plan["ready"], plan["blockers"]
+        rebuilds = [
+            item for item in plan["statements"]
+            if item["kind"] == "rebuild_table" and item["object"] == "conversations"
+        ]
+        assert len(rebuilds) == 1
+        assert apply_migration_plan(target, plan)["applied"] is False
+
+        result = apply_migration_plan(target, plan, apply=True)
+        assert result["applied"] is True
+        assert target.execute(
+            "SELECT id, user_id, role, content, created_at FROM conversations ORDER BY id"
+        ).fetchall() == before
+
+        create_sql = target.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='conversations'"
+        ).fetchone()[0]
+        assert "'system'" not in create_sql
+        index_columns = target.execute(
+            "PRAGMA index_info(idx_conversations_user_id)"
+        ).fetchall()
+        assert [row[2] for row in index_columns] == ["user_id", "id"]
+
+        second = build_migration_plan(source, target)
+        assert second["ready"], second["blockers"]
+        assert second["planned_statement_count"] == 0
+    finally:
+        source.close()
+        target.close()
+
+
+def test_rebuild_aborts_and_rolls_back_if_existing_row_violates_source_check():
+    source, target = _conversation_pair(target_has_invalid_role=True)
+    try:
+        before = target.execute(
+            "SELECT id, user_id, role, content, created_at FROM conversations"
+        ).fetchall()
+        plan = build_migration_plan(source, target)
+        assert plan["ready"], plan["blockers"]
+
+        with pytest.raises(sqlite3.IntegrityError):
+            apply_migration_plan(target, plan, apply=True)
+
+        after = target.execute(
+            "SELECT id, user_id, role, content, created_at FROM conversations"
+        ).fetchall()
+        assert after == before
+        assert target.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='__chappie_rebuild_conversations'"
+        ).fetchone()[0] == 0
+    finally:
+        source.close()
+        target.close()
+
+
+def test_rebuild_is_blocked_when_another_table_references_target():
+    source, target = _conversation_pair(inbound_fk=True)
+    try:
+        plan = build_migration_plan(source, target)
+        assert not plan["ready"]
+        assert any("référencée par une clé étrangère" in item for item in plan["blockers"])
+    finally:
+        source.close()
+        target.close()
+
+
+def test_memories_check_and_skills_level_drift_are_rebuilt_safely():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    source.executescript("""
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            content TEXT NOT NULL,
+            importance INTEGER NOT NULL CHECK(importance BETWEEN 1 AND 5),
+            tags TEXT NOT NULL DEFAULT '[]',
+            access_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, content)
+        );
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            level REAL NOT NULL DEFAULT 0.0,
+            xp REAL NOT NULL DEFAULT 0.0,
+            evidence TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, skill_name)
+        );
+        INSERT INTO memories(user_id, category, content, importance, created_at, updated_at)
+        VALUES ('creator', 'fact', 'kept', 4, 'now', 'now');
+        INSERT INTO skills(user_id, skill_name, level, updated_at)
+        VALUES ('creator', 'language', 1.5, 'now');
+    """)
+    target.executescript("""
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            content TEXT NOT NULL,
+            importance INTEGER NOT NULL CHECK(importance BETWEEN 0 AND 10),
+            tags TEXT NOT NULL DEFAULT '[]',
+            access_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, content)
+        );
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 0,
+            xp REAL NOT NULL DEFAULT 0.0,
+            evidence TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, skill_name)
+        );
+        INSERT INTO memories(user_id, category, content, importance, created_at, updated_at)
+        VALUES ('creator', 'fact', 'existing-memory', 6, 'before', 'before');
+        INSERT INTO skills(user_id, skill_name, level, updated_at)
+        VALUES ('creator', 'existing-skill', 2, 'before');
+    """)
+    source.commit()
+    target.commit()
+    try:
+        before_memories = target.execute(
+            "SELECT id, user_id, category, content, importance, tags, access_count, created_at, updated_at FROM memories"
+        ).fetchall()
+        before_skills = target.execute(
+            "SELECT id, user_id, skill_name, level, xp, evidence, updated_at FROM skills"
+        ).fetchall()
+        plan = build_migration_plan(source, target)
+        assert plan["ready"], plan["blockers"]
+        assert {
+            item["object"] for item in plan["statements"]
+            if item["kind"] == "rebuild_table"
+        } == {"memories", "skills"}
+
+        apply_migration_plan(target, plan, apply=True)
+        assert target.execute(
+            "SELECT id, user_id, category, content, importance, tags, access_count, created_at, updated_at FROM memories"
+        ).fetchall() == before_memories
+        after_skills = target.execute(
+            "SELECT id, user_id, skill_name, level, xp, evidence, updated_at FROM skills"
+        ).fetchall()
+        assert after_skills == before_skills
+        assert isinstance(after_skills[0][3], float)
+
+        second = build_migration_plan(source, target)
+        assert second["ready"], second["blockers"]
+        assert second["planned_statement_count"] == 0
+    finally:
+        source.close()
+        target.close()
+
+
+def test_rebuild_refuses_tables_without_stable_primary_key():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    source.execute("""
+        CREATE TABLE conversations (
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant')),
+            content TEXT NOT NULL
+        )
+    """)
+    target.execute("""
+        CREATE TABLE conversations (
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+            content TEXT NOT NULL
+        )
+    """)
+    try:
+        plan = build_migration_plan(source, target)
+        assert not plan["ready"]
+        assert any("clé primaire stable" in item for item in plan["blockers"])
+    finally:
+        source.close()
+        target.close()

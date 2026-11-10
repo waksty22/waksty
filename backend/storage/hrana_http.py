@@ -196,6 +196,8 @@ class HranaHttpTransaction:
             self._closed = True
         self._unwrap(results[0], "execute")
         if sql in {"COMMIT", "ROLLBACK"}:
+            if self._baton is not None:
+                raise HranaHttpError("Turso Hrana n'a pas fermé le flux après COMMIT/ROLLBACK.")
             if len(results) != 2 or results[1].get("type") != "ok":
                 raise HranaHttpError("Fermeture du flux Hrana impossible.")
             self._active = False
@@ -211,6 +213,10 @@ class HranaHttpTransaction:
         results = self._pipeline_with_baton(
             [{"type": "execute", "stmt": {"sql": sql}}]
         )
+        if not self._baton:
+            self._active = False
+            self._closed = True
+            raise HranaHttpError("Turso Hrana a fermé le flux pendant l'export.")
         response = self._unwrap(results[0], "execute")
         return HranaHttpResult(response.get("result") or {})
 

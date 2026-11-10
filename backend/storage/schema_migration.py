@@ -98,7 +98,26 @@ def _index_is_unique(connection: Any, table_name: str, index_name: str) -> bool 
 
 
 
-REBUILDABLE_TABLES = {"conversations", "memories", "skills"}
+REBUILDABLE_TABLES = {
+    "conversations", "memories", "skills",
+    "conversation_summaries", "dreams", "emotional_state", "goal_steps",
+    "goals", "journal", "maintenance_state", "mood_events",
+    "relationships", "voice_profiles",
+}
+
+# These legacy tables may receive a canonical DEFAULT change during a verified
+# rebuild. Existing values are copied explicitly; only future omitted values
+# use the source default. Type, nullability, PK and hidden status must match.
+DEFAULT_RECONCILE_TABLES = {
+    "conversation_summaries", "dreams", "emotional_state", "goal_steps",
+    "goals", "journal", "maintenance_state", "mood_events",
+    "relationships", "voice_profiles",
+}
+
+# Existing, separately reviewed CHECK-drift rebuilds remain permitted for
+# these two tables; their columns and all other structural constraints must
+# still match exactly.
+CHECK_RECONCILE_TABLES = {"conversations", "memories"}
 
 
 def _rebuild_table_spec(
@@ -180,6 +199,16 @@ def _rebuild_table_spec(
     for name in sorted(set(source_map) & set(target_map)):
         if source_map[name] == target_map[name]:
             continue
+        if table_name in DEFAULT_RECONCILE_TABLES:
+            # A default affects future inserts only. Existing values are
+            # copied explicitly into the canonical table and remain unchanged.
+            if (
+                source_map[name][0] == target_map[name][0]
+                and source_map[name][1] == target_map[name][1]
+                and source_map[name][3] == target_map[name][3]
+                and source_map[name][4] == target_map[name][4]
+            ):
+                continue
         if table_name == "skills" and name == "level":
             # Only the declared storage type may differ; nullability, default,
             # PK position and hidden/generated status must remain identical.
@@ -552,10 +581,29 @@ def build_migration_plan(
             if source_columns[name] != target_columns[name]
         }
         check_drift = source_checks != target_checks
+        safe_default_drift = {
+            name for name in column_drift
+            if table_name in DEFAULT_RECONCILE_TABLES
+            and source_columns[name][0] == target_columns[name][0]
+            and source_columns[name][1] == target_columns[name][1]
+            and source_columns[name][3] == target_columns[name][3]
+        }
+        unsafe_column_drift = column_drift - safe_default_drift
         approved_rebuild = (
             table_name in REBUILDABLE_TABLES
             and (
-                (table_name in {"conversations", "memories"} and check_drift and not column_drift)
+                (
+                    (
+                        table_name in CHECK_RECONCILE_TABLES
+                        and check_drift
+                        and not column_drift
+                    )
+                    or (
+                        table_name in DEFAULT_RECONCILE_TABLES
+                        and (check_drift or bool(safe_default_drift))
+                        and not unsafe_column_drift
+                    )
+                )
                 or (table_name == "skills" and column_drift == {"level"} and not check_drift)
             )
         )

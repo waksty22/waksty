@@ -159,7 +159,7 @@ from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.60"
+CHAPPIE_VERSION = "50.65"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(

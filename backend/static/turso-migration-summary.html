@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>Chappie — Résumé migration Turso V50.57</title>
+  <title>Chappie — Résumé migration Turso V50.65</title>
   <style>
     :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#e8f4ff}
     *{box-sizing:border-box}
@@ -54,6 +54,10 @@
       <ul id="blockers"></ul>
     </div>
     <div class="panel">
+      <h2>Comparaison des définitions SQL (sans SQL brut)</h2>
+      <ul id="definitions"></ul>
+    </div>
+    <div class="panel">
       <h2>Différences détectées</h2>
       <ul id="differences"></ul>
     </div>
@@ -97,6 +101,22 @@
         el("schema").textContent="SQLite : "+(data.schema?.source_table_count??"—")+" tables · Turso : "+(data.schema?.target_table_count??"—")+" tables.";
         list("missing",data.schema?.missing_tables?.map(x=>"Table absente : "+x),data.schema?.missing_table_count?"Liste tronquée ou indisponible":"Aucune table manquante signalée.");
         list("blockers",data.blockers_preview,data.counts?.blockers?"Aucun détail de blocage fourni":"Aucun blocage signalé.");
+        const definitions=(data.table_definition_differences||[]).map(item=>{
+          const source=item.semantic_components?.source||{};
+          const target=item.semantic_components?.target||{};
+          const components=[
+            ["columns_sha256","colonnes / valeurs par défaut"],
+            ["foreign_keys_sha256","clés étrangères"],
+            ["unique_constraints_sha256","contraintes UNIQUE"],
+            ["check_constraints_sha256","contraintes CHECK"],
+            ["advanced_options","options SQL"]
+          ];
+          const changed=components
+            .filter(([key])=>JSON.stringify(source[key])!==JSON.stringify(target[key]))
+            .map(([,label])=>label);
+          return item.table+": "+(changed.length?changed.join(", "):"différence de syntaxe uniquement");
+        });
+        list("definitions",definitions,"Aucune différence de définition de table à détailler.");
         const diffs=(data.differences_preview||[]).map(x=>[x.severity,x.category,x.table,x.item,x.message].filter(Boolean).join(" — "));
         list("differences",diffs,data.counts?.differences?"Détails non disponibles dans ce résumé":"Aucune différence détaillée signalée.");
         el("safety").textContent="Version "+data.version+" · Lecture seule : "+data.read_only+" · Contenu métier exposé : "+data.data_contents_exposed+" · Migration exécutée : "+data.migration_executed+".";

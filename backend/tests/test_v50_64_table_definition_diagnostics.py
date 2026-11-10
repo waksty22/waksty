@@ -40,7 +40,7 @@ def test_table_definition_diagnostics_compare_semantic_components_without_leakin
     try:
         plan = build_data_migration_plan(source, target)
         compact = summarize_data_migration_plan(plan)
-        assert compact["version"] == "50.64"
+        assert compact["version"] == "50.65"
         assert compact["ready"] is False
         definition = next(
             item for item in compact["table_definition_differences"]

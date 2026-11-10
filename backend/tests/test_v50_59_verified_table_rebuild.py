@@ -336,11 +336,11 @@ def test_rebuild_refuses_unreviewed_table_options():
     source.execute("""
         CREATE TABLE conversations (
             id INTEGER PRIMARY KEY,
-            user_id TEXT NOT NULL,
+            user_id TEXT COLLATE NOCASE NOT NULL,
             role TEXT NOT NULL CHECK(role IN ('user','assistant')),
             content TEXT NOT NULL,
             created_at TEXT NOT NULL
-        ) WITHOUT ROWID
+        )
     """)
     target.execute("""
         CREATE TABLE conversations (

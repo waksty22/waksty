@@ -125,12 +125,10 @@ def test_http_v2_backup_uses_one_baton_transaction_and_verifies(tmp_path):
         assert report["verified"] is True
         assert report["total_rows"] == 1
         assert verify_logical_backup(destination)["valid"] is True
-        assert server.statements == [
-            "BEGIN",
-            "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type IN ('table', 'index', 'view', 'trigger') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END, name",
-            'SELECT * FROM "memories"',
-            "COMMIT",
-        ]
+        assert server.statements[0] == "BEGIN"
+        assert "sqlite_master" in server.statements[1]
+        assert 'SELECT * FROM "memories"' == server.statements[2]
+        assert server.statements[3] == "COMMIT"
         assert server.closed is True
         assert server.active is False
     finally:

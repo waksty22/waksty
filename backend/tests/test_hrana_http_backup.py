@@ -10,7 +10,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from storage.hrana_backup import HranaTransactionConnection
 from storage.hrana_http import HranaHttpClient, HranaHttpError
-from storage.logical_backup import export_logical_backup, verify_logical_backup
+from storage.logical_backup import (
+    export_encrypted_logical_backup,
+    verify_encrypted_logical_backup,
+)
 
 
 def _typed(value):
@@ -112,19 +115,23 @@ def test_http_v2_backup_uses_one_baton_transaction_and_verifies(tmp_path):
     server = FakeHranaServer()
     client = _client(server)
     transaction = None
-    destination = tmp_path / "turso-backup.json"
+    destination = tmp_path / "turso-backup.json.enc"
     try:
         assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
         transaction = client.transaction()
-        report = export_logical_backup(
+        report = export_encrypted_logical_backup(
             HranaTransactionConnection(transaction),
             destination,
+            "test-encryption-key-123",
             manage_snapshot=False,
         )
         transaction.commit()
         assert report["verified"] is True
+        assert report["encrypted"] is True
         assert report["total_rows"] == 1
-        assert verify_logical_backup(destination)["valid"] is True
+        assert verify_encrypted_logical_backup(
+            destination, "test-encryption-key-123"
+        )["valid"] is True
         assert server.statements[0] == "BEGIN"
         assert "sqlite_master" in server.statements[1]
         assert 'SELECT * FROM "memories"' == server.statements[2]

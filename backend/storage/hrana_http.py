@@ -102,41 +102,10 @@ class HranaHttpClient:
             raise HranaHttpError("Client Hrana déjà fermé.")
         return HranaHttpTransaction(self)
 
-    def _pipeline(self, baton: str | None, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if self._closed:
-            raise HranaHttpError("Client Hrana déjà fermé.")
-        try:
-            response = self._http.post(
-                self._endpoint,
-                headers=self._headers,
-                json={"baton": baton, "requests": requests},
-            )
-        except httpx.HTTPError as exc:
-            raise HranaHttpError("Échec de transport HTTP vers Turso Hrana.") from exc
-        if response.status_code < 200 or response.status_code >= 300:
-            raise HranaHttpError(
-                "Turso Hrana a refusé la requête HTTP.",
-                status=response.status_code,
-            )
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise HranaHttpError("Réponse JSON Hrana invalide.") from exc
-        if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
-            raise HranaHttpError("Réponse Hrana incomplète.")
-        next_base = payload.get("base_url")
-        if next_base:
-            self._endpoint = _pipeline_url(str(next_base))
-        results = payload["results"]
-        if len(results) != len(requests):
-            raise HranaHttpError("Nombre de résultats Hrana incohérent.")
-        return results
-
     def close(self) -> None:
         if not self._closed:
             self._closed = True
-            if self._owns_http:
-                self._http.close()
+            self._http.close()
 
 
 class HranaHttpTransaction:
@@ -175,9 +144,13 @@ class HranaHttpTransaction:
             )
         except httpx.HTTPError as exc:
             self._baton = None
+            self._active = False
+            self._closed = True
             raise HranaHttpError("Échec de transport HTTP vers Turso Hrana.") from exc
         if response.status_code < 200 or response.status_code >= 300:
             self._baton = None
+            self._active = False
+            self._closed = True
             raise HranaHttpError(
                 "Turso Hrana a refusé la requête HTTP.", status=response.status_code
             )
@@ -185,9 +158,13 @@ class HranaHttpTransaction:
             payload = response.json()
         except ValueError as exc:
             self._baton = None
+            self._active = False
+            self._closed = True
             raise HranaHttpError("Réponse JSON Hrana invalide.") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
             self._baton = None
+            self._active = False
+            self._closed = True
             raise HranaHttpError("Réponse Hrana incomplète.")
         next_base = payload.get("base_url")
         if next_base:
@@ -196,6 +173,8 @@ class HranaHttpTransaction:
         results = payload["results"]
         if len(results) != len(requests):
             self._baton = None
+            self._active = False
+            self._closed = True
             raise HranaHttpError("Nombre de résultats Hrana incohérent.")
         return results
 
@@ -222,6 +201,9 @@ class HranaHttpTransaction:
         if sql in {"COMMIT", "ROLLBACK"}:
             requests.append({"type": "close"})
         results = self._pipeline_with_baton(requests)
+        if sql in {"COMMIT", "ROLLBACK"} and self._baton is None:
+            self._active = False
+            self._closed = True
         self._unwrap(results[0], "execute")
         if sql in {"COMMIT", "ROLLBACK"}:
             if len(results) != 2 or results[1].get("type") != "ok":
@@ -232,7 +214,7 @@ class HranaHttpTransaction:
     def execute(self, sql: str) -> HranaHttpResult:
         if (
             not isinstance(sql, str)
-            or not sql.lstrip().upper().startswith("SELECT")
+            or not __import__("re").match(r"(?i)^SELECT\b", sql.lstrip())
             or ";" in sql
         ):
             raise PermissionError("La sauvegarde Turso n'autorise que des requêtes SELECT uniques.")

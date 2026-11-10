@@ -39,3 +39,16 @@ class HranaTransactionConnection:
             raise PermissionError("La sauvegarde Turso n'autorise que des requêtes SELECT uniques.")
         result = self._transaction.execute(sql)
         return HranaBackupCursor(result)
+
+
+def describe_hrana_error(error: BaseException) -> dict[str, Any]:
+    """Return safe diagnostic fields without exposing URLs, headers, or credentials."""
+    status = getattr(error, "status", None)
+    reason = getattr(error, "message", None)
+    if not isinstance(reason, str):
+        reason = ""
+    return {
+        "error_type": type(error).__name__,
+        "status": status if isinstance(status, (int, str)) else None,
+        "reason": reason[:160],
+    }

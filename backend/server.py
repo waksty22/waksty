@@ -159,7 +159,7 @@ from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.68"
+CHAPPIE_VERSION = "50.69"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -5523,7 +5523,7 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
     try:
         import zipfile
         import libsql_client
-        from storage.hrana_backup import HranaTransactionConnection
+        from storage.hrana_backup import HranaTransactionConnection, describe_hrana_error
         from storage.logical_backup import export_encrypted_logical_backup
 
         source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
@@ -5536,6 +5536,7 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
             auth_token=remote_token,
         )
 
+        backup_stage = "sqlite_export"
         with tempfile.TemporaryDirectory(prefix="chappie-migration-backups-") as work:
             root = Path(work)
             sqlite_path = root / "sqlite-source.json.enc"
@@ -5543,20 +5544,41 @@ async def api_storage_migration_backup(auth=Depends(require_auth)):
             sqlite_report = export_encrypted_logical_backup(
                 source, sqlite_path, encryption_key
             )
+            backup_stage = "turso_transaction_start"
             turso_transaction = target.transaction()
             try:
+                backup_stage = "turso_export"
                 turso_report = export_encrypted_logical_backup(
                     HranaTransactionConnection(turso_transaction),
                     turso_path,
                     encryption_key,
                     manage_snapshot=False,
                 )
+                backup_stage = "turso_commit"
                 turso_transaction.commit()
-            except Exception:
+            except Exception as backup_error:
+                # Log the primary failure before attempting rollback: the rollback
+                # may itself fail and otherwise obscure the useful first traceback.
+                primary_details = describe_hrana_error(backup_error)
+                log.exception(
+                    "[MIGRATION] Turso backup failed before rollback; stage=%s "
+                    "error_type=%s status=%s reason=%s",
+                    backup_stage,
+                    primary_details["error_type"],
+                    primary_details["status"],
+                    primary_details["reason"],
+                )
                 try:
                     turso_transaction.rollback()
-                except Exception:
-                    log.exception("[MIGRATION] Could not roll back Turso backup read transaction.")
+                except Exception as rollback_error:
+                    rollback_details = describe_hrana_error(rollback_error)
+                    log.exception(
+                        "[MIGRATION] Turso backup rollback also failed; "
+                        "error_type=%s status=%s reason=%s",
+                        rollback_details["error_type"],
+                        rollback_details["status"],
+                        rollback_details["reason"],
+                    )
                 raise
             archive_path = root / "chappie-pre-migration-backups.zip"
             with zipfile.ZipFile(

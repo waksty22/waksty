@@ -5412,7 +5412,7 @@ async def api_storage_path_diagnostics(auth=Depends(require_auth)):
         # misleading empty database if the configured file were missing.
         connection = db_connection()
         return {
-            "diagnostics_version": "50.20",
+            "diagnostics_version": CHAPPIE_VERSION,
             "read_only": True,
             "data_contents_exposed": False,
             "database": inspect_sqlite_path_diagnostics(

@@ -19,7 +19,11 @@ from storage.schema_audit import (
     compare_database_inventories,
     inspect_database,
 )
-from storage.schema_migration import build_migration_plan, _row_value
+from storage.schema_migration import (
+    apply_schema_statement,
+    build_migration_plan,
+    _row_value,
+)
 
 
 def _columns(connection: Any, table: str) -> list[dict[str, Any]]:
@@ -542,7 +546,7 @@ def migrate_sqlite_rows_to_turso(
     target.execute("BEGIN")
     try:
         for statement in plan["schema_plan"]["statements"]:
-            target.execute(statement["sql"])
+            apply_schema_statement(target, statement)
 
         for table in plan["table_order"]:
             source_columns = _columns(source, table)

@@ -41,8 +41,19 @@ def _query_rows(connection: Any, sql: str) -> tuple[list[str], list[tuple[Any, .
     return names, [tuple(row) for row in rows]
 
 
-def export_logical_backup(connection: Any, destination: str | Path) -> dict[str, Any]:
-    """Export all user tables to a JSON artifact; never writes to the DB."""
+def export_logical_backup(
+    connection: Any,
+    destination: str | Path,
+    *,
+    manage_snapshot: bool = True,
+) -> dict[str, Any]:
+    """Export all user tables without writing to the DB.
+
+    SQLite connections manage a savepoint by default. For clients such as
+    libSQL/Hrana, callers may supply an already-open transaction and set
+    ``manage_snapshot=False``; the caller then owns commit/rollback and keeps
+    every read on that same transaction snapshot.
+    """
     destination = Path(destination).expanduser().resolve()
     if destination.exists():
         raise FileExistsError(f"Refusing to overwrite existing backup: {destination}")
@@ -57,7 +68,8 @@ def export_logical_backup(connection: Any, destination: str | Path) -> dict[str,
     # A savepoint pins one read snapshot for the entire multi-table export.
     # It nests safely inside a caller transaction and never writes user data.
     snapshot = "chappie_logical_backup_snapshot"
-    connection.execute(f"SAVEPOINT {snapshot}")
+    if manage_snapshot:
+        connection.execute(f"SAVEPOINT {snapshot}")
     try:
         _, object_rows = _query_rows(connection, objects_sql)
         objects = [
@@ -76,10 +88,12 @@ def export_logical_backup(connection: Any, destination: str | Path) -> dict[str,
             tables.append({"name": table_name, "columns": columns, "rows": encoded_rows})
             total_rows += len(encoded_rows)
     except Exception:
-        connection.execute(f"ROLLBACK TO SAVEPOINT {snapshot}")
+        if manage_snapshot:
+            connection.execute(f"ROLLBACK TO SAVEPOINT {snapshot}")
         raise
     finally:
-        connection.execute(f"RELEASE SAVEPOINT {snapshot}")
+        if manage_snapshot:
+            connection.execute(f"RELEASE SAVEPOINT {snapshot}")
 
     payload = {
         "format": "chappie-turso-logical-backup",
@@ -188,6 +202,8 @@ def export_encrypted_logical_backup(
     connection: Any,
     destination: str | Path,
     encryption_key: str,
+    *,
+    manage_snapshot: bool = True,
 ) -> dict[str, Any]:
     """Write only an AES-GCM encrypted logical backup; plaintext stays temporary."""
     from cryptography.hazmat.primitives import hashes
@@ -203,7 +219,9 @@ def export_encrypted_logical_backup(
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="chappie-logical-") as work:
         plain_path = Path(work) / "snapshot.json"
-        result = export_logical_backup(connection, plain_path)
+        result = export_logical_backup(
+            connection, plain_path, manage_snapshot=manage_snapshot
+        )
         plaintext = plain_path.read_bytes()
         salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
         key = PBKDF2HMAC(

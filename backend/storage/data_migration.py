@@ -348,6 +348,15 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         if difference.get("category") != "table_constraints_or_options":
             continue
         table = difference.get("table")
+        planned_rebuilds = {
+            item.get("object")
+            for item in (schema.get("statements") or [])
+            if item.get("kind") == "rebuild_table"
+        }
+        if table in planned_rebuilds:
+            # The schema planner has already checked the exact table-specific
+            # rebuild allowlist, stable PK, FK dependencies, indexes and columns.
+            continue
         # Allow only the exact, reviewed legacy skills.xp omission: removing
         # that one column declaration from the source SQL must reproduce the
         # target SQL byte-for-byte after whitespace normalization.

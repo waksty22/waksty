@@ -51,6 +51,9 @@ def _conversation_pair(*, target_has_invalid_role=False, inbound_fk=False):
                 conversation_id INTEGER REFERENCES conversations(id)
             )
         """)
+        target.execute(
+            "INSERT INTO conversation_refs(id, conversation_id) VALUES (1, 1)"
+        )
     source.commit()
     target.commit()
     return source, target
@@ -355,6 +358,97 @@ def test_rebuild_refuses_unreviewed_table_options():
         plan = build_migration_plan(source, target)
         assert not plan["ready"]
         assert any("option ou clause SQL avancée" in item for item in plan["blockers"])
+    finally:
+        source.close()
+        target.close()
+
+
+
+def test_source_only_inbound_fk_is_created_before_parent_rebuild():
+    source, target = _conversation_pair()
+    source.execute("""
+        CREATE TABLE autobiographical_events (
+            id INTEGER PRIMARY KEY,
+            conversation_id INTEGER REFERENCES conversations(id)
+        )
+    """)
+    source.execute(
+        "INSERT INTO autobiographical_events(id, conversation_id) VALUES (1, 1)"
+    )
+    source.commit()
+    try:
+        plan = build_migration_plan(source, target)
+        assert plan["ready"], plan["blockers"]
+        kinds = [(item["kind"], item["object"]) for item in plan["statements"]]
+        assert kinds.index(("create_table", "autobiographical_events")) < kinds.index(
+            ("rebuild_table", "conversations")
+        )
+
+        applied = apply_migration_plan(target, plan, apply=True)
+        assert applied["applied"] is True
+        assert target.execute(
+            "SELECT COUNT(*) FROM autobiographical_events"
+        ).fetchone()[0] == 0
+        assert target.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        source.close()
+        target.close()
+
+
+def test_skills_rebuild_adds_allowlisted_missing_xp_and_preserves_existing_values():
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    source.executescript("""
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            level REAL NOT NULL DEFAULT 0.0,
+            xp REAL NOT NULL DEFAULT 0.0,
+            evidence TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, skill_name)
+        );
+    """)
+    target.executescript("""
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 0,
+            evidence TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, skill_name)
+        );
+        INSERT INTO skills(user_id, skill_name, level, evidence, updated_at)
+        VALUES ('creator', 'language', 2, 'kept', 'before');
+    """)
+    source.commit()
+    target.commit()
+    try:
+        before = target.execute(
+            "SELECT id, user_id, skill_name, level, evidence, updated_at FROM skills"
+        ).fetchall()
+        plan = build_migration_plan(source, target)
+        assert plan["ready"], plan["blockers"]
+        assert any(
+            item["kind"] == "rebuild_table" and item["object"] == "skills"
+            for item in plan["statements"]
+        )
+
+        result = apply_migration_plan(target, plan, apply=True)
+        assert result["applied"] is True
+        after = target.execute(
+            "SELECT id, user_id, skill_name, level, evidence, updated_at FROM skills"
+        ).fetchall()
+        assert after == before
+        assert target.execute(
+            "SELECT xp FROM skills WHERE user_id='creator' AND skill_name='language'"
+        ).fetchone()[0] == 0.0
+        assert target.execute("PRAGMA foreign_key_check").fetchall() == []
+
+        second = build_migration_plan(source, target)
+        assert second["ready"], second["blockers"]
     finally:
         source.close()
         target.close()

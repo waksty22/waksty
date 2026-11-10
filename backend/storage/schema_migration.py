@@ -114,6 +114,11 @@ DEFAULT_RECONCILE_TABLES = {
     "relationships", "voice_profiles",
 }
 
+# Existing, separately reviewed CHECK-drift rebuilds remain permitted for
+# these two tables; their columns and all other structural constraints must
+# still match exactly.
+CHECK_RECONCILE_TABLES = {"conversations", "memories"}
+
 
 def _rebuild_table_spec(
     source: Any,
@@ -588,9 +593,16 @@ def build_migration_plan(
             table_name in REBUILDABLE_TABLES
             and (
                 (
-                    table_name in DEFAULT_RECONCILE_TABLES
-                    and (check_drift or bool(safe_default_drift))
-                    and not unsafe_column_drift
+                    (
+                        table_name in CHECK_RECONCILE_TABLES
+                        and check_drift
+                        and not column_drift
+                    )
+                    or (
+                        table_name in DEFAULT_RECONCILE_TABLES
+                        and (check_drift or bool(safe_default_drift))
+                        and not unsafe_column_drift
+                    )
                 )
                 or (table_name == "skills" and column_drift == {"level"} and not check_drift)
             )

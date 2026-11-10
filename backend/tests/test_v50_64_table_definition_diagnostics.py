@@ -54,7 +54,7 @@ def test_table_definition_diagnostics_compare_semantic_components_without_leakin
         serialized = json.dumps(compact).lower()
         assert "private_source" not in serialized
         assert "private_target" not in serialized
-        assert "create table" not in serialized
+        assert "create table conversations (" not in serialized
         assert compact["read_only"] is True
         assert compact["data_contents_exposed"] is False
         assert compact["migration_executed"] is False

@@ -381,7 +381,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     schema = build_migration_plan(source, target)
     if not schema.get("ready"):
         return {
-            "version": "50.63",
+            "version": "50.64",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -454,7 +454,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         )
     if table_sql_blockers:
         return {
-            "version": "50.63",
+            "version": "50.64",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -504,7 +504,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         ordered = []
 
     return {
-        "version": "50.63",
+        "version": "50.64",
         "read_only": True,
         "data_contents_exposed": False,
         "ready": not blockers,
@@ -647,7 +647,7 @@ def migrate_sqlite_rows_to_turso(
     plan = build_data_migration_plan(source, target)
     if not plan["ready"]:
         return {
-            "version": "50.63",
+            "version": "50.64",
             "applied": False,
             "ready": False,
             "read_only": True,
@@ -657,7 +657,7 @@ def migrate_sqlite_rows_to_turso(
         }
     if not apply:
         return {
-            "version": "50.63",
+            "version": "50.64",
             "applied": False,
             "ready": True,
             "read_only": True,
@@ -835,7 +835,7 @@ def migrate_sqlite_rows_to_turso(
         raise
 
     return {
-        "version": "50.63",
+        "version": "50.64",
         "applied": True,
         "ready": True,
         "read_only": False,

@@ -52,7 +52,7 @@ def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete():
         )
         connection.execute(
             "INSERT INTO chappie_storage_migration_state VALUES "
-            "('sqlite-to-turso-v50.55', 'pending_cutover', 't1')"
+            "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
         )
         count = server._install_sqlite_cutover_write_guards(connection)
         assert count == 3
@@ -81,7 +81,7 @@ def test_local_pending_cutover_marker_is_detected_after_database_reopen(
     )
     connection.execute(
         "INSERT INTO chappie_storage_migration_state VALUES "
-        "('sqlite-to-turso-v50.55', 'pending_cutover', 't1')"
+        "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
     )
     connection.commit()
     connection.close()
@@ -104,7 +104,7 @@ def test_init_db_stays_read_only_when_local_cutover_marker_exists(
     )
     connection.execute(
         "INSERT INTO chappie_storage_migration_state VALUES "
-        "('sqlite-to-turso-v50.55', 'pending_cutover', 't1')"
+        "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
     )
     connection.commit()
     connection.close()
@@ -144,7 +144,7 @@ def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
     )
     local.execute(
         "INSERT INTO chappie_storage_migration_state VALUES "
-        "('sqlite-to-turso-v50.55', 'pending_cutover', 't1')"
+        "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
     )
     server._install_sqlite_cutover_write_guards(local)
     local.commit()
@@ -157,7 +157,7 @@ def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
     )
     remote.execute(
         "INSERT INTO chappie_storage_migrations VALUES "
-        "('sqlite-to-turso-v50.55', 'completed')"
+        "('sqlite-to-turso-v50.65', 'completed')"
     )
     remote.commit()
 
@@ -236,7 +236,7 @@ def test_pre_cutover_cancel_recovers_when_local_marker_was_not_written(
     )
     remote.execute(
         "INSERT INTO chappie_storage_migrations VALUES "
-        "('sqlite-to-turso-v50.55', 'completed')"
+        "('sqlite-to-turso-v50.65', 'completed')"
     )
     remote.commit()
     remote.close()
@@ -330,3 +330,38 @@ def test_missing_local_sqlite_and_missing_remote_marker_fail_closed(
 
     with pytest.raises(RuntimeError, match="Base SQLite absente"):
         server._remote_turso_migration_completed()
+
+
+def test_missing_local_sqlite_and_completed_v50_65_remote_marker_is_detected(
+    monkeypatch, tmp_path,
+):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote_path = tmp_path / "completed-turso.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('sqlite-to-turso-v50.65', 'completed')"
+    )
+    remote.commit()
+    remote.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(
+            connect=lambda **kwargs: sqlite3.connect(remote_path)
+        ),
+    )
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    assert server._remote_turso_migration_completed() is True

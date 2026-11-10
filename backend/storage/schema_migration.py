@@ -109,6 +109,7 @@ def _rebuild_table_spec(
     target_sql: str,
     source_objects: dict[str, dict[str, Any]],
     target_objects: dict[str, dict[str, Any]],
+    additive_columns: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Prove a narrow, lossless rebuild is possible before planning it."""
     blockers: list[str] = []
@@ -139,8 +140,34 @@ def _rebuild_table_spec(
 
     source_map = column_map(source_columns)
     target_map = column_map(target_columns)
-    if set(source_map) != set(target_map):
-        blockers.append(f"{table_name}: colonnes source/cible différentes, reconstruction refusée.")
+    additive_columns = additive_columns or {}
+    missing_in_target = set(source_map) - set(target_map)
+    unexpected_in_target = set(target_map) - set(source_map)
+    if unexpected_in_target:
+        blockers.append(
+            f"{table_name}: colonnes supplémentaires côté cible non prises en charge : "
+            + ", ".join(sorted(unexpected_in_target)) + "."
+        )
+    for name in sorted(missing_in_target):
+        declaration = " ".join(str(additive_columns.get(name, "")).upper().split())
+        metadata = source_map[name]
+        # Only explicitly allowlisted, ordinary columns with a matching
+        # source definition may be introduced during a verified rebuild.
+        match = re.fullmatch(
+            r"([A-Z][A-Z0-9_]*(?:\\s*\\([^)]*\\))?)(?:\\s+(NOT NULL))?(?:\\s+DEFAULT\\s+(.+))?",
+            declaration,
+        )
+        if (
+            not match
+            or metadata[0] != match.group(1)
+            or metadata[1] != int(bool(match.group(2)))
+            or _normalized_sql(metadata[2]) != _normalized_sql(match.group(3))
+            or metadata[3] != 0
+            or metadata[4] != 0
+        ):
+            blockers.append(
+                f"{table_name}.{name}: ajout pendant reconstruction non autorisé ou définition source incohérente."
+            )
     if any(item[4] != 0 for item in source_map.values()) or any(
         item[4] != 0 for item in target_map.values()
     ):
@@ -169,22 +196,31 @@ def _rebuild_table_spec(
     if _unique_index_signature(source, table_name) != _unique_index_signature(target, table_name):
         blockers.append(f"{table_name}: contraintes UNIQUE différentes.")
 
-    # A DROP TABLE can affect inbound foreign keys, triggers and dependent views.
-    for connection, label in ((source, "source"), (target, "cible")):
-        table_rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    # Only target-side dependencies can be damaged by rebuilding the target.
+    # Source-only child tables are created before rebuild statements and are
+    # empty at this stage. Existing target child tables are safe only when
+    # empty; otherwise DROP TABLE could invalidate their foreign keys.
+    table_rows = target.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    for row in table_rows:
+        other = str(_row_value(row, "name", 0))
+        if other == table_name:
+            continue
+        foreign_keys = target.execute(
+            f"PRAGMA foreign_key_list({_quote_identifier(other)})"
         ).fetchall()
-        for row in table_rows:
-            other = str(_row_value(row, "name", 0))
-            if other == table_name:
-                continue
-            for fk in connection.execute(
-                f"PRAGMA foreign_key_list({_quote_identifier(other)})"
-            ).fetchall():
-                if str(_row_value(fk, "table", 2)) == table_name:
-                    blockers.append(
-                        f"{table_name}: référencée par une clé étrangère de {other} ({label})."
-                    )
+        if any(str(_row_value(fk, "table", 2)) == table_name for fk in foreign_keys):
+            dependent_count = int(target.execute(
+                f"SELECT COUNT(*) FROM {_quote_identifier(other)}"
+            ).fetchone()[0])
+            if dependent_count:
+                blockers.append(
+                    f"{table_name}: référencée par une clé étrangère de {other} "
+                    "(cible non vide), reconstruction refusée."
+                )
+
+    for connection, label in ((source, "source"), (target, "cible")):
         trigger_rows = connection.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?",
             (table_name,),
@@ -228,7 +264,10 @@ def _rebuild_table_spec(
     create_sql = (
         match.group(1) + _quote_identifier(temp_name) + source_sql[match.end():]
     )
-    columns = sorted(source_map, key=lambda name: next(
+    # Copy only columns already present on the target. Any allowlisted
+    # source-only columns are introduced by the canonical CREATE TABLE and
+    # receive their declared safe default; source rows are copied later.
+    columns = sorted(set(source_map) & set(target_map), key=lambda name: next(
         int(_row_value(row, "cid", 0)) for row in source_columns
         if str(_row_value(row, "name", 1)) == name
     ))
@@ -553,6 +592,7 @@ def build_migration_plan(
                 str(source_tables[table_name]["sql"] or ""),
                 str(target_tables[table_name]["sql"] or ""),
                 source_objects, target_objects,
+                allowed.get(table_name, {}),
             )
             blockers.extend(rebuild_blockers)
             if spec:

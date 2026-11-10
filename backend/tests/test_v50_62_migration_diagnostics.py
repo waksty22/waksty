@@ -53,6 +53,7 @@ def test_blocked_table_sql_report_keeps_actionable_read_only_diagnostics():
         assert "source_sql" not in difference
         assert "target_sql" not in difference
         assert "legacy target annotation" not in str(compact)
+        assert "private_sql" not in str(compact)
 
         serialized = json.dumps(compact)
         assert "PRIVATE_SOURCE_CONTENT" not in serialized

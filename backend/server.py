@@ -317,7 +317,7 @@ def _local_migration_pending_cutover() -> bool:
         row = connection.execute(
             "SELECT status FROM chappie_storage_migration_state "
             "WHERE migration_key=?",
-            ("sqlite-to-turso-v50.55",),
+            ("sqlite-to-turso-v50.65",),
         ).fetchone()
         return bool(row and row[0] == "pending_cutover")
     except sqlite3.Error:
@@ -371,7 +371,7 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
                 BEFORE {operation} ON {quoted_table}
                 WHEN EXISTS (
                     SELECT 1 FROM chappie_storage_migration_state
-                    WHERE migration_key='sqlite-to-turso-v50.55'
+                    WHERE migration_key='sqlite-to-turso-v50.65'
                       AND status='pending_cutover'
                 )
                 BEGIN
@@ -410,7 +410,7 @@ def _remote_turso_migration_completed() -> bool:
             )
         row = connection.execute(
             "SELECT status FROM chappie_storage_migrations WHERE migration_key=?",
-            ("sqlite-to-turso-v50.55",),
+            ("sqlite-to-turso-v50.65",),
         ).fetchone()
         if not row or row[0] != "completed":
             raise RuntimeError(
@@ -458,7 +458,7 @@ def init_db() -> None:
                 marker = verification_db.execute(
                     "SELECT status FROM chappie_storage_migrations "
                     "WHERE migration_key=?",
-                    ("sqlite-to-turso-v50.55",),
+                    ("sqlite-to-turso-v50.65",),
                 ).fetchone()
                 if marker is None or marker["status"] != "completed":
                     raise RuntimeError("Marqueur de migration Turso absent ou incomplet.")
@@ -5672,7 +5672,7 @@ async def api_storage_migration_apply(
                 migration_key, status, updated_at
             ) VALUES (?, 'pending_cutover', ?)
             """,
-            ("sqlite-to-turso-v50.55", utc_now()),
+            ("sqlite-to-turso-v50.65", utc_now()),
         )
         trigger_count = _install_sqlite_cutover_write_guards(source)
         STORAGE_MIGRATION_PENDING_CUTOVER = True
@@ -5755,7 +5755,7 @@ async def api_storage_migration_cancel(
         if marker_table:
             marker = local.execute(
                 "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
-                ("sqlite-to-turso-v50.55",),
+                ("sqlite-to-turso-v50.65",),
             ).fetchone()
         local_pending = bool(marker and marker[0] == "pending_cutover")
         if marker is not None and marker[0] != "pending_cutover":
@@ -5779,7 +5779,7 @@ async def api_storage_migration_cancel(
             local.execute(
                 "UPDATE chappie_storage_migration_state SET status='cancelled', updated_at=? "
                 "WHERE migration_key=?",
-                (utc_now(), "sqlite-to-turso-v50.55"),
+                (utc_now(), "sqlite-to-turso-v50.65"),
             )
         local.commit()
 
@@ -5789,7 +5789,7 @@ async def api_storage_migration_cancel(
         remote = libsql.connect(database=remote_url, auth_token=remote_token)
         remote.execute(
             "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
-            ("sqlite-to-turso-v50.55",),
+            ("sqlite-to-turso-v50.65",),
         )
         remote.commit()
         STORAGE_MIGRATION_PENDING_CUTOVER = False

@@ -202,6 +202,12 @@ def _rebuild_table_spec(
 
     if "AUTOINCREMENT" in source_sql.upper() or "AUTOINCREMENT" in target_sql.upper():
         blockers.append(f"{table_name}: séquence AUTOINCREMENT non prise en charge par reconstruction.")
+    unsupported_sql = re.compile(r"\\b(?:COLLATE|STRICT|WITHOUT\\s+ROWID|ON\\s+CONFLICT)\\b", re.I)
+    for label, sql in (("source", source_sql), ("cible", target_sql)):
+        if unsupported_sql.search(sql):
+            blockers.append(
+                f"{table_name}: option ou clause SQL avancée non prise en charge ({label})."
+            )
 
     temp_name = f"__chappie_rebuild_{table_name}"
     if target.execute(

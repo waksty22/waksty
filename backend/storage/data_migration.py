@@ -310,7 +310,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
                 + ". Migration bloquée ; vérifier/reconstruire les index FTS séparément."
             )
         return {
-            "version": "50.56",
+            "version": "50.62",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -330,7 +330,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
     schema = build_migration_plan(source, target)
     if not schema.get("ready"):
         return {
-            "version": "50.56",
+            "version": "50.62",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
@@ -402,11 +402,14 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         )
     if table_sql_blockers:
         return {
-            "version": "50.55",
+            "version": "50.62",
             "read_only": True,
             "data_contents_exposed": False,
             "ready": False,
             "schema_plan": schema,
+            # Preserve metadata-only comparison details so the compact report
+            # can explain each SQL-definition blocker without exposing rows.
+            "schema_diagnostics": detailed,
             "blockers": table_sql_blockers,
             "tables": [],
         }
@@ -448,7 +451,7 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
         ordered = []
 
     return {
-        "version": "50.55",
+        "version": "50.62",
         "read_only": True,
         "data_contents_exposed": False,
         "ready": not blockers,
@@ -485,8 +488,25 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         }
         for item in differences[:12]
     ]
+    # Keep raw CREATE TABLE statements and column identifiers out of the
+    # compact report. Emit non-reversible fingerprints and lengths so the
+    # mismatch can be tracked without exposing schema text.
+    definition_differences = []
+    for item in differences:
+        if item.get("category") != "table_constraints_or_options":
+            continue
+        source_sql = str(item.get("local") or "")
+        target_sql = str(item.get("remote") or "")
+        definition_differences.append({
+            "table": item.get("table"),
+            "source_sha256": hashlib.sha256(source_sql.encode("utf-8")).hexdigest(),
+            "target_sha256": hashlib.sha256(target_sql.encode("utf-8")).hexdigest(),
+            "source_length": len(source_sql),
+            "target_length": len(target_sql),
+            "requires_manual_review": True,
+        })
     return {
-        "version": plan.get("version", "unknown"),
+        "version": plan.get("version", "50.62"),
         "read_only": True,
         "data_contents_exposed": False,
         "migration_executed": False,
@@ -510,8 +530,10 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "blockers_truncated": len(blockers) > 12,
         "differences_preview": difference_preview,
         "differences_truncated": len(differences) > len(difference_preview),
+        "table_definition_differences": definition_differences[:10],
+        "table_definition_differences_truncated": len(definition_differences) > 10,
         "notes": [
-            "Rapport compact : aucune définition SQL ni donnée métier n'est exposée.",
+            "Rapport compact : aucun SQL brut, nom de colonne ni contenu métier n'est exposé.",
             "Les différences de volumes de lignes ne sont pas détaillées dans cette vue.",
             "Aucune migration ni écriture en base n'a été exécutée.",
         ],
@@ -528,7 +550,7 @@ def migrate_sqlite_rows_to_turso(
     plan = build_data_migration_plan(source, target)
     if not plan["ready"]:
         return {
-            "version": "50.55",
+            "version": "50.62",
             "applied": False,
             "ready": False,
             "read_only": True,
@@ -538,7 +560,7 @@ def migrate_sqlite_rows_to_turso(
         }
     if not apply:
         return {
-            "version": "50.55",
+            "version": "50.62",
             "applied": False,
             "ready": True,
             "read_only": True,
@@ -716,7 +738,7 @@ def migrate_sqlite_rows_to_turso(
         raise
 
     return {
-        "version": "50.55",
+        "version": "50.62",
         "applied": True,
         "ready": True,
         "read_only": False,

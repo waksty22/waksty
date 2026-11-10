@@ -258,6 +258,7 @@ def test_sqlite_to_turso_flow_uses_verified_rebuild_before_copying_source_rows()
 
     source, target = _conversation_pair()
     try:
+        source.execute("DELETE FROM conversations WHERE id=1")
         source.execute(
             "INSERT INTO conversations(id, user_id, role, content, created_at) "
             "VALUES (2, 'creator', 'user', 'from-source', '2026-01-03')"

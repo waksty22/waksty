@@ -102,5 +102,6 @@ def test_newborn_chat_falls_back_to_one_word_heard_in_current_message(language_d
     )
 
     assert generated_reply == ""
+    assert gate_spoken_text("...", allowed, max_words=1) == ""
     assert imitation_fallback == "Bonjour"
     assert text_uses_only_allowed_words(imitation_fallback, allowed)

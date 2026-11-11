@@ -165,7 +165,7 @@ from diagnostics.conversation_persistence import (
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.73"
+CHAPPIE_VERSION = "50.74"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -3403,37 +3403,57 @@ async def api_chat(
     request: ChatRequest,
     auth=Depends(require_auth)
 ):
+    request_id = secrets.token_hex(6)
+    started_at = time.perf_counter()
     user_id = _authenticated_user(auth)
 
-    message = str(_model_value(request, "message", "") or "").strip()  
+    message = str(_model_value(request, "message", "") or "").strip()
 
-    if not message:  
-        raise HTTPException(status_code=400, detail="Message vide.")  
+    if not message:
+        raise HTTPException(status_code=400, detail="Message vide.")
 
-    if len(message) > MAX_MESSAGE_LENGTH:  
-        raise HTTPException(  
-            status_code=413,  
-            detail="Message trop long."  
-        )  
+    if len(message) > MAX_MESSAGE_LENGTH:
+        raise HTTPException(status_code=413, detail="Message trop long.")
 
-    try:  
-        result = await run_brain(user_id, message)  
+    log.info(
+        "[CHAT HTTP] request_started request_id=%s message_chars=%s",
+        request_id, len(message),
+    )
+    try:
+        brain_started_at = time.perf_counter()
+        result = await run_brain(user_id, message)
+        brain_elapsed = time.perf_counter() - brain_started_at
+        log.info(
+            "[CHAT HTTP] brain_returned request_id=%s elapsed_seconds=%.3f result_type=%s",
+            request_id, brain_elapsed, type(result).__name__,
+        )
 
-        if isinstance(result, dict):  
-            return result  
+        payload = result if isinstance(result, dict) else {
+            "response": str(result),
+            "user_id": user_id,
+        }
+        log.info(
+            "[CHAT HTTP] response_ready request_id=%s total_elapsed_seconds=%.3f reply_present=%s",
+            request_id,
+            time.perf_counter() - started_at,
+            isinstance(payload.get("reply"), str) or isinstance(payload.get("response"), str),
+        )
+        return payload
 
-        return {  
-            "response": str(result),  
-            "user_id": user_id,  
-        }  
-
-    except HTTPException:  
-        raise  
-    except Exception as exc:  
-        print("[CHAT ERROR]", repr(exc))  
-        raise HTTPException(  
-            status_code=500,  
-            detail="Une erreur est survenue pendant la réflexion de Chappie."  
+    except HTTPException:
+        log.exception(
+            "[CHAT HTTP] http_error request_id=%s elapsed_seconds=%.3f",
+            request_id, time.perf_counter() - started_at,
+        )
+        raise
+    except Exception as exc:
+        log.exception(
+            "[CHAT HTTP] failed request_id=%s error_type=%s elapsed_seconds=%.3f",
+            request_id, type(exc).__name__, time.perf_counter() - started_at,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Une erreur est survenue pendant la réflexion de Chappie."
         )
 
 @app.post("/api/memory")

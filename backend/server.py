@@ -155,12 +155,13 @@ from storage.connection_factory import StorageSettings, open_storage_connection
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
 from storage.memory_health import inspect_memory_persistence
+from storage.global_persistence import inspect_global_persistence
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 from diagnostics.persistence_inventory import inspect_sqlite_database
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.71"
+CHAPPIE_VERSION = "50.72"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -3893,6 +3894,54 @@ async def api_memory_persistence(auth=Depends(require_auth)):
     with db_connection() as conn:
         report = inspect_memory_persistence(conn, user_id, settings.backend)
     return {"ok": True, "version": CHAPPIE_VERSION, "memory_persistence": report}
+
+
+@app.get("/api/storage/persistence/global")
+async def api_global_persistence(auth=Depends(require_auth)):
+    """Read-only inventory and SQLite/Turso schema comparison."""
+    user_id = _authenticated_user(auth)
+    settings = StorageSettings.from_env()
+    # Open the existing SQLite file in URI read-only mode; never create it.
+    if not DB_PATH.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="La base SQLite locale est indisponible pour l'audit.",
+        )
+    sqlite_conn = None
+    turso_conn = None
+    turso_status = "not_configured"
+    try:
+        sqlite_conn = sqlite3.connect(
+            f"file:{DB_PATH.as_posix()}?mode=ro",
+            uri=True,
+        )
+        sqlite_conn.row_factory = sqlite3.Row
+        if settings.turso_database_url and settings.turso_auth_token:
+            turso_settings = StorageSettings(
+                backend="turso",
+                sqlite_path=settings.sqlite_path,
+                turso_database_url=settings.turso_database_url,
+                turso_auth_token=settings.turso_auth_token,
+            )
+            try:
+                turso_conn = open_storage_connection(turso_settings)
+                turso_status = "connected"
+            except Exception:
+                # Do not return driver messages, URLs, or credential details.
+                turso_status = "connection_failed"
+        report = inspect_global_persistence(
+            sqlite_conn,
+            turso_conn,
+            settings.backend,
+            user_id,
+            turso_status=turso_status,
+        )
+    finally:
+        if turso_conn is not None:
+            turso_conn.close()
+        if sqlite_conn is not None:
+            sqlite_conn.close()
+    return {"ok": True, "version": CHAPPIE_VERSION, "global_persistence": report}
 
 
 @app.post("/api/memory/consolidate")

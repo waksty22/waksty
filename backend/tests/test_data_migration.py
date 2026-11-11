@@ -310,3 +310,99 @@ def test_fts_virtual_tables_block_migration_before_shadow_tables_are_copied():
     finally:
         source.close()
         target.close()
+
+def _skills_pair(source_xp=42.5, target_id=99):
+    source = sqlite3.connect(":memory:")
+    target = sqlite3.connect(":memory:")
+    source.execute("PRAGMA foreign_keys=ON")
+    target.execute("PRAGMA foreign_keys=ON")
+    source.execute("""
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            level REAL NOT NULL DEFAULT 0.0,
+            xp REAL NOT NULL DEFAULT 0.0,
+            evidence TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, skill_name)
+        )
+    """)
+    target.execute("""
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            level REAL NOT NULL DEFAULT 0.0,
+            evidence TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, skill_name)
+        )
+    """)
+    source.execute(
+        "INSERT INTO skills(id, user_id, skill_name, level, xp, evidence, updated_at) "
+        "VALUES (1, 'creator', 'language', 2.0, ?, 'source evidence', 'now')",
+        (source_xp,),
+    )
+    target.execute(
+        "INSERT INTO skills(id, user_id, skill_name, level, evidence, updated_at) "
+        "VALUES (?, 'creator', 'legacy-skill', 1.0, 'target evidence', 'before')",
+        (target_id,),
+    )
+    source.commit()
+    target.commit()
+    return source, target
+
+
+def test_skills_xp_is_copied_from_sqlite_and_target_only_rows_are_preserved():
+    source, target = _skills_pair()
+    try:
+        plan = build_data_migration_plan(source, target)
+        assert plan["ready"] is True, plan["blockers"]
+        assert any(
+            item.get("kind") == "add_column" and item.get("object") == "skills.xp"
+            for item in plan["schema_plan"]["statements"]
+        )
+
+        result = migrate_sqlite_rows_to_turso(source, target, apply=True)
+
+        assert result["applied"] is True
+        assert target.execute(
+            "SELECT xp FROM skills WHERE id=1"
+        ).fetchone()[0] == pytest.approx(42.5)
+        assert target.execute(
+            "SELECT skill_name, xp FROM skills WHERE id=99"
+        ).fetchone() == ("legacy-skill", 0.0)
+        assert target.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        source.close()
+        target.close()
+
+
+def test_skills_xp_conflict_aborts_without_overwriting_existing_target_row():
+    source, target = _skills_pair(target_id=1)
+    target.execute(
+        "UPDATE skills SET skill_name='language', level=2.0, "
+        "evidence='source evidence', updated_at='now' WHERE id=1"
+    )
+    target.commit()
+    try:
+        with pytest.raises(ValueError, match="Collision de clé"):
+            migrate_sqlite_rows_to_turso(source, target, apply=True)
+
+        columns = {
+            row[1] for row in target.execute("PRAGMA table_info(skills)")
+        }
+        assert "xp" not in columns
+        assert target.execute(
+            "SELECT skill_name, evidence FROM skills WHERE id=1"
+        ).fetchone() == ("language", "source evidence")
+        assert target.execute("SELECT COUNT(*) FROM skills").fetchone()[0] == 1
+        assert target.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='chappie_storage_migrations'"
+        ).fetchone()[0] == 0
+    finally:
+        source.close()
+        target.close()
+

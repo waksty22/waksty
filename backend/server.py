@@ -3901,15 +3901,21 @@ async def api_global_persistence(auth=Depends(require_auth)):
     """Read-only inventory and SQLite/Turso schema comparison."""
     user_id = _authenticated_user(auth)
     settings = StorageSettings.from_env()
-    sqlite_settings = StorageSettings(
-        backend="sqlite",
-        sqlite_path=str(DB_PATH),
-    )
+    # Open the existing SQLite file in URI read-only mode; never create it.
+    if not DB_PATH.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="La base SQLite locale est indisponible pour l'audit.",
+        )
     sqlite_conn = None
     turso_conn = None
     turso_status = "not_configured"
     try:
-        sqlite_conn = open_storage_connection(sqlite_settings)
+        sqlite_conn = sqlite3.connect(
+            f"file:{DB_PATH.as_posix()}?mode=ro",
+            uri=True,
+        )
+        sqlite_conn.row_factory = sqlite3.Row
         if settings.turso_database_url and settings.turso_auth_token:
             turso_settings = StorageSettings(
                 backend="turso",

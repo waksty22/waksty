@@ -194,28 +194,48 @@ async function apiRequest(url, options = {}) {
     requestHeaders['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers: requestHeaders
-  });
+  // Opt-in timeout: chat cannot remain indefinitely in "thinking" state.
+  const timeoutMs = Number(options.timeoutMs) || 0;
+  const fetchOptions = { ...options, headers: requestHeaders };
+  delete fetchOptions.timeoutMs;
 
-  const data = await readResponse(response);
-
-  if (!response.ok) {
-    const detail =
-      data.detail ||
-      data.message ||
-      data.error ||
-      `Erreur HTTP ${response.status}`;
-
-    throw new Error(
-      typeof detail === 'string'
-        ? detail
-        : JSON.stringify(detail)
-    );
+  let timeoutId = null;
+  let controller = null;
+  if (timeoutMs > 0 && typeof AbortController !== 'undefined') {
+    controller = new AbortController();
+    fetchOptions.signal = controller.signal;
+    timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   }
 
-  return data;
+  try {
+    const response = await fetch(url, fetchOptions);
+    const data = await readResponse(response);
+
+    if (!response.ok) {
+      const detail =
+        data.detail ||
+        data.message ||
+        data.error ||
+        `Erreur HTTP ${response.status}`;
+
+      throw new Error(
+        typeof detail === 'string'
+          ? detail
+          : JSON.stringify(detail)
+      );
+    }
+
+    return data;
+  } catch (error) {
+    if (controller && controller.signal.aborted) {
+      throw new Error(
+        'Le serveur met trop de temps à répondre (délai de 120 secondes). Réessaie ; vérifie les logs Render si le problème persiste.'
+      );
+    }
+    throw error;
+  } finally {
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+  }
 }
 
 /* ============================================================
@@ -482,6 +502,7 @@ async function sendMessage() {
   try {
     const data = await apiRequest(API.chat, {
       method: 'POST',
+      timeoutMs: 120000,
       body: jsonBody({
         user_id: CREATOR_ID,
         message

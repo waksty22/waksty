@@ -158,6 +158,7 @@ from storage.memory_health import inspect_memory_persistence
 from storage.global_persistence import inspect_global_persistence
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 from diagnostics.persistence_inventory import inspect_sqlite_database
+from storage.migration_audit import build_migration_safety_audit
 from diagnostics.conversation_persistence import (
     record_persistence_event,
     persistence_event_snapshot,
@@ -165,7 +166,7 @@ from diagnostics.conversation_persistence import (
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.76"
+CHAPPIE_VERSION = "50.77"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -5663,6 +5664,52 @@ async def api_storage_migration_preview(
         raise HTTPException(
             status_code=503,
             detail="Prévisualisation impossible : " + type(exc).__name__,
+        )
+    finally:
+        for connection in (source, target):
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+
+@app.get("/api/storage/migration/audit")
+async def api_storage_migration_audit(auth=Depends(require_auth)):
+    """Read-only, consolidated safety audit for the pending SQLite -> Turso migration."""
+    _authenticated_user(auth)
+    if StorageSettings.from_env().backend != "sqlite":
+        raise HTTPException(
+            status_code=409,
+            detail="L'audit de migration doit être lancé avant le basculement, depuis SQLite.",
+        )
+    if not DB_PATH.is_file():
+        raise HTTPException(status_code=503, detail="La base SQLite source est introuvable.")
+    remote_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+    remote_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+    if not remote_url or not remote_token:
+        raise HTTPException(status_code=503, detail="Turso n'est pas entièrement configuré.")
+
+    source = None
+    target = None
+    try:
+        import libsql
+        from storage.data_migration import build_data_migration_plan
+
+        source = sqlite3.connect(f"file:{DB_PATH.as_posix()}?mode=ro", uri=True)
+        source.row_factory = sqlite3.Row
+        target = libsql.connect(database=remote_url, auth_token=remote_token)
+        plan = build_data_migration_plan(source, target)
+        audit = build_migration_safety_audit(plan)
+        audit["target_database_host"] = remote_url.split("://", 1)[-1].split("/", 1)[0]
+        return {"ok": True, "version": CHAPPIE_VERSION, "migration_safety_audit": audit}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("[MIGRATION AUDIT] Read-only safety audit failed.")
+        raise HTTPException(
+            status_code=503,
+            detail="Audit de sécurité de migration impossible : " + type(exc).__name__,
         )
     finally:
         for connection in (source, target):

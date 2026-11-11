@@ -670,26 +670,48 @@ document.addEventListener("DOMContentLoaded", () => {
     window.sendMessage = async function() {
         const msgInput = document.getElementById("msg");
         const outDiv = document.getElementById("out");
+        const sendBtn = document.getElementById("sendBtn");
         if (!msgInput) return;
 
         const message = msgInput.value.trim();
         if (!message) return;
 
         if (outDiv) outDiv.textContent = "Chappie réfléchit...";
+        if (sendBtn) sendBtn.disabled = true;
+
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 120000);
 
         try {
             const data = await apiCall('/api/chat', {
                 method: 'POST',
-                body: { user_id: 'creator', message }
+                body: { user_id: 'creator', message },
+                signal: controller.signal
             });
 
-            if (data.reply) {
-                if (outDiv) outDiv.textContent = data.reply;
-                msgInput.value = "";
-                playTextToSpeech(data.reply);
+            const reply = typeof data?.reply === "string" ? data.reply.trim() : "";
+            if (!reply) {
+                throw new Error(
+                    data?.detail ||
+                    "Chappie n'a renvoyé aucune parole. Ton message est conservé : tu peux réessayer."
+                );
             }
+
+            if (outDiv) {
+                outDiv.textContent = data.reply_mode === "imitation"
+                    ? reply + "\\n\\n(Chappie répète un mot qu'il vient d'entendre.)"
+                    : reply;
+            }
+            msgInput.value = "";
+            playTextToSpeech(reply);
         } catch (error) {
-            if (outDiv) outDiv.textContent = "Erreur : " + error.message;
+            const message = error?.name === "AbortError"
+                ? "Le délai de réponse a dépassé 120 secondes. Ton message est conservé : réessaie."
+                : (error?.message || "Erreur inconnue pendant la réponse de Chappie.");
+            if (outDiv) outDiv.textContent = "Erreur : " + message;
+        } finally {
+            window.clearTimeout(timeoutId);
+            if (sendBtn) sendBtn.disabled = false;
         }
     };
 

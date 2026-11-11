@@ -417,9 +417,10 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
             # Identical semantic fingerprints prove there is no table rebuild
             # to perform; index differences are handled independently.
             continue
-        # Allow only the exact, reviewed legacy skills.xp omission: removing
-        # that one column declaration from the source SQL must reproduce the
-        # target SQL byte-for-byte after whitespace normalization.
+        # Allow only the exact, reviewed legacy skills.xp omission when the
+        # schema planner independently schedules the allowlisted xp addition.
+        # Column metadata must match for every shared column; the planner also
+        # verifies the table's keys, indexes and constraints before allowing it.
         if table == "skills":
             source_details = {c["name"]: c for c in _columns(source, table)}
             target_details = {c["name"]: c for c in _columns(target, table)}
@@ -434,27 +435,21 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
                 )
                 for name in source_names & target_names
             )
-            source_sql = next(
-                (item["sql"] for item in _objects(source) if item["name"] == table),
-                None,
-            )
-            target_sql = next(
-                (item["sql"] for item in _objects(target) if item["name"] == table),
-                None,
+            planned_xp_addition = any(
+                item.get("kind") == "add_column"
+                and item.get("object") == "skills.xp"
+                for item in (schema.get("statements") or [])
             )
             if (
                 source_names - target_names == {"xp"}
                 and not (target_names - source_names)
                 and common_match
+                and planned_xp_addition
                 and xp.get("type", "").upper() == "REAL"
                 and xp.get("notnull") == 1
                 and str(xp.get("default")) in {"0.0", "0"}
                 and xp.get("pk") == 0
                 and xp.get("hidden") == 0
-                and source_sql
-                and target_sql
-                and _remove_column_from_create_sql(source_sql, "xp")
-                    == " ".join(str(target_sql).split()).casefold()
             ):
                 continue
         table_sql_blockers.append(

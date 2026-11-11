@@ -699,7 +699,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (outDiv) {
                 outDiv.textContent = data.reply_mode === "imitation"
-                    ? reply + "\\n\\n(Chappie répète un mot qu'il vient d'entendre.)"
+                    ? reply + "\n\n(Chappie répète un mot qu'il vient d'entendre.)"
                     : reply;
             }
             msgInput.value = "";

@@ -158,10 +158,14 @@ from storage.memory_health import inspect_memory_persistence
 from storage.global_persistence import inspect_global_persistence
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 from diagnostics.persistence_inventory import inspect_sqlite_database
+from diagnostics.conversation_persistence import (
+    record_persistence_event,
+    persistence_event_snapshot,
+)
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.72"
+CHAPPIE_VERSION = "50.73"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -1902,41 +1906,58 @@ def save_conversation_turn(
     if not user_text and not assistant_text:  
         return  
 
-    now = utc_now()  
+    now = utc_now()
+    diagnostic_source = (
+        source if source in {"conversation", "gemini_live", "gemini_live_interrupted"}
+        else "unknown"
+    )
+    record_persistence_event("save_attempted", diagnostic_source)
+    try:
+        with db_connection() as db:
+            if user_text:
+                db.execute(
+                    """
+                    INSERT INTO conversations(user_id, role, content, created_at)
+                    VALUES(?,?,?,?)
+                    """,
+                    (user_id, "user", user_text, now),
+                )
 
-    with db_connection() as db:  
-        if user_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "user", user_text, now),  
-            )  
+            if assistant_text:
+                db.execute(
+                    """
+                    INSERT INTO conversations(user_id, role, content, created_at)
+                    VALUES(?,?,?,?)
+                    """,
+                    (user_id, "assistant", assistant_text, now),
+                )
 
-        if assistant_text:  
-            db.execute(  
-                """  
-                INSERT INTO conversations(user_id, role, content, created_at)  
-                VALUES(?,?,?,?)  
-                """,  
-                (user_id, "assistant", assistant_text, now),  
-            )  
-
-        db.execute(  
-            """  
-            INSERT INTO journal(user_id, entry, kind, created_at)  
-            VALUES(?,?,?,?)  
-            """,  
-            (  
-                user_id,  
-                f"Tour enregistré dans la mémoire commune (source : {source}).",  
-                source[:40],  
-                now,  
-            ),  
-        )  
-
-        db.commit()  
+            db.execute(
+                """
+                INSERT INTO journal(user_id, entry, kind, created_at)
+                VALUES(?,?,?,?)
+                """,
+                (
+                    user_id,
+                    f"Tour enregistré dans la mémoire commune (source : {source}).",
+                    source[:40],
+                    now,
+                ),
+            )
+            db.commit()
+    except Exception:
+        record_persistence_event("save_failed", diagnostic_source)
+        log.exception(
+            "[MEMORY WRITE] Échec commit source=%s user_scope=authenticated_user",
+            diagnostic_source,
+        )
+        raise
+    record_persistence_event("save_committed", diagnostic_source)
+    log.info(
+        "[MEMORY WRITE] Commit confirmé source=%s user_scope=authenticated_user "
+        "user_chars=%s assistant_chars=%s",
+        diagnostic_source, len(user_text), len(assistant_text),
+    )
 
     try:
         with db_connection() as db:
@@ -2620,12 +2641,17 @@ async def run_brain(
             "Le message ne peut pas être vide.",  
         )  
 
-    if len(message) > MAX_MESSAGE_CHARS:  
-        raise HTTPException(  
-            413,  
-            f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).",  
-        )  
+    if len(message) > MAX_MESSAGE_CHARS:
+        raise HTTPException(
+            413,
+            f"Message trop long (maximum {MAX_MESSAGE_CHARS} caractères).",
+        )
 
+    record_persistence_event("chat_received", "conversation")
+    log.info(
+        "[MEMORY FLOW] Chat reçu user_scope=authenticated_user message_chars=%s",
+        len(message),
+    )
     emotion_state = update_emotions_once(user_id, message)
     try:
         with db_connection() as affect_db:
@@ -2826,14 +2852,20 @@ async def run_brain(
         reply, repeatable_words, max_words=1 if maturity < 3.0 else None
     )
 
+    record_persistence_event("chat_reply_ready", "conversation")
+    log.info(
+        "[MEMORY FLOW] Réponse prête ; appel de sauvegarde imminent "
+        "user_scope=authenticated_user reply_chars=%s",
+        len(reply),
+    )
     save_conversation_turn(
         user_id,
         message,
         reply,
         source="conversation",
-    )  
+    )
 
-    return {  
+    return {
         "reply": reply,  
         "psychology": get_emotions(user_id),  
         "memories_used": len(relevant),  
@@ -3894,6 +3926,26 @@ async def api_memory_persistence(auth=Depends(require_auth)):
     with db_connection() as conn:
         report = inspect_memory_persistence(conn, user_id, settings.backend)
     return {"ok": True, "version": CHAPPIE_VERSION, "memory_persistence": report}
+
+
+@app.get("/api/memory/write-diagnostics")
+async def api_memory_write_diagnostics(auth=Depends(require_auth)):
+    """Read-only process-local counters for chat and Gemini Live persistence."""
+    _authenticated_user(auth)
+    settings = StorageSettings.from_env()
+    return {
+        "ok": True,
+        "version": CHAPPIE_VERSION,
+        "read_only": True,
+        "active_backend": settings.backend,
+        "sqlite_file_exists": DB_PATH.is_file(),
+        "process_local": True,
+        "events": persistence_event_snapshot(),
+        "note": (
+            "Compteurs depuis le dernier démarrage du processus Render. "
+            "Aucun contenu de message, identifiant utilisateur, chemin ou secret."
+        ),
+    }
 
 
 @app.get("/api/storage/persistence/global")

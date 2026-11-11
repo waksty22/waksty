@@ -450,7 +450,7 @@ def compare_database_inventories(
         "remote_foreign_key_violations": remote["foreign_key_violations"],
         "compatible": schema_comparison["compatible"] and not row_differences,
         "detailed_audit": {
-            "version": "50.54",
+            "version": "50.76",
             "read_only": True,
             "data_contents_exposed": False,
             "schema_readiness": "ready" if schema_ready else "blocked",

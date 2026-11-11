@@ -234,6 +234,10 @@ def gate_spoken_text(
                 output.append("")
         else:
             output.append(token if max_words is None or emitted_words < max_words else "")
+    # Punctuation alone is not a spoken response. If every lexical token
+    # was filtered, discard the leftover punctuation as well.
+    if emitted_words == 0:
+        return ""
     result = "".join(output)
     result = re.sub(r"\s+", " ", result)
     result = re.sub(r"\s+([,.!?;:])", r"\1", result)

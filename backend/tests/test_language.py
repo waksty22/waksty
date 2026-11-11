@@ -13,6 +13,7 @@ from learning.language import (
     get_usable_words,
     init_language_tables,
     record_heard_word,
+    record_heard_text,
     text_uses_only_allowed_words,
 )
 
@@ -64,3 +65,43 @@ def test_live_transcript_gate_blocks_unknown_words():
     assert text_uses_only_allowed_words("Bonjour Chappie !", allowed)
     assert not text_uses_only_allowed_words("Bonjour ami !", allowed)
     assert not text_uses_only_allowed_words("", allowed)
+
+
+
+def test_written_chat_records_words_as_heard_without_promoting_comprehension(language_db):
+    heard = record_heard_text(
+        language_db,
+        "creator",
+        "Bonjour Chappie, regarde la montre.",
+        evidence="Message écrit reçu par le chat classique",
+    )
+
+    assert {item["word"] for item in heard} == {
+        "bonjour", "chappie", "regarde", "la", "montre"
+    }
+    assert get_repeatable_words(language_db, "creator") == {
+        "bonjour", "chappie", "regarde", "la", "montre"
+    }
+    assert get_usable_words(language_db, "creator") == set()
+
+
+def test_newborn_chat_falls_back_to_one_word_heard_in_current_message(language_db):
+    message = "Bonjour Chappie"
+    record_heard_text(language_db, "creator", message, evidence="Chat écrit")
+
+    allowed = get_repeatable_words(language_db, "creator")
+    generated_reply = gate_spoken_text(
+        "Je suis heureux de te parler.",
+        allowed,
+        max_words=1,
+    )
+    imitation_fallback = gate_spoken_text(
+        message,
+        allowed,
+        max_words=1,
+    )
+
+    assert generated_reply == ""
+    assert gate_spoken_text("...", allowed, max_words=1) == ""
+    assert imitation_fallback == "Bonjour"
+    assert text_uses_only_allowed_words(imitation_fallback, allowed)

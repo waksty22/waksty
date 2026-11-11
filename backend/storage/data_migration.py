@@ -631,6 +631,19 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "missing_tables": missing_tables[:30],
             "missing_tables_truncated": len(missing_tables) > 30,
         },
+        "schema_plan_status": {
+            "ready": bool(schema.get("ready")),
+            "blocker_count": len(schema.get("blockers") or []),
+            "planned_statement_count": schema.get("planned_statement_count", 0),
+            "create_table_count": sum(
+                1 for item in (schema.get("statements") or [])
+                if item.get("kind") == "create_table"
+            ),
+            "rebuild_table_count": sum(
+                1 for item in (schema.get("statements") or [])
+                if item.get("kind") == "rebuild_table"
+            ),
+        },
         "counts": {
             "blockers": len(blockers),
             "differences": len(differences),
@@ -647,6 +660,8 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "structural_differences_truncated": len(structural_differences) > 100,
         "notes": [
             "Rapport compact : métadonnées de schéma autorisées uniquement ; aucun SQL brut, valeur par défaut ni contenu métier n'est exposé.",
+            "Les différences structurelles brutes (schema_diagnostics) ne sont pas les bloqueurs du plan SQL : schema_plan_status.ready indique si les changements revus peuvent les réconcilier.",
+            "Les tables manquantes sont créées par les instructions create_table du plan, avant la copie des lignes.",
             "Les différences de volumes de lignes ne sont pas détaillées dans cette vue.",
             "Aucune migration ni écriture en base n'a été exécutée.",
         ],

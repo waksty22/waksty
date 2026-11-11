@@ -417,9 +417,10 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
             # Identical semantic fingerprints prove there is no table rebuild
             # to perform; index differences are handled independently.
             continue
-        # Allow only the exact, reviewed legacy skills.xp omission: removing
-        # that one column declaration from the source SQL must reproduce the
-        # target SQL byte-for-byte after whitespace normalization.
+        # Allow only the exact, reviewed legacy skills.xp omission when the
+        # schema planner independently schedules the allowlisted xp addition.
+        # Column metadata must match for every shared column; the planner also
+        # verifies the table's keys, indexes and constraints before allowing it.
         if table == "skills":
             source_details = {c["name"]: c for c in _columns(source, table)}
             target_details = {c["name"]: c for c in _columns(target, table)}
@@ -434,27 +435,21 @@ def build_data_migration_plan(source: Any, target: Any) -> dict[str, Any]:
                 )
                 for name in source_names & target_names
             )
-            source_sql = next(
-                (item["sql"] for item in _objects(source) if item["name"] == table),
-                None,
-            )
-            target_sql = next(
-                (item["sql"] for item in _objects(target) if item["name"] == table),
-                None,
+            planned_xp_addition = any(
+                item.get("kind") == "add_column"
+                and item.get("object") == "skills.xp"
+                for item in (schema.get("statements") or [])
             )
             if (
                 source_names - target_names == {"xp"}
                 and not (target_names - source_names)
                 and common_match
+                and planned_xp_addition
                 and xp.get("type", "").upper() == "REAL"
                 and xp.get("notnull") == 1
                 and str(xp.get("default")) in {"0.0", "0"}
                 and xp.get("pk") == 0
                 and xp.get("hidden") == 0
-                and source_sql
-                and target_sql
-                and _remove_column_from_create_sql(source_sql, "xp")
-                    == " ".join(str(target_sql).split()).casefold()
             ):
                 continue
         table_sql_blockers.append(
@@ -631,6 +626,19 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "missing_tables": missing_tables[:30],
             "missing_tables_truncated": len(missing_tables) > 30,
         },
+        "schema_plan_status": {
+            "ready": bool(schema.get("ready")),
+            "blocker_count": len(schema.get("blockers") or []),
+            "planned_statement_count": schema.get("planned_statement_count", 0),
+            "create_table_count": sum(
+                1 for item in (schema.get("statements") or [])
+                if item.get("kind") == "create_table"
+            ),
+            "rebuild_table_count": sum(
+                1 for item in (schema.get("statements") or [])
+                if item.get("kind") == "rebuild_table"
+            ),
+        },
         "counts": {
             "blockers": len(blockers),
             "differences": len(differences),
@@ -647,6 +655,8 @@ def summarize_data_migration_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "structural_differences_truncated": len(structural_differences) > 100,
         "notes": [
             "Rapport compact : métadonnées de schéma autorisées uniquement ; aucun SQL brut, valeur par défaut ni contenu métier n'est exposé.",
+            "Les différences structurelles brutes (schema_diagnostics) ne sont pas les bloqueurs du plan SQL : schema_plan_status.ready indique si les changements revus peuvent les réconcilier.",
+            "Les tables manquantes sont créées par les instructions create_table du plan, avant la copie des lignes.",
             "Les différences de volumes de lignes ne sont pas détaillées dans cette vue.",
             "Aucune migration ni écriture en base n'a été exécutée.",
         ],

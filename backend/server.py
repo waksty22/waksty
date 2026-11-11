@@ -2663,18 +2663,35 @@ async def run_brain(
     except Exception:
         log.exception("[V26] Impossible d'enregistrer l'état affectif")
 
-    # Explicit teaching is shared across chat and Live; only the "heard" stage is granted.
+    # Written messages count as lexical exposure, never as comprehension.
+    # This lets newborn Chappie repeat words he has actually heard in chat.
     try:
         with db_connection() as teaching_db:
+            heard = record_heard_text(
+                teaching_db, user_id, message,
+                evidence="Message écrit reçu par le chat classique",
+                max_tokens=30,
+            )
             taught = record_explicit_word_teaching(
                 teaching_db, user_id, message,
                 evidence="Enseignement explicite via le chat classique",
             )
-            if taught:
+            if heard or taught:
                 teaching_db.commit()
-                log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis le chat", len(taught))
+            if heard:
+                log.info(
+                    "[APPRENTISSAGE PARTAGÉ] Exposition lexicale enregistrée "
+                    "depuis le chat : word_count=%s",
+                    len(heard),
+                )
+            if taught:
+                log.info(
+                    "[APPRENTISSAGE PARTAGÉ] Définitions explicites enregistrées "
+                    "depuis le chat : word_count=%s",
+                    len(taught),
+                )
     except Exception:
-        log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement du chat")
+        log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement lexical du chat")
 
     # Une conversation n'est pas une preuve d'apprentissage.
     # Les compétences progressent uniquement après validation explicite.
@@ -2845,18 +2862,45 @@ async def run_brain(
             "cette fois. Peux-tu reformuler ou réessayer ?"  
         )  
 
+    model_reply = reply
     with db_connection() as language_db:
         repeatable_words = get_repeatable_words(language_db, user_id)
     maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+    max_spoken_words = 1 if maturity < 3.0 else None
     reply = gate_spoken_text(
-        reply, repeatable_words, max_words=1 if maturity < 3.0 else None
+        model_reply, repeatable_words, max_words=max_spoken_words
     )
+    reply_mode = "generated"
+
+    # A newborn may be unable to repeat any word in Gemini's answer yet.
+    # In that case, imitate one word from the user's message: it has just
+    # been recorded as heard, and this does not mark it as understood.
+    if not reply:
+        reply = gate_spoken_text(
+            message, repeatable_words, max_words=max_spoken_words
+        )
+        reply_mode = "imitation"
+
+    if not reply:
+        log.warning(
+            "[CHAT OUTPUT] no_repeatable_word request_scope=authenticated_user "
+            "heard_word_count=%s",
+            len(repeatable_words),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Chappie n'a pas encore de mot qu'il puisse répéter. "
+                "Envoie-lui un mot écrit pour qu'il puisse d'abord l'entendre."
+            ),
+        )
 
     record_persistence_event("chat_reply_ready", "conversation")
     log.info(
         "[MEMORY FLOW] Réponse prête ; appel de sauvegarde imminent "
-        "user_scope=authenticated_user reply_chars=%s",
-        len(reply),
+        "user_scope=authenticated_user reply_chars=%s reply_mode=%s "
+        "heard_word_count=%s",
+        len(reply), reply_mode, len(repeatable_words),
     )
     save_conversation_turn(
         user_id,
@@ -2866,9 +2910,10 @@ async def run_brain(
     )
 
     return {
-        "reply": reply,  
-        "psychology": get_emotions(user_id),  
-        "memories_used": len(relevant),  
+        "reply": reply,
+        "reply_mode": reply_mode,
+        "psychology": get_emotions(user_id),
+        "memories_used": len(relevant),
     }
 
 def create_goal(

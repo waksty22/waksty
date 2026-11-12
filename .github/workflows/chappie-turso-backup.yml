@@ -28,7 +28,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install backup dependencies
-        run: python -m pip install --disable-pip-version-check libsql cryptography
+        run: python -m pip install --disable-pip-version-check httpx cryptography
 
       - name: Create and verify encrypted Turso backup
         run: python backend/scripts/backup_turso.py --output-dir backup-output

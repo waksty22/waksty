@@ -365,3 +365,150 @@ def test_missing_local_sqlite_and_completed_v50_65_remote_marker_is_detected(
     monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
 
     assert server._remote_turso_migration_completed() is True
+
+
+def test_empty_turso_database_can_be_bootstrapped_once(monkeypatch):
+    import sqlite3
+    import server
+
+    connection = sqlite3.connect(":memory:")
+    monkeypatch.setattr(server, "db_connection", lambda: connection)
+    monkeypatch.setattr(
+        server, "_remote_turso_migration_completed", lambda allow_missing_marker=False: False
+    )
+    for name in (
+        "init_memory_tables", "init_world_tables", "init_spatial_tables",
+        "init_learning_tables", "init_language_tables", "init_sensory_tables",
+        "init_object_learning_tables", "init_causal_learning_tables",
+        "init_supervised_learning_tables", "init_perception_fusion_tables",
+        "init_autobiographical_tables", "init_cognition_tables",
+        "init_development_tables",
+    ):
+        monkeypatch.setattr(server, name, lambda db: None)
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.setenv("CHAPPIE_TURSO_CUTOVER_READY", "1")
+    monkeypatch.setenv("CHAPPIE_TURSO_FRESH_START", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://fresh-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    try:
+        server.init_db()
+        marker = connection.execute(
+            "SELECT status, source_row_count FROM chappie_storage_migrations "
+            "WHERE migration_key='turso-fresh-bootstrap-v1'"
+        ).fetchone()
+        assert marker == ("completed", 0)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='skills'"
+        ).fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+def test_fresh_turso_bootstrap_refuses_nonempty_unmarked_database(monkeypatch):
+    import sqlite3
+    import server
+
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE existing_data (id INTEGER PRIMARY KEY)")
+    connection.commit()
+    monkeypatch.setattr(server, "db_connection", lambda: connection)
+    monkeypatch.setattr(
+        server, "_remote_turso_migration_completed", lambda allow_missing_marker=False: False
+    )
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.setenv("CHAPPIE_TURSO_CUTOVER_READY", "1")
+    monkeypatch.setenv("CHAPPIE_TURSO_FRESH_START", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://nonempty-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    try:
+        with pytest.raises(RuntimeError, match="Démarrage Turso refusé"):
+            server.init_db()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='existing_data'"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'"
+        ).fetchone()[0] == 0
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("with_xp", [True, False])
+def test_reset_skill_progress_supports_legacy_and_turso_schemas(with_xp):
+    import sqlite3
+    import server
+
+    connection = sqlite3.connect(":memory:")
+    xp_column = ", xp REAL NOT NULL DEFAULT 9.0" if with_xp else ""
+    connection.execute(
+        "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+        "level REAL NOT NULL" + xp_column +
+        ", evidence TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    if with_xp:
+        connection.execute(
+            "INSERT INTO skills(user_id, level, xp, evidence, updated_at) "
+            "VALUES ('creator', 8.0, 42.0, 'old', 'before')"
+        )
+    else:
+        connection.execute(
+            "INSERT INTO skills(user_id, level, evidence, updated_at) "
+            "VALUES ('creator', 8.0, 'old', 'before')"
+        )
+
+    try:
+        changed = server._reset_skill_progress(connection, "creator", "after")
+        assert changed == 1
+        row = connection.execute(
+            "SELECT level, evidence, updated_at FROM skills WHERE user_id='creator'"
+        ).fetchone()
+        assert row == (0.0, "Renaissance (Page Blanche)", "after")
+        if with_xp:
+            assert connection.execute(
+                "SELECT xp FROM skills WHERE user_id='creator'"
+            ).fetchone()[0] == 0.0
+    finally:
+        connection.close()
+
+
+def test_remote_turso_readiness_accepts_completed_fresh_bootstrap_marker(monkeypatch):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations ("
+        "migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, "
+        "source_table_count INTEGER NOT NULL, source_row_count INTEGER NOT NULL, "
+        "inserted_rows INTEGER NOT NULL, already_present_rows INTEGER NOT NULL, "
+        "completed_at TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('turso-fresh-bootstrap-v1', 'completed', 0, 0, 0, 0, 'test')"
+    )
+    remote.commit()
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://fresh-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    try:
+        assert server._remote_turso_migration_completed() is True
+    finally:
+        remote.close()

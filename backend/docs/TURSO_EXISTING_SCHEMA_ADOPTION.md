@@ -19,7 +19,7 @@ Avant toute initialisation, Chappie vérifie en lecture seule la présence des 1
 
 Après réussite des initialiseurs de schéma, Chappie écrit le marqueur distinct `turso-existing-schema-adoption-v1`. Il n'écrit jamais `sqlite-to-turso-v50.65` et ne modifie pas le marqueur de migration SQLite.
 
-Les initialiseurs utilisent les créations idempotentes du schéma applicatif. Aucun ordre de suppression, vidage ou réinitialisation n'est exécuté par cette procédure. Les lignes déjà présentes dans les tables métier sont conservées.
+Les initialiseurs utilisent des créations idempotentes et peuvent ajouter des tables ou colonnes manquantes. Le module mémoire peut copier les anciennes lignes de `memories` vers `memories_v19` sans supprimer la source ; le module spatial peut ajouter des colonnes manquantes à `place_memories`. Aucun ordre de suppression, vidage ou réinitialisation n'est exécuté. Les lignes déjà présentes dans les tables métier sont conservées.
 
 ## Activation contrôlée
 

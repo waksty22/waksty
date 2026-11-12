@@ -1,0 +1,46 @@
+name: Chappie Turso encrypted backup
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chappie-turso-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out backup code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backup dependencies
+        run: python -m pip install --disable-pip-version-check httpx cryptography
+
+      - name: Create and verify encrypted Turso backup
+        run: python backend/scripts/backup_turso.py --output-dir backup-output
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+
+      - name: Store encrypted backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chappie-turso-backup-${{ github.run_id }}
+          path: backup-output/*.zip
+          if-no-files-found: error
+          retention-days: 90

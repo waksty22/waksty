@@ -393,6 +393,7 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
 def _remote_turso_migration_completed(
     allow_missing_marker: bool = False,
     allow_fresh_bootstrap: bool = False,
+    allow_existing_schema_adoption: bool = False,
 ) -> bool:
     """Detect either a completed data migration or an explicitly bootstrapped empty Turso store."""
     database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
@@ -415,19 +416,25 @@ def _remote_turso_migration_completed(
                 return False
             raise RuntimeError("Base SQLite absente et marqueur Turso introuvable.")
         rows = connection.execute(
-            "SELECT migration_key, status FROM chappie_storage_migrations "
-            "WHERE migration_key IN (?, ?)",
-            ("sqlite-to-turso-v50.65", "turso-fresh-bootstrap-v1"),
+            "SELECT migration_key, status FROM chappie_storage_migrations"
         ).fetchall()
         accepted_rows = [
             row for row in rows
             if row[0] == "sqlite-to-turso-v50.65"
             or (allow_fresh_bootstrap and row[0] == "turso-fresh-bootstrap-v1")
+            or (
+                allow_existing_schema_adoption
+                and row[0] == "turso-existing-schema-adoption-v1"
+            )
         ]
         if not accepted_rows:
-            if allow_missing_marker:
+            if allow_missing_marker and not rows:
                 return False
             raise RuntimeError("Base SQLite absente et migration Turso non confirmée.")
+        if len(accepted_rows) != len(rows):
+            raise RuntimeError(
+                "Marqueurs Turso inconnus ou incompatibles ; démarrage bloqué."
+            )
         if any(row[1] != "completed" for row in accepted_rows):
             raise RuntimeError(
                 "Marqueur de stockage Turso présent mais non terminé ; démarrage bloqué."
@@ -474,10 +481,75 @@ def _reset_skill_progress(db: Any, user_id: str, now: str) -> int:
     return int(cursor.rowcount)
 
 
+def _turso_existing_schema_compatible() -> bool:
+    """Read-only guard for explicitly adopting a known existing Chappie schema."""
+    required_columns = {
+        "conversation_summaries": {
+            "id", "user_id", "summary", "through_conversation_id", "created_at",
+        },
+        "conversations": {"id", "user_id", "role", "content", "created_at"},
+        "dreams": {"id", "user_id", "content", "created_at"},
+        "emotional_state": {
+            "user_id", "joy", "fear", "curiosity", "frustration",
+            "sadness", "energy", "updated_at",
+        },
+        "goal_steps": {
+            "id", "goal_id", "description", "status", "evidence", "updated_at",
+        },
+        "goals": {
+            "id", "user_id", "title", "status", "progress",
+            "created_at", "updated_at",
+        },
+        "journal": {"id", "user_id", "entry", "kind", "created_at"},
+        "maintenance_state": {
+            "user_id", "last_active_at", "last_dream_at", "updated_at",
+        },
+        "memories": {
+            "id", "user_id", "category", "content", "importance", "tags",
+            "access_count", "created_at", "updated_at",
+        },
+        "mood_events": {
+            "id", "user_id", "event", "valence", "arousal", "created_at",
+        },
+        "relationships": {
+            "user_id", "trust", "affection", "dependence", "updated_at",
+        },
+        "skills": {"id", "user_id", "skill_name", "level", "evidence", "updated_at"},
+        "voice_profiles": {
+            "id", "user_id", "profile_name", "embedding_json",
+            "created_at", "updated_at",
+        },
+    }
+    db = db_connection()
+    try:
+        tables = {
+            str(row[0])
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        if not set(required_columns).issubset(tables):
+            return False
+        for table, required in required_columns.items():
+            actual = {
+                str(row[1])
+                for row in db.execute(
+                    f"PRAGMA table_info({_quote_sql_identifier(table)})"
+                ).fetchall()
+            }
+            if not required.issubset(actual):
+                return False
+        return True
+    finally:
+        db.close()
+
+
 def init_db() -> None:
     global STORAGE_MIGRATION_PENDING_CUTOVER
     settings = StorageSettings.from_env()
     fresh_turso_bootstrap_pending = False
+    existing_schema_adoption_pending = False
     if settings.backend == "sqlite":
         local_pending = _local_migration_pending_cutover()
         remote_pending = False
@@ -514,25 +586,40 @@ def init_db() -> None:
         fresh_start_requested = (
             os.getenv("CHAPPIE_TURSO_FRESH_START", "").strip() == "1"
         )
+        adoption_requested = (
+            os.getenv("CHAPPIE_TURSO_ADOPT_EXISTING_SCHEMA", "").strip() == "1"
+        )
+        if fresh_start_requested and adoption_requested:
+            raise RuntimeError(
+                "Choisir un seul mode : bootstrap neuf ou adoption du schéma existant."
+            )
         try:
             storage_ready = _remote_turso_migration_completed(
-                allow_missing_marker=fresh_start_requested,
+                allow_missing_marker=fresh_start_requested or adoption_requested,
                 allow_fresh_bootstrap=True,
+                allow_existing_schema_adoption=adoption_requested,
             )
             if not storage_ready:
-                if not fresh_start_requested:
+                if fresh_start_requested:
+                    with db_connection() as probe_db:
+                        existing_tables = _turso_application_table_count(probe_db)
+                    if existing_tables:
+                        raise RuntimeError(
+                            "Le bootstrap neuf exige une base Turso vide. "
+                            "Les tables existantes sont préservées ; utilisez une nouvelle base."
+                        )
+                    fresh_turso_bootstrap_pending = True
+                elif adoption_requested:
+                    if not _turso_existing_schema_compatible():
+                        raise RuntimeError(
+                            "Le schéma Turso existant ne correspond pas au schéma Chappie attendu."
+                        )
+                    existing_schema_adoption_pending = True
+                else:
                     raise RuntimeError("Aucun marqueur de stockage Turso terminé.")
-                with db_connection() as probe_db:
-                    existing_tables = _turso_application_table_count(probe_db)
-                if existing_tables:
-                    raise RuntimeError(
-                        "Le bootstrap neuf exige une base Turso vide. "
-                        "Les tables existantes sont préservées ; utilisez une nouvelle base."
-                    )
-                fresh_turso_bootstrap_pending = True
         except Exception as exc:
             raise RuntimeError(
-                "Démarrage Turso refusé : migration ou initialisation neuve non validée."
+                "Démarrage Turso refusé : migration, adoption ou initialisation neuve non validée."
             ) from exc
     with db_connection() as db:
         # WAL is a local SQLite file-journal setting, not a remote libSQL
@@ -709,7 +796,12 @@ def init_db() -> None:
         init_cognition_tables(db)
         init_development_tables(db)
 
-    if fresh_turso_bootstrap_pending:
+    if fresh_turso_bootstrap_pending or existing_schema_adoption_pending:
+        marker_key = (
+            "turso-fresh-bootstrap-v1"
+            if fresh_turso_bootstrap_pending
+            else "turso-existing-schema-adoption-v1"
+        )
         with db_connection() as db:
             db.execute(
                 """
@@ -726,18 +818,24 @@ def init_db() -> None:
             )
             db.execute(
                 """
-                INSERT OR REPLACE INTO chappie_storage_migrations (
+                INSERT INTO chappie_storage_migrations (
                     migration_key, status, source_table_count, source_row_count,
                     inserted_rows, already_present_rows, completed_at
                 ) VALUES (?, 'completed', 0, 0, 0, 0, ?)
                 """,
-                ("turso-fresh-bootstrap-v1", utc_now()),
+                (marker_key, utc_now()),
             )
             db.commit()
-        log.warning(
-            "[STORAGE] Empty Turso database initialized from application schema; "
-            "no SQLite data was migrated."
-        )
+        if fresh_turso_bootstrap_pending:
+            log.warning(
+                "[STORAGE] Empty Turso database initialized from application schema; "
+                "no SQLite data was migrated."
+            )
+        else:
+            log.warning(
+                "[STORAGE] Existing compatible Turso schema adopted; "
+                "existing application rows were preserved and no SQLite migration was claimed."
+            )
 
 
 def valid_user(user_id: str) -> str:

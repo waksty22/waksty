@@ -4704,7 +4704,7 @@ def reset_turso_life(user_id: str) -> dict[str, Any]:
             protected_tables = {
                 "voice_profiles", "chappie_storage_migrations",
                 "skills", "emotional_state", "relationships",
-                "maintenance_state", "user_intentions",
+                "maintenance_state", "user_intentions", "goals",
             }
             user_tables = []
             for row in connection.execute(

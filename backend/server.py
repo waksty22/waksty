@@ -166,7 +166,7 @@ from diagnostics.conversation_persistence import (
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.77"
+CHAPPIE_VERSION = "50.78"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(

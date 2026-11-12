@@ -4738,7 +4738,10 @@ def reset_turso_life(user_id: str) -> dict[str, Any]:
             while pending:
                 ready = sorted(
                     table for table in pending
-                    if not (dependencies[table] & pending)
+                    if not any(
+                        table in dependencies[other]
+                        for other in pending if other != table
+                    )
                 )
                 if not ready:
                     ready = [sorted(pending)[0]]

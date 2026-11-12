@@ -428,7 +428,9 @@ def _remote_turso_migration_completed(
             )
         ]
         if not accepted_rows:
-            if allow_missing_marker and not rows:
+            if allow_missing_marker and not allow_existing_schema_adoption:
+                return False
+            if allow_existing_schema_adoption and not rows:
                 return False
             raise RuntimeError("Base SQLite absente et migration Turso non confirmée.")
         if len(accepted_rows) != len(rows):

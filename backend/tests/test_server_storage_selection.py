@@ -374,7 +374,7 @@ def test_empty_turso_database_can_be_bootstrapped_once(monkeypatch):
     connection = sqlite3.connect(":memory:")
     monkeypatch.setattr(server, "db_connection", lambda: connection)
     monkeypatch.setattr(
-        server, "_remote_turso_migration_completed", lambda allow_missing_marker=False: False
+        server, "_remote_turso_migration_completed", lambda allow_missing_marker=False, allow_fresh_bootstrap=False: False
     )
     for name in (
         "init_memory_tables", "init_world_tables", "init_spatial_tables",
@@ -510,5 +510,46 @@ def test_remote_turso_readiness_accepts_completed_fresh_bootstrap_marker(monkeyp
     monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
     try:
         assert server._remote_turso_migration_completed(allow_fresh_bootstrap=True) is True
+    finally:
+        remote.close()
+
+
+def test_fresh_bootstrap_marker_is_not_a_sqlite_data_migration(monkeypatch):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations ("
+        "migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, "
+        "source_table_count INTEGER NOT NULL, source_row_count INTEGER NOT NULL, "
+        "inserted_rows INTEGER NOT NULL, already_present_rows INTEGER NOT NULL, "
+        "completed_at TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('turso-fresh-bootstrap-v1', 'completed', 0, 0, 0, 0, 'test')"
+    )
+    remote.commit()
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://fresh-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    try:
+        assert server._remote_turso_migration_completed(
+            allow_missing_marker=True
+        ) is False
     finally:
         remote.close()

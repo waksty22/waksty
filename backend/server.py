@@ -4815,6 +4815,19 @@ def reset_turso_life(user_id: str) -> dict[str, Any]:
                     "VALUES (?, 0.0, 0.0, 0.0, ?)", (user_id, now)
                 )
 
+            intention_columns = {
+                str(row[1]) for row in connection.execute(
+                    "PRAGMA table_info(user_intentions)"
+                ).fetchall()
+            }
+            if {"current_intent", "confidence", "details", "updated_at"} <= intention_columns:
+                connection.execute(
+                    "UPDATE user_intentions SET current_intent='éveil sensoriel', "
+                    "confidence=0.0, details='Aucune intention acquise : naissance', "
+                    "updated_at=? WHERE user_id=?",
+                    (now, user_id),
+                )
+
             cursor = connection.execute(
                 "UPDATE maintenance_state SET last_active_at=?, last_dream_at='', "
                 "updated_at=? WHERE user_id=?", (now, now, user_id)

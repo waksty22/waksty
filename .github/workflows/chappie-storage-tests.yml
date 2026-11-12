@@ -1,6 +1,9 @@
 name: Chappie storage safety tests
 
 on:
+  push:
+    branches:
+      - fix/v50-78-turso-fresh-bootstrap
   pull_request:
     branches: [main]
     paths:

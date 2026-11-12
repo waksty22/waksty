@@ -74,3 +74,33 @@ def test_backup_job_refuses_to_overwrite_existing_archive(tmp_path):
         assert output.read_bytes() == b"preserve this file"
     finally:
         db.close()
+
+
+def test_backup_job_supports_serialized_hrana_select_transaction(tmp_path):
+    from storage.hrana_backup import HranaTransactionConnection
+
+    db = _database()
+
+    class FakeHranaResult:
+        def __init__(self, cursor):
+            self.columns = [column[0] for column in cursor.description or []]
+            self.rows = cursor.fetchall()
+
+    class FakeHranaTransaction:
+        def execute(self, sql):
+            assert sql.lstrip().upper().startswith("SELECT")
+            assert ";" not in sql
+            return FakeHranaResult(db.execute(sql))
+
+    output = tmp_path / "hrana-backup.zip"
+    try:
+        result = create_backup_archive(
+            HranaTransactionConnection(FakeHranaTransaction()),
+            output,
+            "test-only-backup-key-not-production",
+            manage_snapshot=False,
+        )
+        assert result["verified_after_packaging"] is True
+        assert result["total_rows"] == 1
+    finally:
+        db.close()

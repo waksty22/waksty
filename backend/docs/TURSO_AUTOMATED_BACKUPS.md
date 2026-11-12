@@ -4,7 +4,7 @@
 
 Le workflow GitHub Actions `.github/workflows/chappie-turso-backup.yml` lance une sauvegarde quotidienne à 03:17 UTC. Une exécution manuelle est également disponible depuis l'onglet Actions.
 
-Le script `backend/scripts/backup_turso.py` :
+Le script `backend/scripts/backup_turso.py` utilise Hrana HTTP v2 (flux transactionnel sérialisé), comme le chemin de sauvegarde de migration ; il n'utilise pas l'ancien transport WebSocket libsql. Il :
 
 1. ouvre une connexion Turso en lecture seule sur les données ;
 2. exporte le schéma et les lignes dans un instantané logique cohérent ;

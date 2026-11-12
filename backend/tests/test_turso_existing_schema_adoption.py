@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 
 CORE_COLUMNS = {
     "conversation_summaries": "id INTEGER, user_id TEXT, summary TEXT, through_conversation_id INTEGER, created_at TEXT",
@@ -147,6 +149,7 @@ def test_existing_schema_adoption_marker_is_accepted_only_when_enabled(
         assert server._remote_turso_migration_completed(
             allow_existing_schema_adoption=True
         ) is True
-        assert server._remote_turso_migration_completed() is False
+        with pytest.raises(RuntimeError, match="migration Turso non confirmée"):
+            server._remote_turso_migration_completed()
     finally:
         remote.close()

@@ -57,16 +57,6 @@ def test_existing_schema_adoption_is_opt_in_and_preserves_existing_rows(
         "_remote_turso_migration_completed",
         lambda **kwargs: False,
     )
-    for name in (
-        "init_memory_tables", "init_world_tables", "init_spatial_tables",
-        "init_learning_tables", "init_language_tables", "init_sensory_tables",
-        "init_object_learning_tables", "init_causal_learning_tables",
-        "init_supervised_learning_tables", "init_perception_fusion_tables",
-        "init_autobiographical_tables", "init_cognition_tables",
-        "init_development_tables",
-    ):
-        monkeypatch.setattr(server, name, lambda db: None)
-
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
     monkeypatch.setenv("CHAPPIE_TURSO_CUTOVER_READY", "1")
     monkeypatch.setenv("CHAPPIE_TURSO_ADOPT_EXISTING_SCHEMA", "1")
@@ -94,6 +84,14 @@ def test_existing_schema_adoption_is_opt_in_and_preserves_existing_rows(
             "SELECT COUNT(*) FROM chappie_storage_migrations "
             "WHERE migration_key='sqlite-to-turso-v50.65'"
         ).fetchone()[0] == 0
+        assert check.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='memories_v19'"
+        ).fetchone()[0] == 1
+        assert check.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='place_memories'"
+        ).fetchone()[0] == 1
     finally:
         check.close()
 

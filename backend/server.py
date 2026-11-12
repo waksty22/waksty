@@ -4808,7 +4808,11 @@ async def api_reset(payload: ResetRequest, auth=Depends(require_auth)):
         )
     try:
         active_backend = StorageSettings.from_env().backend
-        result = reset_chappie_life(user_id)
+        if active_backend == "turso":
+            result = reset_turso_life(user_id)
+        else:
+            result = reset_chappie_life(user_id)
+        cognitive_engine.invalidate_cache(user_id)
         return {
             "success": True,
             "database_reset": active_backend,

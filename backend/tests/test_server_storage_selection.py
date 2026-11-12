@@ -509,6 +509,6 @@ def test_remote_turso_readiness_accepts_completed_fresh_bootstrap_marker(monkeyp
     monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://fresh-test.invalid")
     monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
     try:
-        assert server._remote_turso_migration_completed() is True
+        assert server._remote_turso_migration_completed(allow_fresh_bootstrap=True) is True
     finally:
         remote.close()

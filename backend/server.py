@@ -4698,12 +4698,58 @@ def reset_turso_life(user_id: str) -> dict[str, Any]:
         deleted: dict[str, int] = {}
         connection.execute("BEGIN")
         try:
-            for table in (
-                "conversation_summaries", "conversations", "dreams",
-                "memories", "mood_events", "journal",
-            ):
+            # Reset every user-scoped experience table, including newer
+            # learning/world/spatial tables added after the original Turso schema.
+            # Keep stable voice profiles and migration audit markers.
+            protected_tables = {
+                "voice_profiles", "chappie_storage_migrations",
+                "skills", "emotional_state", "relationships",
+                "maintenance_state", "user_intentions",
+            }
+            user_tables = []
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall():
+                table = str(row[0])
+                if table in protected_tables:
+                    continue
+                columns = {
+                    str(column[1]) for column in connection.execute(
+                        f'PRAGMA table_info("{table.replace(chr(34), chr(34)*2)}")'
+                    ).fetchall()
+                }
+                if "user_id" in columns:
+                    user_tables.append(table)
+
+            # Delete dependent user-owned tables before their parents.
+            dependencies = {table: set() for table in user_tables}
+            for table in user_tables:
+                safe_table = table.replace('"', '""')
+                for fk in connection.execute(
+                    f'PRAGMA foreign_key_list("{safe_table}")'
+                ).fetchall():
+                    parent = str(fk[2])
+                    if parent in dependencies:
+                        dependencies[table].add(parent)
+
+            ordered_tables = []
+            pending = set(user_tables)
+            while pending:
+                ready = sorted(
+                    table for table in pending
+                    if not (dependencies[table] & pending)
+                )
+                if not ready:
+                    ready = [sorted(pending)[0]]
+                for table in ready:
+                    ordered_tables.append(table)
+                    pending.remove(table)
+
+            for table in ordered_tables:
+                safe_table = table.replace('"', '""')
                 cursor = connection.execute(
-                    f'DELETE FROM "{table}" WHERE user_id=?', (user_id,)
+                    f'DELETE FROM "{safe_table}" WHERE user_id=?', (user_id,)
                 )
                 deleted[table] = max(0, int(cursor.rowcount))
 

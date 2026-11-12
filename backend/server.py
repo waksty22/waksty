@@ -6295,7 +6295,6 @@ async def api_storage_migration_cancel(
 
 
 @app.get("/api/turso/backup")
-
 async def api_turso_backup(auth=Depends(require_auth)):
     """Create a verified AES-GCM encrypted, read-only logical Turso backup."""
     _authenticated_user(auth)
@@ -6310,15 +6309,18 @@ async def api_turso_backup(auth=Depends(require_auth)):
             detail="BACKUP_ENCRYPTION_KEY doit être configurée (12 caractères minimum).",
         )
 
-    connection = None
+    client = None
+    transaction = None
     try:
-        import libsql
+        import zipfile
+        from storage.hrana_backup import HranaTransactionConnection
+        from storage.hrana_http import HranaHttpClient
         from storage.logical_backup import export_encrypted_logical_backup
 
-        connection = libsql.connect(database=database_url, auth_token=auth_token)
-        connection.execute("SELECT 1").fetchone()
-
-        import zipfile
+        # Use the same serialized HTTP v2 stream as the migration backup path.
+        # The archived libsql WebSocket transport is intentionally not used.
+        client = HranaHttpClient(database_url, auth_token)
+        transaction = client.transaction()
 
         with tempfile.TemporaryDirectory(prefix="chappie-turso-backup-") as temp_dir:
             filename = "chappie-turso-backup-" + datetime.now(
@@ -6326,7 +6328,10 @@ async def api_turso_backup(auth=Depends(require_auth)):
             ).strftime("%Y%m%d-%H%M%S") + ".zip"
             backup_path = Path(temp_dir) / "chappie-turso-backup.json.enc"
             result = export_encrypted_logical_backup(
-                connection, backup_path, encryption_key
+                HranaTransactionConnection(transaction),
+                backup_path,
+                encryption_key,
+                manage_snapshot=False,
             )
             archive_path = Path(temp_dir) / filename
             checksum_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
@@ -6337,6 +6342,7 @@ async def api_turso_backup(auth=Depends(require_auth)):
                 archive.write(checksum_path, arcname=checksum_path.name)
             payload = archive_path.read_bytes()
 
+        transaction.commit()
         log.info(
             "[TURSO] Verified encrypted logical backup ready "
             "(%s bytes, %s tables, %s rows).",
@@ -6361,14 +6367,22 @@ async def api_turso_backup(auth=Depends(require_auth)):
         raise
     except Exception as exc:
         log.exception("[TURSO] Échec de l'export logique chiffré en lecture seule.")
+        if transaction is not None:
+            try:
+                transaction.rollback()
+            except Exception as rollback_error:
+                log.exception(
+                    "[TURSO] Rollback de sauvegarde impossible (%s).",
+                    type(rollback_error).__name__,
+                )
         raise HTTPException(
             status_code=503,
             detail="Sauvegarde Turso impossible : " + type(exc).__name__,
         )
     finally:
-        if connection is not None:
+        if client is not None:
             try:
-                connection.close()
+                client.close()
             except Exception:
                 pass
 

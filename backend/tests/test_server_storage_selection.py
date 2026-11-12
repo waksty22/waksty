@@ -597,3 +597,115 @@ def test_reset_api_uses_only_the_active_storage_backend(
     assert result["database_reset"] == backend
     assert result["result"]["source"] == expected
     assert calls == [(backend, "creator"), ("cache", "creator")]
+
+
+
+def test_turso_reset_clears_new_user_tables_and_preserves_voice_profile(
+    monkeypatch,
+):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote = sqlite3.connect(":memory:")
+    remote.executescript("""
+        CREATE TABLE conversation_summaries (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE conversations (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE dreams (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE goal_steps (id INTEGER PRIMARY KEY, goal_id INTEGER);
+        CREATE TABLE goals (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE emotional_state (
+            user_id TEXT PRIMARY KEY, joy REAL, fear REAL, curiosity REAL,
+            frustration REAL, sadness REAL, energy REAL, updated_at TEXT
+        );
+        CREATE TABLE journal (
+            id INTEGER PRIMARY KEY, user_id TEXT, entry TEXT, kind TEXT, created_at TEXT
+        );
+        CREATE TABLE maintenance_state (
+            user_id TEXT PRIMARY KEY, last_active_at TEXT, last_dream_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE memories (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE mood_events (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE relationships (
+            user_id TEXT PRIMARY KEY, trust REAL, affection REAL,
+            dependence REAL, updated_at TEXT
+        );
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY, user_id TEXT, level REAL, xp REAL,
+            evidence TEXT, updated_at TEXT
+        );
+        CREATE TABLE voice_profiles (id INTEGER PRIMARY KEY, user_id TEXT, profile_name TEXT);
+        CREATE TABLE world_entities (id INTEGER PRIMARY KEY, user_id TEXT, label TEXT);
+        CREATE TABLE world_relations (
+            id INTEGER PRIMARY KEY, user_id TEXT, entity_id INTEGER REFERENCES world_entities(id)
+        );
+        CREATE TABLE user_intentions (
+            user_id TEXT PRIMARY KEY, current_intent TEXT, confidence REAL,
+            details TEXT, updated_at TEXT
+        );
+        INSERT INTO goals VALUES (7, 'creator');
+        INSERT INTO goal_steps VALUES (8, 7);
+        INSERT INTO world_entities VALUES (9, 'creator', 'old entity');
+        INSERT INTO world_relations VALUES (10, 'creator', 9);
+        INSERT INTO conversations VALUES (1, 'creator');
+        INSERT INTO memories VALUES (2, 'creator');
+        INSERT INTO skills VALUES (3, 'creator', 8, 90, 'old', 'before');
+        INSERT INTO emotional_state VALUES ('creator', 5, 4, 3, 2, 1, 10, 'before');
+        INSERT INTO relationships VALUES ('creator', 8, 7, 6, 'before');
+        INSERT INTO maintenance_state VALUES ('creator', 'before', 'dream', 'before');
+        INSERT INTO voice_profiles VALUES (11, 'creator', 'stable voice');
+        INSERT INTO user_intentions VALUES ('creator', 'old intent', 0.9, 'old', 'before');
+    """)
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def commit(self):
+            return remote.commit()
+
+        def rollback(self):
+            return remote.rollback()
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    try:
+        result = server.reset_turso_life("creator")
+        assert result["voice_profiles_preserved"] is True
+        assert remote.execute("SELECT COUNT(*) FROM voice_profiles").fetchone()[0] == 1
+        for table in (
+            "conversations", "memories", "goals", "goal_steps",
+            "world_entities", "world_relations",
+        ):
+            assert remote.execute(
+                f'SELECT COUNT(*) FROM "{table}"'
+            ).fetchone()[0] == 0
+        assert remote.execute(
+            "SELECT level, xp, evidence FROM skills WHERE user_id='creator'"
+        ).fetchone() == (0.0, 0.0, "Renaissance (Page Blanche)")
+        assert remote.execute(
+            "SELECT joy, fear, curiosity, frustration, sadness, energy "
+            "FROM emotional_state WHERE user_id='creator'"
+        ).fetchone() == (0.0, 0.0, 0.0, 0.0, 0.0, 100.0)
+        assert remote.execute(
+            "SELECT current_intent, confidence, details "
+            "FROM user_intentions WHERE user_id='creator'"
+        ).fetchone() == (
+            "éveil sensoriel", 0.0,
+            "Aucune intention acquise : naissance",
+        )
+        assert remote.execute(
+            "SELECT kind FROM journal WHERE user_id='creator'"
+        ).fetchone() == ("reset",)
+    finally:
+        remote.close()

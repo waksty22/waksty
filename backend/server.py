@@ -390,7 +390,9 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
     return installed
 
 
-def _remote_turso_migration_completed() -> bool:
+def _remote_turso_migration_completed(
+    allow_missing_marker: bool = False,
+) -> bool:
     """Detect a completed remote transfer if Render's ephemeral SQLite file vanished."""
     database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
     auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
@@ -411,17 +413,25 @@ def _remote_turso_migration_completed() -> bool:
             "SELECT 1 FROM sqlite_master WHERE type='table' "
             "AND name='chappie_storage_migrations'"
         ).fetchone()
+        # A missing marker means that no successful SQLite -> Turso migration
+        # was recorded. The migration helper writes this marker in the same
+        # remote transaction as the copied data, so an absent row is a valid
+        # pre-migration state. Connection/query errors still fail closed below.
         if not exists:
-            raise RuntimeError(
-                "Base SQLite absente et marqueur de migration Turso introuvable ; démarrage bloqué."
-            )
+            if allow_missing_marker:
+                return False
+            raise RuntimeError("Base SQLite absente et marqueur Turso introuvable.")
         row = connection.execute(
             "SELECT status FROM chappie_storage_migrations WHERE migration_key=?",
             ("sqlite-to-turso-v50.65",),
         ).fetchone()
-        if not row or row[0] != "completed":
+        if row is None:
+            if allow_missing_marker:
+                return False
+            raise RuntimeError("Base SQLite absente et migration Turso non confirm?e.")
+        if row[0] != "completed":
             raise RuntimeError(
-                "Base SQLite absente et migration Turso non confirmée ; démarrage bloqué."
+                "Marqueur de migration Turso présent mais non terminé ; démarrage bloqué."
             )
         return True
     except Exception as exc:
@@ -440,11 +450,24 @@ def init_db() -> None:
     if settings.backend == "sqlite":
         local_pending = _local_migration_pending_cutover()
         remote_pending = False
-        if (
-            not local_pending
-            and os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1"
-        ):
-            remote_pending = _remote_turso_migration_completed()
+        migration_enabled = (
+            os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1"
+        )
+        local_sqlite_exists = DB_PATH.is_file()
+        turso_credentials_present = bool(
+            os.getenv("TURSO_DATABASE_URL", "").strip()
+            or os.getenv("TURSO_AUTH_TOKEN", "").strip()
+        )
+        # A fresh local SQLite installation is allowed when migration is not
+        # configured. If migration is enabled, or SQLite vanished while Turso
+        # credentials exist, verify the durable remote migration marker.
+        should_check_remote = migration_enabled or (
+            not local_sqlite_exists and turso_credentials_present
+        )
+        if not local_pending and should_check_remote:
+            remote_pending = _remote_turso_migration_completed(
+                allow_missing_marker=local_sqlite_exists
+            )
         if local_pending or remote_pending:
             STORAGE_MIGRATION_PENDING_CUTOVER = True
             log.warning(
@@ -5039,6 +5062,143 @@ async def create_live_websocket_ticket(user_id: str = Depends(require_auth)):
     )
 
 
+class LiveStorageCutover(Exception):
+    """Signal that Gemini Live initialization was interrupted for storage cutover."""
+
+
+async def supervise_live_initialization(operation_task, websocket):
+    """Supervise Gemini Live initialization and always clean up its child task."""
+    try:
+        while not STORAGE_MIGRATION_PENDING_CUTOVER and not operation_task.done():
+            await asyncio.wait({operation_task}, timeout=0.25)
+
+        if STORAGE_MIGRATION_PENDING_CUTOVER:
+            if not operation_task.done():
+                operation_task.cancel()
+
+            results = await asyncio.gather(operation_task, return_exceptions=True)
+
+            try:
+                await websocket.close(
+                    code=1013,
+                    reason="Migration memoire en cours de bascule vers Turso.",
+                )
+            except Exception:
+                log.debug(
+                    "[GEMINI LIVE] Initialization WebSocket close unavailable.",
+                    exc_info=True,
+                )
+            for result in results:
+                if not isinstance(result, BaseException):
+                    continue
+                if isinstance(result, asyncio.CancelledError):
+                    continue
+                if not isinstance(result, Exception):
+                    raise result
+                log.error(
+                    "[GEMINI LIVE] Initialization operation failed during storage cutover: %s",
+                    result,
+                    exc_info=(type(result), result, result.__traceback__),
+                )
+
+            raise LiveStorageCutover(
+                "Gemini Live initialization interrupted for storage cutover."
+            )
+
+        return operation_task.result()
+    finally:
+        if not operation_task.done():
+            operation_task.cancel()
+            await asyncio.gather(operation_task, return_exceptions=True)
+
+
+@asynccontextmanager
+async def supervised_gemini_connection(websocket):
+    """Open Gemini Live with cancellation and context cleanup during storage cutover."""
+    manager = websockets.connect(
+        GEMINI_LIVE_URI,
+        open_timeout=20,
+        close_timeout=5,
+        ping_interval=20,
+        ping_timeout=20,
+        max_size=20_000_000,
+    )
+    open_task = asyncio.create_task(manager.__aenter__())
+
+    try:
+        gemini_ws = await supervise_live_initialization(open_task, websocket)
+    except BaseException:
+        if not open_task.done():
+            open_task.cancel()
+
+        results = await asyncio.gather(open_task, return_exceptions=True)
+        if results and not isinstance(results[0], BaseException):
+            try:
+                await manager.__aexit__(None, None, None)
+            except Exception:
+                log.exception("[GEMINI LIVE] Failed to close connection after initialization interruption.")
+        raise
+
+    try:
+        yield gemini_ws
+    finally:
+        await manager.__aexit__(None, None, None)
+
+
+async def supervise_live_bridge_tasks(client_task, gemini_task, websocket):
+    """Stop both Gemini Live bridge tasks promptly when storage cutover starts."""
+    tasks = (client_task, gemini_task)
+    completed = set()
+    cutover_triggered = False
+
+    try:
+        while True:
+            completed, _ = await asyncio.wait(
+                tasks,
+                timeout=0.25,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if STORAGE_MIGRATION_PENDING_CUTOVER:
+                cutover_triggered = True
+                try:
+                    await websocket.close(
+                        code=1013,
+                        reason="Migration memoire en cours de bascule vers Turso.",
+                    )
+                except Exception:
+                    log.debug(
+                        "[GEMINI LIVE] WebSocket close already completed or unavailable.",
+                        exc_info=True,
+                    )
+                break
+            if completed:
+                break
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for result in results:
+        if not isinstance(result, BaseException):
+            continue
+        if isinstance(result, (asyncio.CancelledError, WebSocketDisconnect)):
+            continue
+        if not isinstance(result, Exception):
+            raise result
+        if cutover_triggered:
+            log.error(
+                "[GEMINI LIVE] Unexpected bridge error during storage cutover: %s",
+                result,
+                exc_info=(type(result), result, result.__traceback__),
+            )
+        else:
+            raise result
+
+    if cutover_triggered:
+        log.info("[GEMINI LIVE] Session stopped for storage cutover.")
+
+
 @app.websocket("/ws")
 @app.websocket("/ws/live")
 async def websocket_endpoint(
@@ -5076,14 +5236,7 @@ async def websocket_endpoint(
 
     try:
         log.info("[GEMINI LIVE] Ouverture session modèle=%s", GEMINI_LIVE_MODEL)
-        async with websockets.connect(
-            GEMINI_LIVE_URI,
-            open_timeout=20,
-            close_timeout=5,
-            ping_interval=20,
-            ping_timeout=20,
-            max_size=20_000_000,
-        ) as gemini_ws:
+        async with supervised_gemini_connection(websocket) as gemini_ws:
             identity_prompt = get_identity_prompt(user_id)
             with db_connection() as language_db:
                 repeatable_words = sorted(get_repeatable_words(language_db, user_id))
@@ -5128,11 +5281,19 @@ async def websocket_endpoint(
                     "outputAudioTranscription": {},
                 }
             }
-            await gemini_ws.send(json.dumps(setup_message, ensure_ascii=False))
+            setup_send_task = asyncio.create_task(
+                gemini_ws.send(json.dumps(setup_message, ensure_ascii=False))
+            )
+            await supervise_live_initialization(setup_send_task, websocket)
 
             try:
                 while True:
-                    raw_setup = await asyncio.wait_for(gemini_ws.recv(), timeout=20)
+                    setup_recv_task = asyncio.create_task(
+                        asyncio.wait_for(gemini_ws.recv(), timeout=20)
+                    )
+                    raw_setup = await supervise_live_initialization(
+                        setup_recv_task, websocket
+                    )
                     setup_response = json.loads(raw_setup)
                     if "setupComplete" in setup_response:
                         break
@@ -5157,20 +5318,15 @@ async def websocket_endpoint(
                 await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
                 return
 
-            await websocket.send_json({
+            connected_task = asyncio.create_task(websocket.send_json({
                 "type": "connected",
                 "message": "Gemini Live prêt : microphone et audio de réponse activés.",
                 "model": GEMINI_LIVE_MODEL,
-            })
+            }))
+            await supervise_live_initialization(connected_task, websocket)
 
             async def client_to_gemini():
                 while True:
-                    if STORAGE_MIGRATION_PENDING_CUTOVER:
-                        await websocket.close(
-                            code=1013,
-                            reason="Migration mémoire en cours de bascule vers Turso.",
-                        )
-                        return
                     payload = await websocket.receive_json()
                     action = payload.get("action")
                     if action == "audio_chunk":
@@ -5217,12 +5373,6 @@ async def websocket_endpoint(
 
             async def gemini_to_client():
                 async for raw_message in gemini_ws:
-                    if STORAGE_MIGRATION_PENDING_CUTOVER:
-                        await websocket.close(
-                            code=1013,
-                            reason="Migration mémoire en cours de bascule vers Turso.",
-                        )
-                        return
                     response = json.loads(raw_message)
                     if "error" in response:
                         error = response["error"]
@@ -5388,18 +5538,14 @@ async def websocket_endpoint(
 
             client_task = asyncio.create_task(client_to_gemini())
             gemini_task = asyncio.create_task(gemini_to_client())
-            done, pending = await asyncio.wait(
-                {client_task, gemini_task},
-                return_when=asyncio.FIRST_COMPLETED,
+            await supervise_live_bridge_tasks(
+                client_task,
+                gemini_task,
+                websocket,
             )
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-            for task in done:
-                error = task.exception()
-                if error and not isinstance(error, (WebSocketDisconnect, asyncio.CancelledError)):
-                    raise error
 
+    except LiveStorageCutover:
+        log.info("[GEMINI LIVE] Initialization/session stopped for storage cutover.")
     except WebSocketDisconnect:
         log.info("[GEMINI LIVE] Client déconnecté.")
     except Exception as exc:
@@ -6029,8 +6175,18 @@ async def api_storage_migration_cancel(
                 detail="Le marqueur local n'est pas dans l'état pending_cutover.",
             )
 
-        # If remote commit succeeded but local gate creation failed, the durable
-        # Turso marker is sufficient proof of a pre-cutover migration to cancel.
+        # Remove the durable remote marker first. Until that succeeds, the
+        # local pending marker and SQLite write-guard triggers remain intact.
+        # If the process stops after the remote commit but before the local
+        # commit, startup still sees the local pending gate and stays read-only.
+        remote = libsql.connect(database=remote_url, auth_token=remote_token)
+        remote.execute(
+            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
+            ("sqlite-to-turso-v50.65",),
+        )
+        remote.commit()
+
+        # Only after the remote marker is durably removed may SQLite be unlocked.
         guards = local.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' "
             "AND name LIKE 'chappie_migration_guard_%'"
@@ -6046,16 +6202,6 @@ async def api_storage_migration_cancel(
                 (utc_now(), "sqlite-to-turso-v50.65"),
             )
         local.commit()
-
-        # Unlock the local source first, but keep the in-process write lock until
-        # the durable Turso marker is removed. If the remote call fails, restart
-        # detection still sees the completed marker and re-locks SQLite.
-        remote = libsql.connect(database=remote_url, auth_token=remote_token)
-        remote.execute(
-            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
-            ("sqlite-to-turso-v50.65",),
-        )
-        remote.commit()
         STORAGE_MIGRATION_PENDING_CUTOVER = False
         return {
             "cancelled": True,

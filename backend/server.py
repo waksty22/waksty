@@ -393,13 +393,9 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
 def _remote_turso_migration_completed(
     allow_missing_marker: bool = False,
 ) -> bool:
-    """Detect a completed remote transfer if Render's ephemeral SQLite file vanished."""
+    """Detect either a completed data migration or an explicitly bootstrapped empty Turso store."""
     database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
     auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
-    # This function is called only when the migration gate is enabled and
-    # the local SQLite file is absent. In that situation, failing open would
-    # create a fresh empty SQLite database and silently strand the migrated
-    # memories. Every uncertain remote state must therefore stop startup.
     if not database_url or not auth_token:
         raise RuntimeError(
             "Base SQLite absente et accès Turso incomplet ; démarrage bloqué pour protéger la mémoire."
@@ -413,25 +409,22 @@ def _remote_turso_migration_completed(
             "SELECT 1 FROM sqlite_master WHERE type='table' "
             "AND name='chappie_storage_migrations'"
         ).fetchone()
-        # A missing marker means that no successful SQLite -> Turso migration
-        # was recorded. The migration helper writes this marker in the same
-        # remote transaction as the copied data, so an absent row is a valid
-        # pre-migration state. Connection/query errors still fail closed below.
         if not exists:
             if allow_missing_marker:
                 return False
             raise RuntimeError("Base SQLite absente et marqueur Turso introuvable.")
-        row = connection.execute(
-            "SELECT status FROM chappie_storage_migrations WHERE migration_key=?",
-            ("sqlite-to-turso-v50.65",),
-        ).fetchone()
-        if row is None:
+        rows = connection.execute(
+            "SELECT migration_key, status FROM chappie_storage_migrations "
+            "WHERE migration_key IN (?, ?)",
+            ("sqlite-to-turso-v50.65", "turso-fresh-bootstrap-v1"),
+        ).fetchall()
+        if not rows:
             if allow_missing_marker:
                 return False
-            raise RuntimeError("Base SQLite absente et migration Turso non confirm?e.")
-        if row[0] != "completed":
+            raise RuntimeError("Base SQLite absente et migration Turso non confirmée.")
+        if any(row[1] != "completed" for row in rows):
             raise RuntimeError(
-                "Marqueur de migration Turso présent mais non terminé ; démarrage bloqué."
+                "Marqueur de stockage Turso présent mais non terminé ; démarrage bloqué."
             )
         return True
     except Exception as exc:
@@ -444,9 +437,41 @@ def _remote_turso_migration_completed(
             connection.close()
 
 
+def _turso_application_table_count(connection: Any) -> int:
+    """Count user tables while excluding SQLite internals and the migration marker."""
+    row = connection.execute(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+        "AND name != 'chappie_storage_migrations'"
+    ).fetchone()
+    return int(row[0])
+
+
+def _reset_skill_progress(db: Any, user_id: str, now: str) -> int:
+    """Reset skill progress on both legacy SQLite and Turso schemas with or without xp."""
+    columns = {
+        str(row[1])
+        for row in db.execute("PRAGMA table_info(skills)").fetchall()
+    }
+    if not columns:
+        raise RuntimeError("La table skills est absente.")
+    assignments = ["level=0.0"]
+    if "xp" in columns:
+        assignments.append("xp=0.0")
+    assignments.extend(
+        ["evidence='Renaissance (Page Blanche)'", "updated_at=?"]
+    )
+    cursor = db.execute(
+        "UPDATE skills SET " + ", ".join(assignments) + " WHERE user_id=?",
+        (now, user_id),
+    )
+    return int(cursor.rowcount)
+
+
 def init_db() -> None:
     global STORAGE_MIGRATION_PENDING_CUTOVER
     settings = StorageSettings.from_env()
+    fresh_turso_bootstrap_pending = False
     if settings.backend == "sqlite":
         local_pending = _local_migration_pending_cutover()
         remote_pending = False
@@ -474,27 +499,33 @@ def init_db() -> None:
                 "[STORAGE] SQLite migration is complete; writes are paused until Turso cutover."
             )
             return
-    if (
-        settings.backend == "turso"
-        and os.getenv("CHAPPIE_TURSO_CUTOVER_READY", "").strip() != "1"
-    ):
-        raise RuntimeError(
-            "Turso sélectionné mais CHAPPIE_TURSO_CUTOVER_READY n'est pas validé. "
-            "Le démarrage est bloqué pour éviter d'ouvrir une mémoire distante vide."
-        )
     if settings.backend == "turso":
+        if os.getenv("CHAPPIE_TURSO_CUTOVER_READY", "").strip() != "1":
+            raise RuntimeError(
+                "Turso sélectionné mais CHAPPIE_TURSO_CUTOVER_READY n'est pas validé. "
+                "Le démarrage est bloqué pour éviter d'ouvrir une mémoire distante vide."
+            )
+        fresh_start_requested = (
+            os.getenv("CHAPPIE_TURSO_FRESH_START", "").strip() == "1"
+        )
         try:
-            with db_connection() as verification_db:
-                marker = verification_db.execute(
-                    "SELECT status FROM chappie_storage_migrations "
-                    "WHERE migration_key=?",
-                    ("sqlite-to-turso-v50.65",),
-                ).fetchone()
-                if marker is None or marker["status"] != "completed":
-                    raise RuntimeError("Marqueur de migration Turso absent ou incomplet.")
+            storage_ready = _remote_turso_migration_completed(
+                allow_missing_marker=fresh_start_requested
+            )
+            if not storage_ready:
+                if not fresh_start_requested:
+                    raise RuntimeError("Aucun marqueur de stockage Turso terminé.")
+                with db_connection() as probe_db:
+                    existing_tables = _turso_application_table_count(probe_db)
+                if existing_tables:
+                    raise RuntimeError(
+                        "Le bootstrap neuf exige une base Turso vide. "
+                        "Les tables existantes sont préservées ; utilisez une nouvelle base."
+                    )
+                fresh_turso_bootstrap_pending = True
         except Exception as exc:
             raise RuntimeError(
-                "Démarrage Turso refusé : migration SQLite -> Turso non validée."
+                "Démarrage Turso refusé : migration ou initialisation neuve non validée."
             ) from exc
     with db_connection() as db:
         # WAL is a local SQLite file-journal setting, not a remote libSQL
@@ -670,6 +701,37 @@ def init_db() -> None:
         init_autobiographical_tables(db)
         init_cognition_tables(db)
         init_development_tables(db)
+
+    if fresh_turso_bootstrap_pending:
+        with db_connection() as db:
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chappie_storage_migrations (
+                    migration_key TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    source_table_count INTEGER NOT NULL,
+                    source_row_count INTEGER NOT NULL,
+                    inserted_rows INTEGER NOT NULL,
+                    already_present_rows INTEGER NOT NULL,
+                    completed_at TEXT NOT NULL
+                )
+                """
+            )
+            db.execute(
+                """
+                INSERT OR REPLACE INTO chappie_storage_migrations (
+                    migration_key, status, source_table_count, source_row_count,
+                    inserted_rows, already_present_rows, completed_at
+                ) VALUES (?, 'completed', 0, 0, 0, 0, ?)
+                """,
+                ("turso-fresh-bootstrap-v1", utc_now()),
+            )
+            db.commit()
+        log.warning(
+            "[STORAGE] Empty Turso database initialized from application schema; "
+            "no SQLite data was migrated."
+        )
+
 
 def valid_user(user_id: str) -> str:
     try:
@@ -1200,15 +1262,7 @@ def reset_chappie_life(user_id: str) -> dict[str, Any]:
     cognitive_engine.invalidate_cache(user_id)  
 
     with db_connection() as db:  
-        db.execute(  
-            """  
-            UPDATE skills  
-            SET level=0.0, xp=0.0,  
-                evidence='Renaissance (Page Blanche)', updated_at=?  
-            WHERE user_id=?  
-            """,  
-            (now, user_id),  
-        )  
+        _reset_skill_progress(db, user_id, now)  
 
         db.execute("DELETE FROM memories WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM memories_v19 WHERE user_id=?", (user_id,))

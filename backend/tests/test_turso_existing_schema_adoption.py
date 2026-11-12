@@ -149,7 +149,7 @@ def test_existing_schema_adoption_marker_is_accepted_only_when_enabled(
         assert server._remote_turso_migration_completed(
             allow_existing_schema_adoption=True
         ) is True
-        with pytest.raises(RuntimeError, match="migration Turso non confirmée"):
+        with pytest.raises(RuntimeError, match="migration non confirmée"):
             server._remote_turso_migration_completed()
     finally:
         remote.close()

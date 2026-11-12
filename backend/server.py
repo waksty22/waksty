@@ -594,11 +594,17 @@ def init_db() -> None:
                 "Choisir un seul mode : bootstrap neuf ou adoption du schéma existant."
             )
         try:
-            storage_ready = _remote_turso_migration_completed(
-                allow_missing_marker=fresh_start_requested or adoption_requested,
-                allow_fresh_bootstrap=True,
-                allow_existing_schema_adoption=adoption_requested,
-            )
+            if adoption_requested:
+                storage_ready = _remote_turso_migration_completed(
+                    allow_missing_marker=True,
+                    allow_fresh_bootstrap=True,
+                    allow_existing_schema_adoption=True,
+                )
+            else:
+                storage_ready = _remote_turso_migration_completed(
+                    allow_missing_marker=fresh_start_requested,
+                    allow_fresh_bootstrap=True,
+                )
             if not storage_ready:
                 if fresh_start_requested:
                     with db_connection() as probe_db:

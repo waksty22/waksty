@@ -392,6 +392,7 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
 
 def _remote_turso_migration_completed(
     allow_missing_marker: bool = False,
+    allow_fresh_bootstrap: bool = False,
 ) -> bool:
     """Detect either a completed data migration or an explicitly bootstrapped empty Turso store."""
     database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
@@ -418,11 +419,16 @@ def _remote_turso_migration_completed(
             "WHERE migration_key IN (?, ?)",
             ("sqlite-to-turso-v50.65", "turso-fresh-bootstrap-v1"),
         ).fetchall()
-        if not rows:
+        accepted_rows = [
+            row for row in rows
+            if row[0] == "sqlite-to-turso-v50.65"
+            or (allow_fresh_bootstrap and row[0] == "turso-fresh-bootstrap-v1")
+        ]
+        if not accepted_rows:
             if allow_missing_marker:
                 return False
             raise RuntimeError("Base SQLite absente et migration Turso non confirmée.")
-        if any(row[1] != "completed" for row in rows):
+        if any(row[1] != "completed" for row in accepted_rows):
             raise RuntimeError(
                 "Marqueur de stockage Turso présent mais non terminé ; démarrage bloqué."
             )
@@ -510,7 +516,8 @@ def init_db() -> None:
         )
         try:
             storage_ready = _remote_turso_migration_completed(
-                allow_missing_marker=fresh_start_requested
+                allow_missing_marker=fresh_start_requested,
+                allow_fresh_bootstrap=True,
             )
             if not storage_ready:
                 if not fresh_start_requested:

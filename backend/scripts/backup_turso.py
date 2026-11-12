@@ -26,6 +26,8 @@ def create_backup_archive(
     connection: Any,
     output_path: str | Path,
     encryption_key: str,
+    *,
+    manage_snapshot: bool = True,
 ) -> dict[str, Any]:
     """Create and re-verify a ZIP containing ciphertext and its SHA-256 sidecar."""
     output = Path(output_path).expanduser().resolve()
@@ -37,7 +39,10 @@ def create_backup_archive(
         root = Path(work)
         encrypted_path = root / "chappie-turso.json.enc"
         report = export_encrypted_logical_backup(
-            connection, encrypted_path, encryption_key
+            connection,
+            encrypted_path,
+            encryption_key,
+            manage_snapshot=manage_snapshot,
         )
         checksum_path = encrypted_path.with_suffix(
             encrypted_path.suffix + ".sha256"
@@ -98,29 +103,42 @@ def main() -> int:
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = Path(args.output_dir) / f"chappie-turso-{timestamp}.zip"
-    connection = None
+    client = None
+    transaction = None
     try:
-        import libsql
+        from storage.hrana_backup import HranaTransactionConnection
+        from storage.hrana_http import HranaHttpClient
 
-        connection = libsql.connect(
-            database=database_url,
-            auth_token=auth_token,
+        # Use the same serialized Hrana HTTP v2 transport as the migration
+        # backup path; do not fall back to the legacy libsql WebSocket client.
+        client = HranaHttpClient(database_url, auth_token)
+        transaction = client.transaction()
+        connection = HranaTransactionConnection(transaction)
+        result = create_backup_archive(
+            connection,
+            output,
+            encryption_key,
+            manage_snapshot=False,
         )
-        connection.execute("SELECT 1").fetchone()
-        result = create_backup_archive(connection, output, encryption_key)
+        transaction.commit()
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
     except Exception as exc:
-        # Never include exception text: database clients can echo connection data.
+        if transaction is not None:
+            try:
+                transaction.rollback()
+            except Exception:
+                pass
+        # Never include exception text: HTTP/database clients can echo connection data.
         print(
             f"Backup failed: {type(exc).__name__}",
             file=sys.stderr,
         )
         return 1
     finally:
-        if connection is not None:
+        if client is not None:
             try:
-                connection.close()
+                client.close()
             except Exception:
                 pass
 

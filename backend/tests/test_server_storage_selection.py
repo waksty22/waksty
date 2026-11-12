@@ -553,3 +553,47 @@ def test_fresh_bootstrap_marker_is_not_a_sqlite_data_migration(monkeypatch):
         ) is False
     finally:
         remote.close()
+
+
+
+@pytest.mark.parametrize("backend,expected", [
+    ("sqlite", "sqlite-reset"),
+    ("turso", "turso-reset"),
+])
+def test_reset_api_uses_only_the_active_storage_backend(
+    monkeypatch, backend, expected
+):
+    import asyncio
+    import types
+    import server
+
+    calls = []
+    monkeypatch.setattr(
+        server.StorageSettings,
+        "from_env",
+        staticmethod(lambda: types.SimpleNamespace(backend=backend)),
+    )
+    monkeypatch.setattr(
+        server, "reset_chappie_life",
+        lambda user_id: calls.append(("sqlite", user_id)) or {"source": "sqlite-reset"},
+    )
+    monkeypatch.setattr(
+        server, "reset_turso_life",
+        lambda user_id: calls.append(("turso", user_id)) or {"source": "turso-reset"},
+    )
+    monkeypatch.setattr(
+        server.cognitive_engine, "invalidate_cache",
+        lambda user_id: calls.append(("cache", user_id)),
+    )
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    result = asyncio.run(
+        server.api_reset(
+            server.ResetRequest(confirmation="REINITIALISER CHAPPIE"),
+            auth="creator",
+        )
+    )
+
+    assert result["database_reset"] == backend
+    assert result["result"]["source"] == expected
+    assert calls == [(backend, "creator"), ("cache", "creator")]

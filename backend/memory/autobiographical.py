@@ -210,9 +210,13 @@ def search_autobiographical_events(
     for row in rows:
         item = dict(row)
         normalized_content = _normalize_search_text(item.get("content", ""))
-        if not normalized_content:
+        content_tokens = set(normalized_content.split())
+        if not content_tokens:
             continue
-        present = sum(1 for token in set(tokens) if token in normalized_content)
+        # Match complete normalized tokens only: substring matches can create
+        # false autobiographical recalls (e.g. "art" inside "partage").
+        matched_tokens = set(tokens) & content_tokens
+        present = len(matched_tokens)
         if not present:
             continue
         coverage = present / max(1, len(set(tokens)))
@@ -222,7 +226,7 @@ def search_autobiographical_events(
         score = coverage * 4.0 + phrase_bonus + importance * 0.04
         item["relevance_score"] = round(score, 4)
         item["matched_terms"] = [
-            token for token in dict.fromkeys(tokens) if token in normalized_content
+            token for token in dict.fromkeys(tokens) if token in content_tokens
         ]
         item["dialogue_context"] = False
         ranked.append((score, item))

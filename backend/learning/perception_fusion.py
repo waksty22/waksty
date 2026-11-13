@@ -137,3 +137,77 @@ def list_perception_fusions(
             item["evidence"] = {}
         result.append(item)
     return result
+
+
+
+def review_perception_fusion(
+    db: sqlite3.Connection,
+    user_id: str,
+    candidate_id: int,
+    decision: str,
+    evidence: str,
+) -> dict[str, Any]:
+    """Record an explicit human review without promoting a candidate to world knowledge."""
+    if isinstance(candidate_id, bool):
+        raise ValueError("Identifiant de rapprochement invalide.")
+    try:
+        candidate_id = int(candidate_id)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Identifiant de rapprochement invalide.") from exc
+    if candidate_id < 1:
+        raise ValueError("Identifiant de rapprochement invalide.")
+
+    decision = str(decision or "").strip().casefold()
+    if decision not in {"confirm", "reject"}:
+        raise ValueError("La décision doit être confirm ou reject.")
+
+    evidence = str(evidence or "").strip()
+    if not evidence or len(evidence) > 1000:
+        raise ValueError("Une preuve de validation (1 à 1000 caractères) est obligatoire.")
+
+    row = db.execute(
+        """SELECT id, status, evidence_json
+           FROM perception_fusion_candidates
+           WHERE id=? AND user_id=?""",
+        (candidate_id, user_id),
+    ).fetchone()
+    if row is None:
+        raise ValueError("Candidat de rapprochement introuvable.")
+
+    if row["status"] != "candidate":
+        raise ValueError("Ce candidat a déjà été examiné et ne peut plus être modifié.")
+
+    try:
+        stored_evidence = json.loads(row["evidence_json"] or "{}")
+        if not isinstance(stored_evidence, dict):
+            stored_evidence = {}
+    except (TypeError, ValueError):
+        stored_evidence = {}
+
+    reviewed_at = _now().isoformat()
+    stored_evidence["human_review"] = {
+        "decision": decision,
+        "evidence": evidence,
+        "reviewed_at": reviewed_at,
+    }
+    status = "confirmed" if decision == "confirm" else "rejected"
+    cursor = db.execute(
+        """UPDATE perception_fusion_candidates
+           SET status=?, evidence_json=?
+           WHERE id=? AND user_id=? AND status='candidate'""",
+        (
+            status,
+            json.dumps(stored_evidence, ensure_ascii=False, allow_nan=False),
+            candidate_id,
+            user_id,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise ValueError("Le candidat a été examiné entre-temps.")
+
+    return {
+        "id": candidate_id,
+        "status": status,
+        "evidence": stored_evidence,
+        "world_knowledge_promoted": False,
+    }

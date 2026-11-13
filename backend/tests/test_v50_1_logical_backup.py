@@ -117,7 +117,7 @@ def test_logical_export_uses_one_consistent_wal_snapshot(tmp_path, monkeypatch):
     def concurrent_writer(connection, sql):
         nonlocal changed
         result = original_query_rows(connection, sql)
-        if not changed and 'SELECT * FROM "child"' in sql:
+        if not changed and 'FROM "child"' in sql:
             writer.execute("INSERT INTO parent VALUES (2, 'committed-during-export')")
             writer.commit()
             changed = True

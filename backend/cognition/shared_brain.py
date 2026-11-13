@@ -227,7 +227,7 @@ def merge_live_transcript(existing: str, incoming: str) -> str:
     """Merge incremental transcript chunks and normalize punctuation spacing."""
     def clean(value: str) -> str:
         normalized = " ".join(str(value or "").split())
-        return re.sub(r"\\s+([,.;!?;:])", r"\\1", normalized).strip()
+        return re.sub(r"\s+([,.;!?;:])", r"\1", normalized).strip()
 
     old = clean(existing)
     new = clean(incoming)

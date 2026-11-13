@@ -46,6 +46,17 @@ def _pipeline_url(database_url: str) -> str:
     return urlunsplit((scheme, parsed.netloc, endpoint_path, "", ""))
 
 
+
+def database_identity(database_url: str) -> str:
+    """Return the normalized database host used as an explicit restore identity."""
+    parsed = urlsplit(database_url.strip())
+    if parsed.scheme.lower() not in {"libsql", "https"} or not parsed.hostname:
+        raise ValueError("URL de base Turso invalide pour identifier la cible.")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("URL de base Turso contient des composants interdits.")
+    return parsed.hostname.rstrip(".").lower()
+
+
 def _decode_value(value: dict[str, Any]) -> Any:
     kind = value.get("type")
     if kind == "null":

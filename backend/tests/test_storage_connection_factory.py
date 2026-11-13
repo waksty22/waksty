@@ -55,3 +55,46 @@ def test_storage_backend_rejects_unknown_values(monkeypatch):
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "postgres")
     with pytest.raises(ValueError, match="sqlite ou turso"):
         StorageSettings.from_env()
+
+
+
+def test_closing_connection_closes_after_successful_context_exit(tmp_path):
+    from storage.connection_factory import ClosingConnection
+
+    raw = open_storage_connection(
+        StorageSettings(backend="sqlite", sqlite_path=str(tmp_path / "closed.db"))
+    )
+    connection = ClosingConnection(raw)
+    with connection as db:
+        db.execute("CREATE TABLE probe (value TEXT)")
+        db.execute("INSERT INTO probe(value) VALUES ('committed')")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+
+
+def test_closing_connection_rolls_back_and_closes_after_exception(tmp_path):
+    from storage.connection_factory import ClosingConnection
+
+    database_path = tmp_path / "rollback.db"
+    raw = open_storage_connection(
+        StorageSettings(backend="sqlite", sqlite_path=str(database_path))
+    )
+    raw.execute("CREATE TABLE probe (value TEXT)")
+    raw.commit()
+    connection = ClosingConnection(raw)
+
+    with pytest.raises(RuntimeError, match="abort transaction"):
+        with connection as db:
+            db.execute("INSERT INTO probe(value) VALUES ('must rollback')")
+            raise RuntimeError("abort transaction")
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+
+    reopened = open_storage_connection(
+        StorageSettings(backend="sqlite", sqlite_path=str(database_path))
+    )
+    try:
+        assert reopened.execute("SELECT COUNT(*) FROM probe").fetchone()[0] == 0
+    finally:
+        reopened.close()

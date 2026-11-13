@@ -7,6 +7,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from learning.language import init_language_tables, record_heard_word, advance_word
+from learning.perception_fusion import (
+    init_perception_fusion_tables,
+    link_temporally_cooccurring_observation,
+    review_perception_fusion,
+)
 from learning.sensory import (
     init_sensory_tables,
     record_observation,
@@ -21,6 +26,7 @@ def db():
     connection.row_factory = sqlite3.Row
     init_language_tables(connection)
     init_sensory_tables(connection)
+    init_perception_fusion_tables(connection)
     yield connection
     connection.close()
 
@@ -76,4 +82,78 @@ def test_observations_are_isolated_by_user(db):
     with pytest.raises(ValueError):
         associate_word_with_observation(
             db, "other", "objet", observation["observation_id"]
+        )
+
+
+
+def _fusion_candidate(db, user_id="creator"):
+    visual = record_observation(
+        db, user_id, "vision", "Une pomme rouge.", "camera_snapshot"
+    )
+    audio = record_observation(
+        db, user_id, "audio", "Regarde la pomme.", "gemini_live"
+    )
+    candidates = link_temporally_cooccurring_observation(
+        db, user_id, audio["observation_id"]
+    )
+    assert len(candidates) == 1
+    row = db.execute(
+        """SELECT id FROM perception_fusion_candidates
+           WHERE user_id=? AND audio_observation_id=? AND vision_observation_id=?""",
+        (user_id, audio["observation_id"], visual["observation_id"]),
+    ).fetchone()
+    return int(row["id"])
+
+
+def test_explicit_fusion_review_records_decision_without_promoting_knowledge(db):
+    candidate_id = _fusion_candidate(db)
+    reviewed = review_perception_fusion(
+        db, "creator", candidate_id, "confirm",
+        "Le créateur confirme que le mot pomme désigne l'objet visible.",
+    )
+
+    assert reviewed["status"] == "confirmed"
+    assert reviewed["world_knowledge_promoted"] is False
+    row = db.execute(
+        "SELECT status, evidence_json FROM perception_fusion_candidates WHERE id=?",
+        (candidate_id,),
+    ).fetchone()
+    assert row["status"] == "confirmed"
+    assert '"decision": "confirm"' in row["evidence_json"]
+    assert db.execute(
+        "SELECT COUNT(*) FROM world_entities"
+    ).fetchone()[0] == 0
+
+
+def test_fusion_review_is_user_scoped_and_terminal(db):
+    candidate_id = _fusion_candidate(db)
+
+    with pytest.raises(ValueError):
+        review_perception_fusion(
+            db, "other-user", candidate_id, "confirm",
+            "Validation explicite par le créateur.",
+        )
+
+    rejected = review_perception_fusion(
+        db, "creator", candidate_id, "reject",
+        "La phrase ne décrit pas l'objet affiché.",
+    )
+    assert rejected["status"] == "rejected"
+
+    with pytest.raises(ValueError):
+        review_perception_fusion(
+            db, "creator", candidate_id, "confirm",
+            "Nouvelle validation contradictoire.",
+        )
+
+
+@pytest.mark.parametrize(
+    ("decision", "evidence"),
+    [("maybe", "preuve"), ("confirm", ""), ("reject", "x" * 1001)],
+)
+def test_fusion_review_rejects_invalid_decisions_or_evidence(db, decision, evidence):
+    candidate_id = _fusion_candidate(db)
+    with pytest.raises(ValueError):
+        review_perception_fusion(
+            db, "creator", candidate_id, decision, evidence
         )

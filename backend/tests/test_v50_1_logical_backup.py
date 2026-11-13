@@ -603,3 +603,53 @@ def test_logical_export_refuses_existing_checksum_without_overwriting(tmp_path):
         assert checksum.read_text(encoding="ascii") == "preserve this checksum"
     finally:
         db.close()
+
+
+
+def test_logical_export_never_overwrites_destination_created_concurrently(tmp_path, monkeypatch):
+    import storage.logical_backup as backup
+
+    db = _database()
+    target = tmp_path / "racing.json"
+    real_link = backup.os.link
+
+    def competing_link(source, destination):
+        Path(destination).write_text("owned by competing exporter", encoding="utf-8")
+        return real_link(source, destination)
+
+    from pathlib import Path
+    monkeypatch.setattr(backup.os, "link", competing_link)
+    try:
+        with pytest.raises(FileExistsError):
+            backup.export_logical_backup(db, target)
+        assert target.read_text(encoding="utf-8") == "owned by competing exporter"
+        assert not target.with_suffix(target.suffix + ".sha256").exists()
+    finally:
+        db.close()
+
+
+def test_logical_export_preserves_checksum_created_concurrently(tmp_path, monkeypatch):
+    import storage.logical_backup as backup
+    from pathlib import Path
+
+    db = _database()
+    target = tmp_path / "racing-checksum.json"
+    checksum = target.with_suffix(target.suffix + ".sha256")
+    real_link = backup.os.link
+    calls = 0
+
+    def competing_checksum_link(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            Path(destination).write_text("owned by competing exporter", encoding="ascii")
+        return real_link(source, destination)
+
+    monkeypatch.setattr(backup.os, "link", competing_checksum_link)
+    try:
+        with pytest.raises(FileExistsError):
+            backup.export_logical_backup(db, target)
+        assert not target.exists()
+        assert checksum.read_text(encoding="ascii") == "owned by competing exporter"
+    finally:
+        db.close()

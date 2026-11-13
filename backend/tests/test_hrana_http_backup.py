@@ -343,3 +343,19 @@ def test_hrana_execute_write_sends_typed_bound_arguments():
         transaction.rollback()
     finally:
         client.close()
+
+
+def test_hrana_restore_write_adapter_rejects_transaction_control_before_network():
+    server = FakeHranaServer()
+    client = _client(server)
+    transaction = None
+    try:
+        transaction = client.transaction()
+        for sql in ("BEGIN", " COMMIT", "ROLLBACK", "SAVEPOINT nested", "RELEASE nested", "INSERT INTO t VALUES (1); DELETE FROM t"):
+            with pytest.raises(PermissionError):
+                transaction.execute_write(sql)
+        # Only the initial transaction-opening statement reached the server.
+        assert server.statements == ["BEGIN"]
+        transaction.rollback()
+    finally:
+        client.close()

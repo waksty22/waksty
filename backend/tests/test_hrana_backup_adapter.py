@@ -25,11 +25,6 @@ class _Transaction:
                 ("type", "name", "tbl_name", "sql"),
                 [("table", "memories", "memories", "CREATE TABLE memories (id INTEGER, note TEXT)")],
             )
-        if "pragma_table_xinfo" in sql:
-            return _Result(
-                ("cid", "name", "type", "notnull", "dflt_value", "pk", "hidden"),
-                [(0, "id", "INTEGER", 0, None, 0, 0), (1, "note", "TEXT", 0, None, 0, 0)],
-            )
         if 'FROM "memories"' in sql:
             return _Result(("id", "note"), [(1, "private fixture")])
         raise AssertionError("Unexpected SQL: " + sql)
@@ -83,7 +78,7 @@ def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
         assert report["verified"] is True
         assert report["total_rows"] == 1
         assert verify_logical_backup(destination)["valid"] is True
-        assert len(transaction.statements) == 3
+        assert len(transaction.statements) == 2
     finally:
         destination.unlink(missing_ok=True)
         destination.with_suffix(destination.suffix + ".sha256").unlink(missing_ok=True)

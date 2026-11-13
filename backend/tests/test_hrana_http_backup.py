@@ -208,3 +208,53 @@ def test_http_v2_decodes_null_integer_float_text_and_blob():
     })
     assert result.columns == ("n", "i", "f", "t", "b")
     assert result.rows == [(None, 9223372036854775807, 1.25, "hello", bytes([0, 1, 2]))]
+
+
+def test_hrana_write_transaction_encodes_typed_parameters_without_weakening_read_adapter():
+    from storage.hrana_backup import HranaRestoreConnection
+    from storage.hrana_http import HranaHttpResult
+
+    class WriteTransaction:
+        def __init__(self):
+            self.calls = []
+            self.committed = False
+            self.rolled_back = False
+
+        def execute_write(self, sql, args=()):
+            self.calls.append((sql, tuple(args)))
+            if sql.startswith("SELECT"):
+                return HranaHttpResult({
+                    "cols": [{"name": "count"}],
+                    "rows": [{"type": "integer", "value": "1"}],
+                })
+            return HranaHttpResult({"cols": [], "rows": []})
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+    transaction = WriteTransaction()
+    connection = HranaRestoreConnection(transaction)
+    connection.execute("INSERT INTO t VALUES (?, ?, ?)", (1, "note", b"\\x00"))
+    cursor = connection.execute("SELECT COUNT(*) FROM t")
+    assert cursor.fetchone() == (1,)
+    connection.executemany("INSERT INTO t VALUES (?)", [(2,), (3,)])
+    connection.commit()
+    assert transaction.committed is True
+    assert connection.in_transaction is False
+    assert len(transaction.calls) == 4
+
+    # The existing backup adapter remains strictly read-only.
+    readonly = HranaTransactionConnection(transaction)
+    with pytest.raises(PermissionError):
+        readonly.execute("DELETE FROM t")
+
+
+def test_hrana_database_identity_is_normalized_and_rejects_credentials():
+    from storage.hrana_http import database_identity
+
+    assert database_identity("libsql://CHAPPIE-TEST.turso.io") == "chappie-test.turso.io"
+    with pytest.raises(ValueError):
+        database_identity("libsql://user:secret@chappie-test.turso.io")

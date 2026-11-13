@@ -105,3 +105,19 @@ def test_autobiographical_search_empty_or_stopword_only_query_is_safe():
     assert search_autobiographical_events(db, "creator", "") == []
     assert search_autobiographical_events(db, "creator", "et ou le") == []
     db.close()
+
+
+
+def test_autobiographical_search_uses_complete_tokens_not_substrings():
+    db = make_db()
+    add_event(db, 1, "creator", "user",
+              "Nous partageons une information importante.")
+    add_event(db, 2, "creator", "user",
+              "L'art est un sujet différent.")
+
+    results = search_autobiographical_events(db, "creator", "art", limit=5)
+
+    assert len(results) == 1
+    assert results[0]["id"] == 2
+    assert results[0]["matched_terms"] == ["art"]
+    db.close()

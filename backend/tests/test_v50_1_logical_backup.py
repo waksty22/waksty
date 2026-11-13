@@ -158,3 +158,124 @@ def test_encrypted_export_refuses_to_report_unverified_ciphertext(tmp_path, monk
         assert not target.with_suffix(target.suffix + ".sha256").exists()
     finally:
         db.close()
+
+
+def test_guarded_logical_restore_populates_only_explicit_empty_target(tmp_path):
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    backup_path = tmp_path / "known-good.json"
+    try:
+        export_logical_backup(source, backup_path)
+    finally:
+        source.close()
+    payload = json.loads(backup_path.read_text(encoding="utf-8"))
+
+    target = sqlite3.connect(":memory:")
+    try:
+        report = restore_logical_backup_payload(
+            target, payload,
+            target_identity="chappie-restore-test",
+            expected_target_identity="chappie-restore-test",
+            production_identity="chappie-db",
+        )
+        assert report["restored"] is True
+        assert report["table_count"] == 2
+        assert report["total_rows"] == 2
+        assert target.execute("SELECT payload FROM parent WHERE id=1").fetchone()[0] == bytes([0, 1, 255])
+        assert target.execute("SELECT note FROM child WHERE id=2").fetchone()[0] == "existing Turso row"
+        assert target.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        target.close()
+
+
+def test_guarded_logical_restore_refuses_production_or_wrong_identity():
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    backup_path = __import__("pathlib").Path(__import__("tempfile").mkdtemp()) / "backup.json"
+    try:
+        export_logical_backup(source, backup_path)
+    finally:
+        source.close()
+    payload = json.loads(backup_path.read_text(encoding="utf-8"))
+    backup_path.unlink()
+    backup_path.with_suffix(".json.sha256").unlink(missing_ok=True)
+    backup_path.parent.rmdir()
+
+    for target_id, expected_id in [
+        ("chappie-db", "chappie-db"),
+        ("other-test-db", "chappie-restore-test"),
+    ]:
+        target = sqlite3.connect(":memory:")
+        try:
+            with pytest.raises(PermissionError):
+                restore_logical_backup_payload(
+                    target, payload,
+                    target_identity=target_id,
+                    expected_target_identity=expected_id,
+                    production_identity="chappie-db",
+                )
+            assert target.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == []
+        finally:
+            target.close()
+
+
+def test_guarded_logical_restore_refuses_nonempty_target_without_changes():
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    backup_path = __import__("pathlib").Path(__import__("tempfile").mkdtemp()) / "backup.json"
+    try:
+        export_logical_backup(source, backup_path)
+    finally:
+        source.close()
+    payload = json.loads(backup_path.read_text(encoding="utf-8"))
+    backup_path.unlink()
+    backup_path.with_suffix(".json.sha256").unlink(missing_ok=True)
+    backup_path.parent.rmdir()
+
+    target = sqlite3.connect(":memory:")
+    try:
+        target.execute("CREATE TABLE keep_me(value TEXT)")
+        target.execute("INSERT INTO keep_me VALUES ('untouched')")
+        target.commit()
+        with pytest.raises(PermissionError, match="pas vide"):
+            restore_logical_backup_payload(
+                target, payload,
+                target_identity="chappie-restore-test",
+                expected_target_identity="chappie-restore-test",
+                production_identity="chappie-db",
+            )
+        assert target.execute("SELECT value FROM keep_me").fetchone()[0] == "untouched"
+    finally:
+        target.close()
+
+
+def test_guarded_logical_restore_rolls_back_on_invalid_row_count():
+    from logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    backup_path = __import__("pathlib").Path(__import__("tempfile").mkdtemp()) / "backup.json"
+    try:
+        export_logical_backup(source, backup_path)
+    finally:
+        source.close()
+    payload = json.loads(backup_path.read_text(encoding="utf-8"))
+    backup_path.unlink()
+    backup_path.with_suffix(".json.sha256").unlink(missing_ok=True)
+    backup_path.parent.rmdir()
+    payload["summary"]["row_counts"]["child"] = 999
+
+    target = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(ValueError, match="nombres de lignes"):
+            restore_logical_backup_payload(
+                target, payload,
+                target_identity="chappie-restore-test",
+                expected_target_identity="chappie-restore-test",
+                production_identity="chappie-db",
+            )
+        assert target.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == []
+    finally:
+        target.close()

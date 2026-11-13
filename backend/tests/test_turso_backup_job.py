@@ -133,7 +133,8 @@ def test_backup_job_never_overwrites_archive_created_concurrently(tmp_path, monk
     real_link = backup_turso.os.link
 
     def competing_link(source, destination):
-        Path(destination).write_bytes(b"owned by competing exporter")
+        if Path(destination) == output:
+            Path(destination).write_bytes(b"owned by competing exporter")
         return real_link(source, destination)
 
     monkeypatch.setattr(backup_turso.os, "link", competing_link)

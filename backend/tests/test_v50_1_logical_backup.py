@@ -656,6 +656,8 @@ def test_logical_export_preserves_checksum_created_concurrently(tmp_path, monkey
 
 
 def test_encrypted_export_refuses_existing_checksum_without_deleting_it(tmp_path):
+    from storage.logical_backup import export_encrypted_logical_backup
+
     db = _database()
     target = tmp_path / "encrypted-existing-checksum.enc"
     checksum = target.with_suffix(target.suffix + ".sha256")

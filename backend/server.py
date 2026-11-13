@@ -5688,15 +5688,6 @@ async def websocket_endpoint(
                                         sensory_db, user_id, live_emotions,
                                         source="gemini_live", event_label="transcription utilisateur",
                                     )
-                                    audio_observation = record_observation(
-                                        sensory_db, user_id, "audio", heard_text,
-                                        "gemini_live_transcription",
-                                        confidence=0.8,
-                                        metadata={"language": "fr"},
-                                    )
-                                    link_temporally_cooccurring_observation(
-                                        sensory_db, user_id, audio_observation["observation_id"]
-                                    )
                                     sensory_db.commit()
                             except Exception:
                                 log.exception("[GEMINI LIVE] Échec mémorisation transcription")
@@ -5767,7 +5758,19 @@ async def websocket_endpoint(
                                         teaching_db, user_id, live_turn_state["user"],
                                         evidence="Enseignement explicite via Gemini Live",
                                     )
-                                    if heard or taught:
+                                    audio_observation = None
+                                    if live_turn_state["user"]:
+                                        audio_observation = record_observation(
+                                            teaching_db, user_id, "audio",
+                                            live_turn_state["user"],
+                                            "gemini_live_completed_turn",
+                                            confidence=0.8,
+                                            metadata={"language": "fr", "chunk_count": len(live_turn_state.get("input_chunks", []))},
+                                        )
+                                        link_temporally_cooccurring_observation(
+                                            teaching_db, user_id, audio_observation["observation_id"]
+                                        )
+                                    if heard or taught or audio_observation:
                                         teaching_db.commit()
                                     if heard:
                                         log.info("[APPRENTISSAGE PARTAGÉ] Exposition Live enregistrée après fusion : %s mot(s)", len(heard))

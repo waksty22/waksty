@@ -303,3 +303,43 @@ def test_guarded_restore_opens_transaction_only_for_exact_test_host():
         assert server.closed is True
     finally:
         client.close()
+
+
+def test_hrana_execute_write_sends_typed_bound_arguments():
+    captured = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        captured.append(body)
+        statements = [item.get("stmt", {}).get("sql") for item in body["requests"] if item["type"] == "execute"]
+        results = [
+            {"type": "ok", "response": {"type": "execute", "result": {"cols": [], "rows": []}}}
+            for _ in statements
+        ]
+        if any(item["type"] == "close" for item in body["requests"]):
+            results.append({"type": "ok", "response": {"type": "close"}})
+            baton = None
+        else:
+            baton = "write-baton"
+        return httpx.Response(200, json={"baton": baton, "results": results})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = HranaHttpClient("libsql://test-restore.turso.io", "test-token", http_client=http)
+    try:
+        transaction = client.transaction()
+        transaction.execute_write(
+            "INSERT INTO t VALUES (?, ?, ?, ?, ?)",
+            (None, 7, 1.5, "hello", b"\\x00\\xff"),
+        )
+        statement = captured[1]["requests"][0]["stmt"]
+        assert statement["sql"].startswith("INSERT")
+        assert statement["args"] == [
+            {"type": "null"},
+            {"type": "integer", "value": "7"},
+            {"type": "float", "value": 1.5},
+            {"type": "text", "value": "hello"},
+            {"type": "blob", "base64": "AP8="},
+        ]
+        transaction.rollback()
+    finally:
+        client.close()

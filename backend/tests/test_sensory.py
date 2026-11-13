@@ -12,6 +12,7 @@ from learning.perception_fusion import (
     link_temporally_cooccurring_observation,
     review_perception_fusion,
 )
+from world.world_model import init_world_tables
 from learning.sensory import (
     init_sensory_tables,
     record_observation,
@@ -106,6 +107,7 @@ def _fusion_candidate(db, user_id="creator"):
 
 
 def test_explicit_fusion_review_records_decision_without_promoting_knowledge(db):
+    init_world_tables(db)
     candidate_id = _fusion_candidate(db)
     reviewed = review_perception_fusion(
         db, "creator", candidate_id, "confirm",

@@ -83,10 +83,34 @@ def export_logical_backup(
                 continue
             table_name = obj["name"]
             escaped = '"' + table_name.replace('"', '""') + '"'
-            columns, rows = _query_rows(connection, f"SELECT * FROM {escaped}")
+            if isinstance(obj.get("sql"), str) and "CREATE VIRTUAL TABLE" in obj["sql"].upper():
+                raise ValueError(f"Unsupported virtual table in logical backup: {table_name}")
+            _, column_info = _query_rows(connection, f"PRAGMA table_xinfo({escaped})")
+            if not column_info:
+                raise ValueError(f"Unable to inspect columns for logical backup table: {table_name}")
+            # hidden=0 are writable columns; generated/virtual hidden columns
+            # are recomputed by SQLite and must not be included in INSERT.
+            columns = [str(row[1]) for row in column_info if int(row[6]) == 0]
+            if not columns:
+                raise ValueError(f"Table has no writable columns: {table_name}")
+            selected = ",".join('"' + column.replace('"', '""') + '"' for column in columns)
+            _, rows = _query_rows(connection, f"SELECT {selected} FROM {escaped}")
             encoded_rows = [[_value(value) for value in row] for row in rows]
             tables.append({"name": table_name, "columns": columns, "rows": encoded_rows})
             total_rows += len(encoded_rows)
+
+        autoincrement_tables = {
+            obj["name"] for obj in objects
+            if obj["type"] == "table" and isinstance(obj.get("sql"), str)
+            and "AUTOINCREMENT" in obj["sql"].upper()
+        }
+        sequences = []
+        if autoincrement_tables:
+            _, sequence_rows = _query_rows(connection, "SELECT name, seq FROM sqlite_sequence")
+            sequences = [
+                {"table": str(name), "seq": int(seq)}
+                for name, seq in sequence_rows if name in autoincrement_tables
+            ]
     except Exception:
         if manage_snapshot:
             connection.execute(f"ROLLBACK TO SAVEPOINT {snapshot}")
@@ -100,6 +124,7 @@ def export_logical_backup(
         "format_version": 1,
         "objects": objects,
         "tables": tables,
+        "sequences": sequences,
         "summary": {
             "table_count": len(tables),
             "object_count": len(objects),
@@ -170,6 +195,12 @@ def verify_logical_backup(path: str | Path) -> dict[str, Any]:
             db.executemany(
                 f"INSERT INTO {table_sql} ({column_sql}) VALUES ({placeholders})",
                 [[_restore_value(value) for value in row] for row in table["rows"]],
+            )
+        for sequence in payload.get("sequences", []):
+            db.execute("DELETE FROM sqlite_sequence WHERE name = ?", (sequence["table"],))
+            db.execute(
+                "INSERT INTO sqlite_sequence(name, seq) VALUES (?, ?)",
+                (sequence["table"], sequence["seq"]),
             )
         for obj in objects:
             if obj["type"] in {"index", "view", "trigger"} and obj["sql"]:
@@ -244,6 +275,20 @@ def restore_logical_backup_payload(
     normalized_expected = dict(expected_counts)
     if type(summary.get("total_rows")) is not int or summary["total_rows"] != sum(normalized_expected.values()):
         raise ValueError("Résumé du nombre total de lignes incohérent.")
+    autoincrement_tables = {
+        obj["name"] for obj in table_objects
+        if isinstance(obj.get("sql"), str) and "AUTOINCREMENT" in obj["sql"].upper()
+    }
+    sequences = payload.get("sequences", [])
+    if not isinstance(sequences, list) or not all(isinstance(item, dict) for item in sequences):
+        raise ValueError("Séquences AUTOINCREMENT invalides.")
+    sequence_names = [item.get("table") for item in sequences]
+    if (
+        any(name not in autoincrement_tables for name in sequence_names)
+        or len(set(sequence_names)) != len(sequence_names)
+        or any(type(item.get("seq")) is not int or item["seq"] < 0 for item in sequences)
+    ):
+        raise ValueError("Séquences AUTOINCREMENT invalides.")
 
     existing = connection.execute(
         "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
@@ -284,6 +329,13 @@ def restore_logical_backup_payload(
                     decoded_rows,
                 )
             restored_counts[name] = int(connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0])
+
+        for sequence in sequences:
+            connection.execute("DELETE FROM sqlite_sequence WHERE name = ?", (sequence["table"],))
+            connection.execute(
+                "INSERT INTO sqlite_sequence(name, seq) VALUES (?, ?)",
+                (sequence["table"], sequence["seq"]),
+            )
 
         for obj in objects:
             if obj.get("type") in {"index", "view", "trigger"}:

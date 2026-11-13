@@ -428,7 +428,7 @@ def _memory_search_terms(query: str) -> list[str]:
     )
     stop_words = {
         "a", "au", "aux", "avec", "ce", "ces", "dans", "de", "des",
-        "du", "elle", "en", "et", "eux", "il", "je", "la", "le",
+        "du", "elle", "en", "est", "et", "eux", "il", "je", "la", "le",
         "les", "leur", "lui", "ma", "mais", "me", "mes", "moi",
         "mon", "ne", "nos", "notre", "nous", "on", "ou", "par",
         "pas", "pour", "que", "qui", "sa", "se", "ses", "son",

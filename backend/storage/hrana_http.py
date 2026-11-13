@@ -197,10 +197,31 @@ class HranaHttpTransaction:
             self._active = False
             self._closed = True
             raise HranaHttpError("Réponse Hrana incomplète.")
+        # Advance the baton before validating an optional endpoint update. If
+        # the update is rejected, callers can still roll back through the
+        # already-trusted endpoint; credentials are never sent cross-origin.
+        self._baton = payload.get("baton")
         next_base = payload.get("base_url")
         if next_base:
-            self._client._endpoint = _pipeline_url(str(next_base))
-        self._baton = payload.get("baton")
+            try:
+                candidate = _pipeline_url(str(next_base))
+                current = urlsplit(self._client._endpoint)
+                proposed = urlsplit(candidate)
+                current_port = current.port or 443
+                proposed_port = proposed.port or 443
+                same_origin = (
+                    proposed.scheme == "https"
+                    and (proposed.hostname or "").rstrip(".").lower()
+                    == (current.hostname or "").rstrip(".").lower()
+                    and proposed_port == current_port
+                )
+            except ValueError:
+                same_origin = False
+            if not same_origin:
+                raise HranaHttpError(
+                    "Turso Hrana a proposé une origine de connexion non autorisée."
+                )
+            self._client._endpoint = candidate
         results = payload["results"]
         if len(results) != len(requests):
             self._baton = None

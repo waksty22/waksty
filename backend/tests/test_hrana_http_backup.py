@@ -41,8 +41,11 @@ class FakeHranaServer:
         self.statements = []
         self.active = False
         self.closed = False
+        self.base_url = None
+        self.request_hosts = []
 
     def handle(self, request):
+        self.request_hosts.append(request.url.host)
         assert request.url.path == "/v2/pipeline"
         assert request.headers["authorization"] == "Bearer test-token"
         body = json.loads(request.content)
@@ -126,7 +129,7 @@ class FakeHranaServer:
             self.baton = "opaque-baton-" + str(self.counter)
         return httpx.Response(
             200,
-            json={"baton": self.baton, "base_url": None, "results": results},
+            json={"baton": self.baton, "base_url": self.base_url, "results": results},
         )
 
 
@@ -315,3 +318,16 @@ def test_guarded_restore_opens_transaction_only_for_expected_nonproduction_host(
         if client is not None:
             client.close()
         http.close()
+
+
+def test_http_rejects_cross_origin_base_url_without_forwarding_auth_token():
+    server = FakeHranaServer()
+    server.base_url = "https://attacker.example/v2/pipeline"
+    client = _client(server)
+    try:
+        with pytest.raises(HranaHttpError, match="origine de connexion"):
+            client.transaction()
+        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+        assert server.request_hosts == ["example-org.turso.io"]
+    finally:
+        client.close()

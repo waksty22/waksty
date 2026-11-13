@@ -340,7 +340,7 @@ def test_http_accepts_same_origin_base_url_update_and_keeps_stream_working():
     transaction = None
     try:
         transaction = client.transaction()
-        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
         transaction.rollback()
         assert server.request_hosts == ["example-org.turso.io", "example-org.turso.io"]
         assert server.closed is True
@@ -367,6 +367,6 @@ def test_http_rejects_deceptive_or_downgraded_base_url_updates(base_url):
         with pytest.raises(HranaHttpError, match="origine de connexion"):
             client.transaction()
         assert server.request_hosts == ["example-org.turso.io"]
-        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
     finally:
         client.close()

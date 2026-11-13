@@ -388,6 +388,8 @@ def test_encrypted_restore_through_hrana_adapter_with_foreign_keys_enabled(tmp_p
         def __init__(self):
             self.db = sqlite3.connect(":memory:")
             self.db.execute("PRAGMA foreign_keys = ON")
+            # HranaRestoreConnection wraps an already-open remote transaction.
+            self.db.execute("BEGIN")
             self.committed = False
             self.rolled_back = False
 

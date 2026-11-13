@@ -426,3 +426,87 @@ def verify_encrypted_logical_backup(
         )
         result = verify_logical_backup(plain_path)
     return {**result, "encrypted": True, "encryption": "AES-256-GCM"}
+
+
+
+def restore_encrypted_logical_backup(
+    connection: Any,
+    path: str | Path,
+    encryption_key: str,
+    *,
+    target_identity: str,
+    expected_target_identity: str,
+    production_identity: str,
+) -> dict[str, Any]:
+    """Authenticate and verify one encrypted artifact before restoring its payload.
+
+    The ciphertext is read once so verification and restoration operate on the
+    same bytes. AES-GCM authentication protects the payload; the adjacent
+    checksum detects damaged or mismatched artifact files.
+    """
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    artifact = Path(path).expanduser().resolve()
+    raw = artifact.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    checksum_path = artifact.with_suffix(artifact.suffix + ".sha256")
+    if not checksum_path.exists():
+        raise ValueError("Checksum de sauvegarde absent.")
+    try:
+        expected_digest = checksum_path.read_text(encoding="ascii").split()[0]
+    except (OSError, UnicodeError, IndexError):
+        raise ValueError("Checksum de sauvegarde invalide.") from None
+    if digest != expected_digest:
+        raise ValueError("Checksum de sauvegarde incorrect.")
+
+    magic = b"CHAPPIE-LOGICAL-V1"
+    if not raw.startswith(magic) or len(raw) < len(magic) + 28:
+        raise ValueError("Format de sauvegarde chiffrée invalide.")
+    if not isinstance(encryption_key, str) or len(encryption_key) < 12:
+        raise ValueError("Clé de chiffrement invalide.")
+    offset = len(magic)
+    salt, nonce = raw[offset:offset + 16], raw[offset + 16:offset + 28]
+    derived_key = PBKDF2HMAC(
+        algorithm=hashes.SHA256(), length=32, salt=salt, iterations=600_000
+    ).derive(encryption_key.encode("utf-8"))
+    try:
+        plaintext = AESGCM(derived_key).decrypt(
+            nonce, raw[offset + 28:], magic
+        )
+    except Exception:
+        raise ValueError("Authentification AES-GCM impossible.") from None
+
+    # Reuse the independent SQLite reconstruction/integrity verifier before
+    # allowing any SQL from the artifact to reach the destination connection.
+    with tempfile.TemporaryDirectory(prefix="chappie-restore-verify-") as work:
+        verified_path = Path(work) / "snapshot.json"
+        verified_path.write_bytes(plaintext)
+        verified_path.with_suffix(".json.sha256").write_text(
+            f"{hashlib.sha256(plaintext).hexdigest()}  snapshot.json\\n",
+            encoding="ascii",
+        )
+        verification = verify_logical_backup(verified_path)
+    if not verification.get("valid"):
+        raise ValueError(
+            "Sauvegarde logique invalide : "
+            + str(verification.get("reason", "contrôles d'intégrité échoués"))
+        )
+    try:
+        payload = json.loads(plaintext)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("Contenu de sauvegarde illisible.") from None
+    report = restore_logical_backup_payload(
+        connection,
+        payload,
+        target_identity=target_identity,
+        expected_target_identity=expected_target_identity,
+        production_identity=production_identity,
+    )
+    return {
+        **report,
+        "artifact_sha256": digest,
+        "artifact_authenticated": True,
+        "logical_integrity_verified": True,
+    }

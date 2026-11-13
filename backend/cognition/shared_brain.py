@@ -7,6 +7,7 @@ into learned knowledge. Both interfaces consume the same snapshot.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Any
 

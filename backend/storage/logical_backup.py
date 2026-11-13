@@ -229,6 +229,12 @@ def restore_logical_backup_payload(
     expected_counts = summary.get("row_counts")
     if not isinstance(expected_counts, dict) or set(expected_counts) != set(table_names):
         raise ValueError("Comptage des lignes attendu invalide.")
+    try:
+        normalized_expected = {name: int(count) for name, count in expected_counts.items()}
+    except (TypeError, ValueError):
+        raise ValueError("Comptage des lignes attendu invalide.") from None
+    if any(count < 0 for count in normalized_expected.values()) or summary.get("total_rows") != sum(normalized_expected.values()):
+        raise ValueError("Résumé du nombre total de lignes incohérent.")
 
     existing = connection.execute(
         "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
@@ -284,7 +290,6 @@ def restore_logical_backup_payload(
 
         if connection.execute("PRAGMA foreign_key_check").fetchall():
             raise ValueError("La restauration contient des violations de clés étrangères.")
-        normalized_expected = {name: int(count) for name, count in expected_counts.items()}
         if restored_counts != normalized_expected:
             raise ValueError("Les nombres de lignes restaurés ne correspondent pas à la sauvegarde.")
         if owns_transaction:

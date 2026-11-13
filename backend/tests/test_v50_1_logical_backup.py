@@ -189,19 +189,16 @@ def test_guarded_logical_restore_populates_only_explicit_empty_target(tmp_path):
         target.close()
 
 
-def test_guarded_logical_restore_refuses_production_or_wrong_identity():
+def test_guarded_logical_restore_refuses_production_or_wrong_identity(tmp_path):
     from storage.logical_backup import restore_logical_backup_payload
 
     source = _database()
-    backup_path = __import__("pathlib").Path(__import__("tempfile").mkdtemp()) / "backup.json"
+    backup_path = tmp_path / "backup.json"
     try:
         export_logical_backup(source, backup_path)
     finally:
         source.close()
     payload = json.loads(backup_path.read_text(encoding="utf-8"))
-    backup_path.unlink()
-    backup_path.with_suffix(".json.sha256").unlink(missing_ok=True)
-    backup_path.parent.rmdir()
 
     for target_id, expected_id in [
         ("chappie-db", "chappie-db"),
@@ -221,7 +218,7 @@ def test_guarded_logical_restore_refuses_production_or_wrong_identity():
             target.close()
 
 
-def test_guarded_logical_restore_refuses_nonempty_target_without_changes():
+def test_guarded_logical_restore_refuses_nonempty_target_without_changes(tmp_path):
     from storage.logical_backup import restore_logical_backup_payload
 
     source = _database()
@@ -252,8 +249,8 @@ def test_guarded_logical_restore_refuses_nonempty_target_without_changes():
         target.close()
 
 
-def test_guarded_logical_restore_rolls_back_on_invalid_row_count():
-    from logical_backup import restore_logical_backup_payload
+def test_guarded_logical_restore_rolls_back_on_invalid_row_count(tmp_path):
+    from storage.logical_backup import restore_logical_backup_payload
 
     source = _database()
     backup_path = __import__("pathlib").Path(__import__("tempfile").mkdtemp()) / "backup.json"

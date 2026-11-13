@@ -270,8 +270,15 @@ def restore_logical_backup_payload(
         for obj in objects:
             if obj.get("type") in {"index", "view", "trigger"}:
                 sql = obj.get("sql")
-                prefix = {"index": "CREATE INDEX", "view": "CREATE VIEW", "trigger": "CREATE TRIGGER"}[obj["type"]]
-                if not isinstance(sql, str) or not sql.lstrip().upper().startswith(prefix):
+                normalized_sql = sql.lstrip().upper() if isinstance(sql, str) else ""
+                valid_prefix = (
+                    normalized_sql.startswith(("CREATE INDEX", "CREATE UNIQUE INDEX"))
+                    if obj["type"] == "index"
+                    else normalized_sql.startswith("CREATE VIEW")
+                    if obj["type"] == "view"
+                    else normalized_sql.startswith("CREATE TRIGGER")
+                )
+                if not valid_prefix:
                     raise ValueError("Instruction de schéma invalide dans la sauvegarde.")
                 connection.execute(sql)
 

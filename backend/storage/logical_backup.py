@@ -149,34 +149,53 @@ def export_logical_backup(
     encoded = (json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_name = tempfile.mkstemp(prefix=destination.name + ".", suffix=".tmp", dir=destination.parent)
+    destination_created = False
+    checksum_created = False
+    checksum_fd = None
+    checksum_temporary = None
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary_name, destination)
-    except Exception:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
-        raise
+        # Hard-link publication is atomic and refuses to replace an artifact
+        # another exporter may have created after our initial existence check.
+        os.link(temporary_name, destination)
+        destination_created = True
+        os.unlink(temporary_name)
+        temporary_name = ""
 
-    digest = hashlib.sha256(encoded).hexdigest()
-    checksum_temporary = checksum_path.with_name("." + checksum_path.name + ".tmp")
-    try:
-        with checksum_temporary.open("x", encoding="ascii") as handle:
+        digest = hashlib.sha256(encoded).hexdigest()
+        checksum_fd, checksum_name = tempfile.mkstemp(
+            prefix=checksum_path.name + ".", suffix=".tmp", dir=checksum_path.parent
+        )
+        checksum_temporary = Path(checksum_name)
+        with os.fdopen(checksum_fd, "w", encoding="ascii") as handle:
+            checksum_fd = None
             handle.write(f"{digest}  {destination.name}\\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(checksum_temporary, checksum_path)
+        # A second no-clobber publication protects a pre-existing or
+        # concurrently-created checksum sidecar.
+        os.link(checksum_temporary, checksum_path)
+        checksum_created = True
+        checksum_temporary.unlink()
+        checksum_temporary = None
+
         verification = verify_logical_backup(destination)
         if not verification["valid"]:
             raise ValueError("Backup export failed local restore verification.")
     except Exception:
-        destination.unlink(missing_ok=True)
-        checksum_path.unlink(missing_ok=True)
-        checksum_temporary.unlink(missing_ok=True)
+        if checksum_fd is not None:
+            os.close(checksum_fd)
+        if temporary_name:
+            Path(temporary_name).unlink(missing_ok=True)
+        if checksum_temporary is not None:
+            checksum_temporary.unlink(missing_ok=True)
+        if checksum_created:
+            checksum_path.unlink(missing_ok=True)
+        if destination_created:
+            destination.unlink(missing_ok=True)
         raise
     return {
         "path": str(destination),

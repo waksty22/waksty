@@ -286,3 +286,35 @@ class HranaHttpTransaction:
     def rollback(self) -> None:
         if self._active:
             self._execute_control("ROLLBACK")
+
+
+def open_guarded_restore_transaction(
+    database_url: str,
+    auth_token: str,
+    *,
+    expected_target_identity: str,
+    production_identity: str,
+    http_client: httpx.Client | None = None,
+    timeout: float = 30.0,
+) -> tuple[HranaHttpClient, HranaHttpTransaction]:
+    """Open a write transaction only after exact host identity checks.
+
+    The identity values must be the full normalized Turso database hostnames,
+    not display labels or user-provided aliases.
+    """
+    actual = database_identity(database_url)
+    expected = expected_target_identity.strip().lower().rstrip(".")
+    production = production_identity.strip().lower().rstrip(".")
+    if not expected or actual != expected:
+        raise PermissionError("La cible Turso ne correspond pas à l'identité attendue.")
+    if not production or actual == production:
+        raise PermissionError("La restauration vers la base de production est interdite.")
+    client = HranaHttpClient(
+        database_url, auth_token, http_client=http_client, timeout=timeout
+    )
+    try:
+        transaction = client.transaction()
+    except Exception:
+        client.close()
+        raise
+    return client, transaction

@@ -109,3 +109,42 @@ def test_retrieval_is_accent_insensitive_and_keeps_user_isolation():
     assert search_episodic_memories(db, "creator", "inexistant", limit=5) == []
     db.close()
 
+
+
+
+def test_retrieval_uses_complete_tokens_not_substrings():
+    from memory.episodic_memory import save_episodic_memory, search_episodic_memories
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    save_episodic_memory(
+        db, "creator", "Un partage important avec la famille",
+        category="general", importance=5,
+    )
+    save_episodic_memory(
+        db, "creator", "L'art est un sujet différent",
+        category="general", importance=2,
+    )
+    db.commit()
+
+    results = search_episodic_memories(db, "creator", "art", limit=5)
+    assert [item["content"] for item in results] == [
+        "L'art est un sujet différent"
+    ]
+    db.close()
+
+
+def test_retrieval_phrase_bonus_requires_complete_token_sequence():
+    from memory.episodic_memory import save_episodic_memory, search_episodic_memories
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    save_episodic_memory(db, "creator", "Le partage est important", importance=5)
+    save_episodic_memory(db, "creator", "Le sujet art est important", importance=2)
+    db.commit()
+
+    results = search_episodic_memories(db, "creator", "art est", limit=5)
+    assert [item["content"] for item in results] == ["Le sujet art est important"]
+    db.close()

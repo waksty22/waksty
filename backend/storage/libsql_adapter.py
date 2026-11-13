@@ -209,8 +209,8 @@ class LibSQLConnectionAdapter:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        # Match sqlite3.Connection's context-manager behavior: finish the
-        # transaction, but do not close the connection.
+        # Preserve sqlite3 transaction semantics. Request-scoped adapters
+        # additionally release their remote session after the transaction.
         try:
             if exc_type is None:
                 self.commit()

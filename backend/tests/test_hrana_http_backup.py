@@ -57,6 +57,8 @@ class FakeHranaServer:
             elif sql in {"COMMIT", "ROLLBACK"}:
                 self.active = False
                 result = {"cols": [], "rows": []}
+            elif sql.startswith("CREATE TRIGGER"):
+                result = {"cols": [], "rows": []}
             elif "sqlite_master" in sql:
                 result = {
                     "cols": [

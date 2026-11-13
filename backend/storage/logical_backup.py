@@ -219,21 +219,30 @@ def restore_logical_backup_payload(
     objects, tables, summary = payload.get("objects"), payload.get("tables"), payload.get("summary")
     if not isinstance(objects, list) or not isinstance(tables, list) or not isinstance(summary, dict):
         raise ValueError("Structure de sauvegarde incomplète.")
-    table_objects = [obj for obj in objects if isinstance(obj, dict) and obj.get("type") == "table"]
-    object_names = {obj.get("name") for obj in table_objects}
-    if len(object_names) != len(table_objects) or any(obj.get("type") not in {"table", "index", "view", "trigger"} for obj in objects):
-        raise ValueError("Objets de schéma absents, dupliqués ou non pris en charge.")
-    table_names = [table.get("name") for table in tables if isinstance(table, dict)]
-    if len(table_names) != len(tables) or len(set(table_names)) != len(table_names) or set(table_names) != object_names:
+    if not all(isinstance(obj, dict) for obj in objects) or not all(isinstance(table, dict) for table in tables):
+        raise ValueError("Entrées de schéma ou de tables invalides.")
+    supported_types = {"table", "index", "view", "trigger"}
+    if any(obj.get("type") not in supported_types for obj in objects):
+        raise ValueError("Type d'objet de schéma non pris en charge.")
+    schema_names = [obj.get("name") for obj in objects]
+    if any(not isinstance(name, str) or not name or name.startswith("sqlite_") for name in schema_names):
+        raise ValueError("Nom d'objet de schéma invalide.")
+    if len(set(schema_names)) != len(schema_names):
+        raise ValueError("Noms d'objets de schéma dupliqués.")
+    table_objects = [obj for obj in objects if obj.get("type") == "table"]
+    object_names = {obj["name"] for obj in table_objects}
+    table_names = [table.get("name") for table in tables]
+    if any(not isinstance(name, str) or not name or name.startswith("sqlite_") for name in table_names):
+        raise ValueError("Nom de table invalide.")
+    if len(set(table_names)) != len(table_names) or set(table_names) != object_names:
         raise ValueError("Les tables et les objets de schéma ne correspondent pas.")
     expected_counts = summary.get("row_counts")
     if not isinstance(expected_counts, dict) or set(expected_counts) != set(table_names):
         raise ValueError("Comptage des lignes attendu invalide.")
-    try:
-        normalized_expected = {name: int(count) for name, count in expected_counts.items()}
-    except (TypeError, ValueError):
-        raise ValueError("Comptage des lignes attendu invalide.") from None
-    if any(count < 0 for count in normalized_expected.values()) or summary.get("total_rows") != sum(normalized_expected.values()):
+    if any(type(count) is not int or count < 0 for count in expected_counts.values()):
+        raise ValueError("Comptage des lignes attendu invalide.")
+    normalized_expected = dict(expected_counts)
+    if type(summary.get("total_rows")) is not int or summary["total_rows"] != sum(normalized_expected.values()):
         raise ValueError("Résumé du nombre total de lignes incohérent.")
 
     existing = connection.execute(

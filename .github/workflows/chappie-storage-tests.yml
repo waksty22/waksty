@@ -2,8 +2,16 @@ name: Chappie storage safety tests
 
 on:
   push:
-    branches:
-      - fix/v50-78-turso-fresh-bootstrap
+    branches: [main]
+    paths:
+      - "backend/server.py"
+      - "backend/storage/**"
+      - "backend/scripts/backup_turso.py"
+      - "backend/tests/test_server_storage_selection.py"
+      - "backend/tests/test_turso_existing_schema_adoption.py"
+      - "backend/tests/test_turso_backup_job.py"
+      - "backend/requirements.txt"
+      - ".github/workflows/chappie-storage-tests.yml"
   pull_request:
     branches: [main]
     paths:

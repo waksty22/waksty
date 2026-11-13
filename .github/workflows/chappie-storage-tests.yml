@@ -2,8 +2,31 @@ name: Chappie storage safety tests
 
 on:
   push:
-    branches:
-      - fix/v50-78-turso-fresh-bootstrap
+    branches: [main]
+    paths:
+      - "backend/server.py"
+      - "backend/storage/**"
+      - "backend/scripts/backup_turso.py"
+      - "backend/tests/test_server_storage_selection.py"
+      - "backend/tests/test_turso_existing_schema_adoption.py"
+      - "backend/tests/test_turso_backup_job.py"
+      - "backend/tests/test_data_migration.py"
+      - "backend/tests/test_v50_1_logical_backup.py"
+      - "backend/tests/test_hrana_backup_adapter.py"
+      - "backend/tests/test_hrana_http_backup.py"
+      - "backend/tests/test_logical_backup_transactions.py"
+      - "backend/tests/test_migration_audit.py"
+      - "backend/tests/test_skill_schema_compat.py"
+      - "backend/tests/test_storage_connection_factory.py"
+      - "backend/tests/test_turso_compat.py"
+      - "backend/tests/test_v50_1_preserve_existing_turso_rows.py"
+      - "backend/tests/test_v50_1_schema_migration.py"
+      - "backend/tests/test_v50_62_migration_diagnostics.py"
+      - "backend/tests/test_v50_backup_restore_rollback.py"
+      - "backend/tests/test_v50_schema_migration_dry_run.py"
+      - "backend/tests/test_v50_storage_factory.py"
+      - "backend/requirements.txt"
+      - ".github/workflows/chappie-storage-tests.yml"
   pull_request:
     branches: [main]
     paths:
@@ -13,6 +36,21 @@ on:
       - "backend/tests/test_server_storage_selection.py"
       - "backend/tests/test_turso_existing_schema_adoption.py"
       - "backend/tests/test_turso_backup_job.py"
+      - "backend/tests/test_data_migration.py"
+      - "backend/tests/test_v50_1_logical_backup.py"
+      - "backend/tests/test_hrana_backup_adapter.py"
+      - "backend/tests/test_hrana_http_backup.py"
+      - "backend/tests/test_logical_backup_transactions.py"
+      - "backend/tests/test_migration_audit.py"
+      - "backend/tests/test_skill_schema_compat.py"
+      - "backend/tests/test_storage_connection_factory.py"
+      - "backend/tests/test_turso_compat.py"
+      - "backend/tests/test_v50_1_preserve_existing_turso_rows.py"
+      - "backend/tests/test_v50_1_schema_migration.py"
+      - "backend/tests/test_v50_62_migration_diagnostics.py"
+      - "backend/tests/test_v50_backup_restore_rollback.py"
+      - "backend/tests/test_v50_schema_migration_dry_run.py"
+      - "backend/tests/test_v50_storage_factory.py"
       - "backend/requirements.txt"
       - ".github/workflows/chappie-storage-tests.yml"
   workflow_dispatch:
@@ -48,4 +86,17 @@ jobs:
             tests/test_turso_existing_schema_adoption.py \
             tests/test_data_migration.py \
             tests/test_turso_backup_job.py \
-            tests/test_v50_1_logical_backup.py
+            tests/test_v50_1_logical_backup.py \
+            tests/test_hrana_backup_adapter.py \
+            tests/test_hrana_http_backup.py \
+            tests/test_logical_backup_transactions.py \
+            tests/test_migration_audit.py \
+            tests/test_skill_schema_compat.py \
+            tests/test_storage_connection_factory.py \
+            tests/test_turso_compat.py \
+            tests/test_v50_1_preserve_existing_turso_rows.py \
+            tests/test_v50_1_schema_migration.py \
+            tests/test_v50_62_migration_diagnostics.py \
+            tests/test_v50_backup_restore_rollback.py \
+            tests/test_v50_schema_migration_dry_run.py \
+            tests/test_v50_storage_factory.py

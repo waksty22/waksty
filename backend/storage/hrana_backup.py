@@ -52,3 +52,50 @@ def describe_hrana_error(error: BaseException) -> dict[str, Any]:
         "status": status if isinstance(status, (int, str)) else None,
         "reason": reason[:160],
     }
+
+
+class HranaRestoreCursor:
+    """Minimal DB-API cursor facade for guarded logical restore."""
+
+    def __init__(self, result: Any) -> None:
+        self.description = tuple(
+            (str(column), None, None, None, None, None, None)
+            for column in result.columns
+        )
+        self._rows = [tuple(row) for row in result.rows]
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return list(self._rows)
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._rows[0] if self._rows else None
+
+
+class HranaRestoreConnection:
+    """Write-capable facade restricted to one caller-owned restore transaction.
+
+    The caller must open HranaHttpClient.transaction() first and must verify
+    the destination identity independently before constructing this adapter.
+    """
+
+    def __init__(self, transaction: Any) -> None:
+        self._transaction = transaction
+        self.in_transaction = True
+
+    def execute(self, sql: str, parameters: tuple[Any, ...] | list[Any] = ()) -> HranaRestoreCursor:
+        result = self._transaction.execute_write(sql, parameters)
+        return HranaRestoreCursor(result)
+
+    def executemany(self, sql: str, parameter_rows: list[tuple[Any, ...]]) -> None:
+        for parameters in parameter_rows:
+            self._transaction.execute_write(sql, parameters)
+
+    def commit(self) -> None:
+        if self.in_transaction:
+            self._transaction.commit()
+            self.in_transaction = False
+
+    def rollback(self) -> None:
+        if self.in_transaction:
+            self._transaction.rollback()
+            self.in_transaction = False

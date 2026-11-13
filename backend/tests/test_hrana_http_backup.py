@@ -237,7 +237,7 @@ def test_hrana_write_transaction_encodes_typed_parameters_without_weakening_read
 
     transaction = WriteTransaction()
     connection = HranaRestoreConnection(transaction)
-    connection.execute("INSERT INTO t VALUES (?, ?, ?)", (1, "note", b"\\x00"))
+    connection.execute("INSERT INTO t VALUES (?, ?, ?)", (1, "note", bytes([0])))
     cursor = connection.execute("SELECT COUNT(*) FROM t")
     assert cursor.fetchone() == (1,)
     connection.executemany("INSERT INTO t VALUES (?)", [(2,), (3,)])
@@ -329,7 +329,7 @@ def test_hrana_execute_write_sends_typed_bound_arguments():
         transaction = client.transaction()
         transaction.execute_write(
             "INSERT INTO t VALUES (?, ?, ?, ?, ?)",
-            (None, 7, 1.5, "hello", b"\\x00\\xff"),
+            (None, 7, 1.5, "hello", bytes([0, 255])),
         )
         statement = captured[1]["requests"][0]["stmt"]
         assert statement["sql"].startswith("INSERT")

@@ -374,3 +374,69 @@ def test_encrypted_restore_rejects_wrong_password_before_target_access(tmp_path)
         ).fetchall() == []
     finally:
         target.close()
+
+
+def test_encrypted_restore_through_hrana_adapter_with_foreign_keys_enabled(tmp_path):
+    from storage.hrana_backup import HranaRestoreConnection
+    from storage.logical_backup import (
+        export_encrypted_logical_backup,
+        restore_encrypted_logical_backup,
+    )
+
+    class LocalHranaTransaction:
+        """Execute Hrana-like bound statements against an isolated SQLite target."""
+        def __init__(self):
+            self.db = sqlite3.connect(":memory:")
+            self.db.execute("PRAGMA foreign_keys = ON")
+            self.committed = False
+            self.rolled_back = False
+
+        def execute_write(self, sql, args=()):
+            cursor = self.db.execute(sql, tuple(args))
+            return type("Result", (), {
+                "columns": tuple(item[0] for item in (cursor.description or ())),
+                "rows": cursor.fetchall() if cursor.description else [],
+            })()
+
+        def commit(self):
+            self.db.commit()
+            self.committed = True
+
+        def rollback(self):
+            self.db.rollback()
+            self.rolled_back = True
+
+    source = _database()
+    artifact = tmp_path / "hrana-restore.enc"
+    password = "local-test-password-never-production"
+    try:
+        export_encrypted_logical_backup(source, artifact, password)
+    finally:
+        source.close()
+
+    transaction = LocalHranaTransaction()
+    adapter = HranaRestoreConnection(transaction)
+    try:
+        report = restore_encrypted_logical_backup(
+            adapter,
+            artifact,
+            password,
+            target_identity="isolated-test-db.turso.io",
+            expected_target_identity="isolated-test-db.turso.io",
+            production_identity="chappie-db.turso.io",
+        )
+        assert report["restored"] is True
+        assert report["total_rows"] == 2
+        assert transaction.db.execute(
+            "SELECT payload FROM parent WHERE id=1"
+        ).fetchone()[0] == bytes([0, 1, 255])
+        assert transaction.db.execute(
+            "SELECT note FROM child WHERE id=2"
+        ).fetchone()[0] == "existing Turso row"
+        assert transaction.db.execute("PRAGMA foreign_key_check").fetchall() == []
+        adapter.commit()
+        assert transaction.committed is True
+    finally:
+        if adapter.in_transaction:
+            adapter.rollback()
+        transaction.db.close()

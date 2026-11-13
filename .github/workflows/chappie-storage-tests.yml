@@ -10,6 +10,8 @@ on:
       - "backend/tests/test_server_storage_selection.py"
       - "backend/tests/test_turso_existing_schema_adoption.py"
       - "backend/tests/test_turso_backup_job.py"
+      - "backend/tests/test_data_migration.py"
+      - "backend/tests/test_v50_1_logical_backup.py"
       - "backend/requirements.txt"
       - ".github/workflows/chappie-storage-tests.yml"
   pull_request:

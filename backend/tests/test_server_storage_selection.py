@@ -709,3 +709,30 @@ def test_turso_reset_clears_new_user_tables_and_preserves_voice_profile(
         ).fetchone() == ("reset",)
     finally:
         remote.close()
+
+
+def test_server_db_connection_routes_explicit_turso_selection_through_factory(
+    monkeypatch,
+):
+    import server
+
+    captured = {}
+    sentinel = object()
+
+    def fake_open_storage_connection(settings):
+        captured["settings"] = settings
+        return sentinel
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.turso.io")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-only-token")
+    monkeypatch.setattr(
+        server, "open_storage_connection", fake_open_storage_connection
+    )
+
+    connection = server.db_connection()
+
+    assert connection is sentinel
+    assert captured["settings"].backend == "turso"
+    assert captured["settings"].turso_database_url == "libsql://isolated-test.turso.io"
+    assert captured["settings"].turso_auth_token == "test-only-token"

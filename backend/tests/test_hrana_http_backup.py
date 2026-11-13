@@ -9,7 +9,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from storage.hrana_backup import HranaTransactionConnection
-from storage.hrana_http import HranaHttpClient, HranaHttpError
+from storage.hrana_http import (
+    HranaHttpClient,
+    HranaHttpError,
+    open_guarded_restore_transaction,
+)
 from storage.logical_backup import (
     export_encrypted_logical_backup,
     verify_encrypted_logical_backup,
@@ -259,3 +263,55 @@ def test_single_statement_guard_accepts_trailing_comments_and_quoted_semicolons(
     assert _is_single_sql_statement("CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;")
     assert not _is_single_sql_statement("SELECT 1; SELECT 2")
     assert not _is_single_sql_statement("SELECT 1; -- comment\nDROP TABLE t")
+
+
+
+def test_guarded_restore_checks_exact_host_before_opening_transaction():
+    server = FakeHranaServer()
+    http = httpx.Client(transport=httpx.MockTransport(server.handle))
+    try:
+        with pytest.raises(PermissionError):
+            open_guarded_restore_transaction(
+                "libsql://isolated-db.turso.io",
+                "test-token",
+                expected_target_identity="different-db.turso.io",
+                production_identity="chappie-db.turso.io",
+                http_client=http,
+            )
+        with pytest.raises(PermissionError):
+            open_guarded_restore_transaction(
+                "libsql://chappie-db.turso.io",
+                "test-token",
+                expected_target_identity="chappie-db.turso.io",
+                production_identity="chappie-db.turso.io",
+                http_client=http,
+            )
+        assert server.statements == []
+        assert server.active is False
+    finally:
+        http.close()
+
+
+def test_guarded_restore_opens_transaction_only_for_expected_nonproduction_host():
+    server = FakeHranaServer()
+    http = httpx.Client(transport=httpx.MockTransport(server.handle))
+    client = transaction = None
+    try:
+        client, transaction = open_guarded_restore_transaction(
+            "libsql://isolated-db.turso.io",
+            "test-token",
+            expected_target_identity="ISOLATED-DB.TURSO.IO",
+            production_identity="chappie-db.turso.io",
+            http_client=http,
+        )
+        assert server.statements == ["BEGIN"]
+        assert server.active is True
+        transaction.rollback()
+        assert server.statements == ["BEGIN", "ROLLBACK"]
+        assert server.active is False
+    finally:
+        if transaction is not None and transaction._active:
+            transaction.rollback()
+        if client is not None:
+            client.close()
+        http.close()

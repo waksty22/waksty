@@ -222,15 +222,12 @@ def test_guarded_logical_restore_refuses_nonempty_target_without_changes(tmp_pat
     from storage.logical_backup import restore_logical_backup_payload
 
     source = _database()
-    backup_path = __import__("pathlib").Path(__import__("tempfile").mkdtemp()) / "backup.json"
+    backup_path = tmp_path / "backup.json"
     try:
         export_logical_backup(source, backup_path)
     finally:
         source.close()
     payload = json.loads(backup_path.read_text(encoding="utf-8"))
-    backup_path.unlink()
-    backup_path.with_suffix(".json.sha256").unlink(missing_ok=True)
-    backup_path.parent.rmdir()
 
     target = sqlite3.connect(":memory:")
     try:

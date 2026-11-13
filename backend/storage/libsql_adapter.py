@@ -143,9 +143,12 @@ def _raise_sqlite_compatible_error(exc: Exception) -> None:
 class LibSQLConnectionAdapter:
     """Provide the subset of sqlite3.Connection used by the current backend."""
 
-    def __init__(self, connection: Any) -> None:
+    def __init__(
+        self, connection: Any, *, close_on_context_exit: bool = False
+    ) -> None:
         self._connection = connection
         self._closed = False
+        self._close_on_context_exit = close_on_context_exit
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -208,13 +211,21 @@ class LibSQLConnectionAdapter:
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
         # Match sqlite3.Connection's context-manager behavior: finish the
         # transaction, but do not close the connection.
-        if exc_type is None:
-            self.commit()
-        else:
-            self.rollback()
+        try:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
+        finally:
+            if self._close_on_context_exit:
+                self.close()
         return False
 
 
-def adapt_libsql_connection(connection: Any) -> LibSQLConnectionAdapter:
-    """Wrap an already-created libsql connection without opening a new one."""
-    return LibSQLConnectionAdapter(connection)
+def adapt_libsql_connection(
+    connection: Any, *, close_on_context_exit: bool = False
+) -> LibSQLConnectionAdapter:
+    """Wrap a libsql connection; optionally release request-scoped sessions."""
+    return LibSQLConnectionAdapter(
+        connection, close_on_context_exit=close_on_context_exit
+    )

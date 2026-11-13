@@ -74,7 +74,7 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
             database=selected.turso_database_url,
             auth_token=selected.turso_auth_token,
         )
-        connection = adapt_libsql_connection(native)
+        connection = adapt_libsql_connection(native, close_on_context_exit=True)
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
 

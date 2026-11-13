@@ -422,3 +422,25 @@ def test_real_libsql_episodic_memory_init_is_idempotent_and_user_scoped():
         assert search_episodic_memories(db, "another-user") == []
     finally:
         db.close()
+
+
+def test_context_manager_can_close_request_scoped_connection():
+    raw = FakeConnection()
+    with LibSQLConnectionAdapter(raw, close_on_context_exit=True) as db:
+        db.execute("SELECT id, label FROM sample")
+
+    assert raw.commits == 1
+    assert raw.closed is True
+
+
+def test_context_manager_closes_request_scoped_connection_after_rollback():
+    raw = FakeConnection()
+
+    try:
+        with LibSQLConnectionAdapter(raw, close_on_context_exit=True):
+            raise RuntimeError("expected")
+    except RuntimeError:
+        pass
+
+    assert raw.rollbacks == 1
+    assert raw.closed is True

@@ -247,6 +247,9 @@ def restore_logical_backup_payload(
     if owns_transaction:
         connection.execute("BEGIN")
     try:
+        # Defer FK enforcement until the complete dataset has been inserted;
+        # this avoids depending on alphabetic/table creation order.
+        connection.execute("PRAGMA defer_foreign_keys = ON")
         for obj in table_objects:
             sql = obj.get("sql")
             if not isinstance(sql, str) or not sql.lstrip().upper().startswith("CREATE TABLE"):

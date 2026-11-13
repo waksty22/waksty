@@ -109,7 +109,14 @@ def export_logical_backup(
             and "AUTOINCREMENT" in obj["sql"].upper()
         }
         sequences = []
-        if autoincrement_tables:
+        has_sequence_table = bool(
+            _query_rows(
+                connection,
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'sqlite_sequence' LIMIT 1",
+            )[1]
+        )
+        if autoincrement_tables and has_sequence_table:
             _, sequence_rows = _query_rows(connection, "SELECT name, seq FROM sqlite_sequence")
             sequences = [
                 {"table": str(name), "seq": int(seq)}

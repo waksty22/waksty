@@ -551,3 +551,21 @@ def test_logical_backup_excludes_generated_columns_from_restore_inserts(tmp_path
         ).fetchall() == [(7, 14), (11, 22)]
     finally:
         target.close()
+
+
+def test_logical_backup_does_not_assume_sqlite_sequence_from_sql_comment(tmp_path):
+    source = sqlite3.connect(":memory:")
+    source.execute(
+        "CREATE TABLE notes(id INTEGER PRIMARY KEY, note TEXT) "
+        "/* AUTOINCREMENT appears here only as a comment */"
+    )
+    source.execute("INSERT INTO notes(note) VALUES ('safe')")
+    artifact = tmp_path / "comment-autoincrement.json"
+    try:
+        report = export_logical_backup(source, artifact)
+        assert report["verified"] is True
+    finally:
+        source.close()
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["sequences"] == []

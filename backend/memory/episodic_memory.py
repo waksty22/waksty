@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import sqlite3
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -506,10 +507,23 @@ def search_episodic_memories(
             char for char in searchable_folded
             if not unicodedata.combining(char)
         )
-        matched = sum(
-            1 for term in terms if term in searchable_folded
+        searchable_tokens = re.findall(r"[a-z0-9]{2,}", searchable_folded)
+        searchable_token_set = set(searchable_tokens)
+        matched = sum(1 for term in terms if term in searchable_token_set)
+
+        normalized_query_folded = unicodedata.normalize("NFKD", normalized_query)
+        normalized_query_folded = "".join(
+            char for char in normalized_query_folded
+            if not unicodedata.combining(char)
         )
-        phrase_match = bool(normalized_query and normalized_query in searchable)
+        query_tokens = re.findall(r"[a-z0-9]{2,}", normalized_query_folded)
+        phrase_match = bool(
+            query_tokens
+            and any(
+                searchable_tokens[index:index + len(query_tokens)] == query_tokens
+                for index in range(len(searchable_tokens) - len(query_tokens) + 1)
+            )
+        )
         if query and matched == 0 and not phrase_match:
             continue
         # Relevance is lexical evidence, not a claim that the memory is true.

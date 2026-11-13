@@ -1219,6 +1219,14 @@ class VocabularyTeachRequest(BaseModel):
     meaning: str = Field(default="", max_length=1000)
     evidence: str = Field(default="Enseignement explicite par le créateur", max_length=500)
 
+def _skill_table_columns(db: Any) -> set[str]:
+    """Return the columns actually exposed by the active skills table."""
+    return {
+        str(row[1])
+        for row in db.execute("PRAGMA table_info(skills)").fetchall()
+    }
+
+
 def get_emotions(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
     now = utc_now()
@@ -1266,15 +1274,23 @@ def get_emotions(user_id: str) -> dict[str, Any]:
             ),  
         )  
 
-        for skill_id, label in default_skills:  
-            db.execute(  
-                """  
-                INSERT OR IGNORE INTO skills  
-                (user_id, skill_name, level, xp, evidence, updated_at)  
-                VALUES (?, ?, 0.0, 0.0, ?, ?)  
-                """,  
-                (user_id, skill_id, label, now),  
-            )  
+        skill_columns = _skill_table_columns(db)
+        if "xp" in skill_columns:
+            skill_insert_sql = """
+                INSERT OR IGNORE INTO skills
+                (user_id, skill_name, level, xp, evidence, updated_at)
+                VALUES (?, ?, 0.0, 0.0, ?, ?)
+            """
+        else:
+            # Existing Turso schemas may intentionally omit the legacy XP column.
+            # Supervised branch assessments, not aggregate XP, drive cognitive maturity.
+            skill_insert_sql = """
+                INSERT OR IGNORE INTO skills
+                (user_id, skill_name, level, evidence, updated_at)
+                VALUES (?, ?, 0.0, ?, ?)
+            """
+        for skill_id, label in default_skills:
+            db.execute(skill_insert_sql, (user_id, skill_id, label, now))
 
         db.execute(  
             """  
@@ -1338,9 +1354,11 @@ def get_skills_summary(user_id: str) -> dict[str, Any]:
     """Build maturity only from branch-level assessments approved by the supervisor."""
     get_emotions(user_id)
     with db_connection() as db:
+        skill_columns = _skill_table_columns(db)
+        xp_expression = "xp" if "xp" in skill_columns else "0.0 AS xp"
         legacy_rows = db.execute(
-            """SELECT skill_name, level, xp, evidence, updated_at
-               FROM skills WHERE user_id=?""",
+            f"""SELECT skill_name, level, {xp_expression}, evidence, updated_at
+                FROM skills WHERE user_id=?""",
             (user_id,),
         ).fetchall()
         test_rows = db.execute(
@@ -1510,15 +1528,20 @@ def update_skill(
     evidence = str(evidence)[:500]  
     now = utc_now()  
 
-    cognitive_engine.invalidate_cache(user_id)  
+    cognitive_engine.invalidate_cache(user_id)
 
-    with db_connection() as db:  
-        row = db.execute(  
-            """  
-            SELECT level, xp FROM skills  
-            WHERE user_id=? AND skill_name=?  
-            """,  
-            (user_id, skill_name),  
+    with db_connection() as db:
+        if "xp" not in _skill_table_columns(db):
+            raise ValueError(
+                "La progression par XP historique n'est pas disponible dans ce schéma. "
+                "Utilise une évaluation de sous-compétence avec preuve et validation."
+            )
+        row = db.execute(
+            """
+            SELECT level, xp FROM skills
+            WHERE user_id=? AND skill_name=?
+            """,
+            (user_id, skill_name),
         ).fetchone()  
 
         current_xp = float(row["xp"]) if row else 0.0  

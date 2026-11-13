@@ -85,7 +85,11 @@ def export_logical_backup(
             escaped = '"' + table_name.replace('"', '""') + '"'
             if isinstance(obj.get("sql"), str) and "CREATE VIRTUAL TABLE" in obj["sql"].upper():
                 raise ValueError(f"Unsupported virtual table in logical backup: {table_name}")
-            _, column_info = _query_rows(connection, f"PRAGMA table_xinfo({escaped})")
+            pragma_table = table_name.replace("'", "''")
+            _, column_info = _query_rows(
+                connection,
+                "SELECT * FROM pragma_table_xinfo('" + pragma_table + "')",
+            )
             if not column_info:
                 raise ValueError(f"Unable to inspect columns for logical backup table: {table_name}")
             # hidden=0 are writable columns; generated/virtual hidden columns

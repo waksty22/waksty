@@ -151,7 +151,9 @@ from cognition.shared_brain import (
     merge_live_transcript,
 )
 from storage.turso_compat import inspect_turso_driver
-from storage.connection_factory import StorageSettings, open_storage_connection
+from storage.connection_factory import (
+    ClosingConnection, StorageSettings, open_storage_connection,
+)
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
 from storage.memory_health import inspect_memory_persistence
@@ -303,7 +305,7 @@ def db_connection() -> Any:
             backend="sqlite",
             sqlite_path=str(DB_PATH),
         )
-    return open_storage_connection(settings)
+    return ClosingConnection(open_storage_connection(settings))
 
 def _local_migration_pending_cutover() -> bool:
     """Read the local migration gate without creating or changing the database."""

@@ -331,3 +331,42 @@ def test_http_rejects_cross_origin_base_url_without_forwarding_auth_token():
         assert server.request_hosts == ["example-org.turso.io"]
     finally:
         client.close()
+
+
+def test_http_accepts_same_origin_base_url_update_and_keeps_stream_working():
+    server = FakeHranaServer()
+    server.base_url = "https://EXAMPLE-ORG.TURSO.IO"
+    client = _client(server)
+    transaction = None
+    try:
+        transaction = client.transaction()
+        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+        transaction.rollback()
+        assert server.request_hosts == ["example-org.turso.io", "example-org.turso.io"]
+        assert server.closed is True
+        assert server.active is False
+    finally:
+        if transaction is not None and transaction._active:
+            transaction.rollback()
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://example-org.turso.io.attacker.example",
+        "https://example-org.turso.io:444",
+        "http://example-org.turso.io",
+    ],
+)
+def test_http_rejects_deceptive_or_downgraded_base_url_updates(base_url):
+    server = FakeHranaServer()
+    server.base_url = base_url
+    client = _client(server)
+    try:
+        with pytest.raises(HranaHttpError, match="origine de connexion"):
+            client.transaction()
+        assert server.request_hosts == ["example-org.turso.io"]
+        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+    finally:
+        client.close()

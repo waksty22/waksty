@@ -59,6 +59,8 @@ class FakeHranaServer:
                 result = {"cols": [], "rows": []}
             elif sql.startswith("CREATE TRIGGER"):
                 result = {"cols": [], "rows": []}
+            elif "name = 'sqlite_sequence'" in sql:
+                result = {"cols": [{"name": "1", "decltype": "INTEGER"}], "rows": []}
             elif "sqlite_master" in sql:
                 result = {
                     "cols": [
@@ -154,7 +156,7 @@ def test_http_v2_backup_uses_one_baton_transaction_and_verifies(tmp_path):
         assert "sqlite_master" in server.statements[1]
         assert "pragma_table_xinfo" in server.statements[2]
         assert 'SELECT "id","note" FROM "memories"' == server.statements[3]
-        assert server.statements[4] == "COMMIT"
+        assert server.statements[5] == "COMMIT"
         assert server.closed is True
         assert server.active is False
     finally:

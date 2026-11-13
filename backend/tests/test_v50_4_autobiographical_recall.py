@@ -139,3 +139,37 @@ def test_autobiographical_sync_does_not_cross_link_turns_with_same_timestamp():
         ("Question du second tour.", "Réponse du second tour."),
     ]
     db.close()
+
+
+
+def test_autobiographical_sync_keeps_same_timestamp_links_user_scoped():
+    from memory.autobiographical import sync_autobiographical_events
+
+    db = make_db()
+    same_time = "2026-11-13T17:30:00+00:00"
+    db.executemany(
+        "INSERT INTO conversations(user_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+        [
+            ("alice", "user", "Question privée Alice.", same_time),
+            ("alice", "assistant", "Réponse privée Alice.", same_time),
+            ("bob", "user", "Question privée Bob.", same_time),
+            ("bob", "assistant", "Réponse privée Bob.", same_time),
+        ],
+    )
+
+    sync_autobiographical_events(db, "alice")
+    sync_autobiographical_events(db, "bob")
+    links = db.execute(
+        """SELECT l.user_id, u.user_id, u.content, a.user_id, a.content
+           FROM autobiographical_links l
+           JOIN autobiographical_events u ON u.id=l.source_event_id
+           JOIN autobiographical_events a ON a.id=l.target_event_id
+           ORDER BY l.user_id"""
+    ).fetchall()
+
+    assert len(links) == 2
+    assert [(row[0], row[1], row[2], row[3], row[4]) for row in links] == [
+        ("alice", "alice", "Question privée Alice.", "alice", "Réponse privée Alice."),
+        ("bob", "bob", "Question privée Bob.", "bob", "Réponse privée Bob."),
+    ]
+    db.close()

@@ -472,7 +472,7 @@ def export_encrypted_logical_backup(
         )
         checksum_temporary = Path(checksum_name)
         with os.fdopen(checksum_fd, "w", encoding="ascii") as handle:
-            handle.write(f"{digest}  {destination.name}\\n")
+            handle.write(f"{digest}  {destination.name}\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.link(checksum_temporary, checksum_path)

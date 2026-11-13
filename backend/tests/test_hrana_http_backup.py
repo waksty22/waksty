@@ -225,7 +225,7 @@ def test_hrana_write_transaction_encodes_typed_parameters_without_weakening_read
             if sql.startswith("SELECT"):
                 return HranaHttpResult({
                     "cols": [{"name": "count"}],
-                    "rows": [{"type": "integer", "value": "1"}],
+                    "rows": [[{"type": "integer", "value": "1"}]],
                 })
             return HranaHttpResult({"cols": [], "rows": []})
 

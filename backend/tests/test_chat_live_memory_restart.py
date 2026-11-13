@@ -8,7 +8,6 @@ sys.path.insert(0, str(BACKEND))
 
 def test_chat_and_live_turns_survive_fresh_storage_connections(monkeypatch, tmp_path):
     import server
-    from cognition.shared_brain import get_shared_brain_snapshot
 
     database_path = tmp_path / "chappie-persistence.sqlite3"
     monkeypatch.setattr(server, "DB_PATH", database_path)
@@ -71,9 +70,9 @@ def test_chat_and_live_turns_survive_fresh_storage_connections(monkeypatch, tmp_
         "gemini_live",
     ]
 
-    # The shared cognitive snapshot must read the same persisted conversation
-    # records regardless of which interface originally wrote them.
+    # A second independent connection must observe the same committed rows.
     with server.db_connection() as reopened:
-        snapshot = get_shared_brain_snapshot(reopened, "creator")
-
-    assert snapshot["statistics"]["totals"]["memories"] >= 0
+        assert reopened.execute(
+            "SELECT COUNT(*) FROM conversations WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0] == 4

@@ -260,6 +260,7 @@ def test_guarded_logical_restore_rolls_back_on_invalid_row_count(tmp_path):
     backup_path.with_suffix(".json.sha256").unlink(missing_ok=True)
     backup_path.parent.rmdir()
     payload["summary"]["row_counts"]["child"] = 999
+    payload["summary"]["total_rows"] = 1000
 
     target = sqlite3.connect(":memory:")
     try:

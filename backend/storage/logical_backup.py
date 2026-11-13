@@ -172,7 +172,7 @@ def export_logical_backup(
         checksum_temporary = Path(checksum_name)
         with os.fdopen(checksum_fd, "w", encoding="ascii") as handle:
             checksum_fd = None
-            handle.write(f"{digest}  {destination.name}\\n")
+            handle.write(f"{digest}  {destination.name}\n")
             handle.flush()
             os.fsync(handle.fileno())
         # A second no-clobber publication protects a pre-existing or

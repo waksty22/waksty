@@ -442,3 +442,41 @@ def test_encrypted_restore_through_hrana_adapter_with_foreign_keys_enabled(tmp_p
         if adapter.in_transaction:
             adapter.rollback()
         transaction.db.close()
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload["objects"].append("not-an-object"),
+        lambda payload: payload["tables"][0].update(name=[]),
+        lambda payload: payload["summary"]["row_counts"].update(child="1"),
+        lambda payload: payload["summary"].update(total_rows=True),
+    ],
+)
+def test_logical_restore_rejects_malformed_payload_before_target_changes(tmp_path, mutate):
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    backup_path = tmp_path / "malformed-source.json"
+    try:
+        export_logical_backup(source, backup_path)
+    finally:
+        source.close()
+    payload = json.loads(backup_path.read_text(encoding="utf-8"))
+    mutate(payload)
+
+    target = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(ValueError):
+            restore_logical_backup_payload(
+                target,
+                payload,
+                target_identity="isolated-restore-db",
+                expected_target_identity="isolated-restore-db",
+                production_identity="chappie-db",
+            )
+        assert target.execute(
+            "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+        ).fetchall() == []
+    finally:
+        target.close()

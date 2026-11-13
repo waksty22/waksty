@@ -198,6 +198,101 @@ def verify_logical_backup(path: str | Path) -> dict[str, Any]:
         db.close()
 
 
+
+def restore_logical_backup_payload(
+    connection: Any,
+    payload: dict[str, Any],
+    *,
+    target_identity: str,
+    expected_target_identity: str,
+    production_identity: str,
+) -> dict[str, Any]:
+    """Restore a verified logical payload into an explicitly identified empty target."""
+    identities = (target_identity.strip(), expected_target_identity.strip(), production_identity.strip())
+    if not all(identities) or identities[0] != identities[1]:
+        raise PermissionError("La cible ne correspond pas à l'identité explicitement attendue.")
+    if identities[0].casefold() == identities[2].casefold():
+        raise PermissionError("La restauration vers l'identité de production est interdite.")
+    if not isinstance(payload, dict) or payload.get("format") != "chappie-turso-logical-backup" or payload.get("format_version") != 1:
+        raise ValueError("Format de sauvegarde logique non pris en charge.")
+
+    objects, tables, summary = payload.get("objects"), payload.get("tables"), payload.get("summary")
+    if not isinstance(objects, list) or not isinstance(tables, list) or not isinstance(summary, dict):
+        raise ValueError("Structure de sauvegarde incomplète.")
+    table_objects = [obj for obj in objects if isinstance(obj, dict) and obj.get("type") == "table"]
+    object_names = {obj.get("name") for obj in table_objects}
+    if len(object_names) != len(table_objects) or any(obj.get("type") not in {"table", "index", "view", "trigger"} for obj in objects):
+        raise ValueError("Objets de schéma absents, dupliqués ou non pris en charge.")
+    table_names = [table.get("name") for table in tables if isinstance(table, dict)]
+    if len(table_names) != len(tables) or len(set(table_names)) != len(table_names) or set(table_names) != object_names:
+        raise ValueError("Les tables et les objets de schéma ne correspondent pas.")
+    expected_counts = summary.get("row_counts")
+    if not isinstance(expected_counts, dict) or set(expected_counts) != set(table_names):
+        raise ValueError("Comptage des lignes attendu invalide.")
+
+    existing = connection.execute(
+        "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
+        "AND type IN ('table', 'index', 'view', 'trigger')"
+    ).fetchall()
+    if existing:
+        raise PermissionError("La base cible n'est pas vide ; aucune donnée n'a été modifiée.")
+
+    owns_transaction = not bool(getattr(connection, "in_transaction", False))
+    if owns_transaction:
+        connection.execute("BEGIN")
+    try:
+        for obj in table_objects:
+            sql = obj.get("sql")
+            if not isinstance(sql, str) or not sql.lstrip().upper().startswith("CREATE TABLE"):
+                raise ValueError("Instruction CREATE TABLE invalide dans la sauvegarde.")
+            connection.execute(sql)
+
+        restored_counts: dict[str, int] = {}
+        for table in tables:
+            name, columns, rows = table["name"], table.get("columns"), table.get("rows")
+            if not isinstance(columns, list) or not columns or not all(isinstance(col, str) for col in columns) or not isinstance(rows, list):
+                raise ValueError("Colonnes ou lignes de table invalides.")
+            quoted_table = '"' + name.replace('"', '""') + '"'
+            quoted_columns = ",".join('"' + col.replace('"', '""') + '"' for col in columns)
+            placeholders = ",".join("?" for _ in columns)
+            decoded_rows = []
+            for row in rows:
+                if not isinstance(row, list) or len(row) != len(columns):
+                    raise ValueError("Une ligne ne correspond pas aux colonnes déclarées.")
+                decoded_rows.append([_restore_value(value) for value in row])
+            if decoded_rows:
+                connection.executemany(
+                    f"INSERT INTO {quoted_table} ({quoted_columns}) VALUES ({placeholders})",
+                    decoded_rows,
+                )
+            restored_counts[name] = int(connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0])
+
+        for obj in objects:
+            if obj.get("type") in {"index", "view", "trigger"}:
+                sql = obj.get("sql")
+                prefix = {"index": "CREATE INDEX", "view": "CREATE VIEW", "trigger": "CREATE TRIGGER"}[obj["type"]]
+                if not isinstance(sql, str) or not sql.lstrip().upper().startswith(prefix):
+                    raise ValueError("Instruction de schéma invalide dans la sauvegarde.")
+                connection.execute(sql)
+
+        if connection.execute("PRAGMA foreign_key_check").fetchall():
+            raise ValueError("La restauration contient des violations de clés étrangères.")
+        normalized_expected = {name: int(count) for name, count in expected_counts.items()}
+        if restored_counts != normalized_expected:
+            raise ValueError("Les nombres de lignes restaurés ne correspondent pas à la sauvegarde.")
+        if owns_transaction:
+            connection.commit()
+        return {
+            "restored": True, "target_identity": identities[0],
+            "table_count": len(restored_counts), "total_rows": sum(restored_counts.values()),
+            "row_counts": restored_counts, "foreign_key_violations": 0,
+        }
+    except Exception:
+        if owns_transaction:
+            connection.rollback()
+        raise
+
+
 def export_encrypted_logical_backup(
     connection: Any,
     destination: str | Path,

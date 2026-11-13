@@ -19,6 +19,8 @@ MAX_CONTEXT_CHARS = 18000
 TABLES = {
     "vocabulary": ("personal_vocabulary", "updated_at DESC, word ASC"),
     "sensory_observations": ("sensory_observations", "created_at DESC"),
+    "word_visual_associations": ("word_visual_associations", "created_at DESC"),
+    "perception_fusions": ("perception_fusion_candidates", "created_at DESC"),
     "world_entities": ("world_entities", "last_observed_at DESC"),
     "world_relations": ("world_relations", "updated_at DESC"),
     "object_properties": ("object_properties", "updated_at DESC"),
@@ -151,6 +153,8 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
     labels = (
         ("vocabulary", "VOCABULAIRE PERSONNEL — état d'acquisition"),
         ("sensory_observations", "OBSERVATIONS SENSORIELLES — non promues en faits"),
+        ("word_visual_associations", "ASSOCIATIONS MOT-IMAGE — apprentissage visuel enregistré"),
+        ("perception_fusions", "RAPPROCHEMENTS AUDIO-VISION — candidats à vérifier, pas des identités confirmées"),
         ("world_entities", "ENTITÉS DU MODÈLE DU MONDE — conserver provenance/confiance"),
         ("world_relations", "RELATIONS DU MONDE — conserver provenance/confiance"),
         ("object_properties", "PROPRIÉTÉS D'OBJETS — enseignées/observées/confirmées"),

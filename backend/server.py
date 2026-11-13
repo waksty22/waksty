@@ -88,6 +88,7 @@ from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
     get_usable_words, get_repeatable_words, gate_spoken_text,
     record_heard_word, record_heard_text, record_explicit_word_teaching,
+    record_user_text_learning,
     text_uses_only_allowed_words,
 )
 from learning.sensory import (
@@ -2881,15 +2882,11 @@ async def run_brain(
     # This lets newborn Chappie repeat words he has actually heard in chat.
     try:
         with db_connection() as teaching_db:
-            heard = record_heard_text(
-                teaching_db, user_id, message,
-                evidence="Message écrit reçu par le chat classique",
-                max_tokens=30,
+            lexical_learning = record_user_text_learning(
+                teaching_db, user_id, message, source="classic_chat"
             )
-            taught = record_explicit_word_teaching(
-                teaching_db, user_id, message,
-                evidence="Enseignement explicite via le chat classique",
-            )
+            heard = lexical_learning["heard"]
+            taught = lexical_learning["taught"]
             if heard or taught:
                 teaching_db.commit()
             if heard:
@@ -5688,10 +5685,16 @@ async def websocket_endpoint(
                                         sensory_db, user_id, live_emotions,
                                         source="gemini_live", event_label="transcription utilisateur",
                                     )
-                                    record_heard_text(
+                                    lexical_learning = record_user_text_learning(
                                         sensory_db, user_id, heard_text,
-                                        evidence="Transcription confirmée par Gemini Live",
+                                        source="gemini_live",
                                     )
+                                    if lexical_learning["taught"]:
+                                        log.info(
+                                            "[APPRENTISSAGE PARTAGÉ] Définitions explicites "
+                                            "enregistrées depuis Gemini Live : word_count=%s",
+                                            len(lexical_learning["taught"]),
+                                        )
                                     audio_observation = record_observation(
                                         sensory_db, user_id, "audio", heard_text,
                                         "gemini_live_transcription",

@@ -274,3 +274,103 @@ def test_guarded_logical_restore_rolls_back_on_invalid_row_count(tmp_path):
         assert target.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == []
     finally:
         target.close()
+
+
+
+def test_encrypted_restore_authenticates_artifact_before_writing(tmp_path):
+    from storage.logical_backup import (
+        export_encrypted_logical_backup,
+        restore_encrypted_logical_backup,
+    )
+
+    source = _database()
+    artifact = tmp_path / "verified.enc"
+    password = "local-test-password-never-production"
+    try:
+        export_encrypted_logical_backup(source, artifact, password)
+    finally:
+        source.close()
+
+    target = sqlite3.connect(":memory:")
+    try:
+        report = restore_encrypted_logical_backup(
+            target, artifact, password,
+            target_identity="isolated-restore-db",
+            expected_target_identity="isolated-restore-db",
+            production_identity="chappie-db",
+        )
+        assert report["artifact_authenticated"] is True
+        assert report["logical_integrity_verified"] is True
+        assert report["total_rows"] == 2
+        assert target.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        target.close()
+
+
+def test_encrypted_restore_rejects_tampering_even_if_checksum_is_rewritten(tmp_path):
+    from storage.logical_backup import (
+        export_encrypted_logical_backup,
+        restore_encrypted_logical_backup,
+    )
+
+    source = _database()
+    artifact = tmp_path / "tampered.enc"
+    password = "local-test-password-never-production"
+    try:
+        export_encrypted_logical_backup(source, artifact, password)
+    finally:
+        source.close()
+
+    damaged = bytearray(artifact.read_bytes())
+    damaged[-1] ^= 0x01
+    artifact.write_bytes(damaged)
+    digest = hashlib.sha256(damaged).hexdigest()
+    artifact.with_suffix(artifact.suffix + ".sha256").write_text(
+        f"{digest}  {artifact.name}\\n", encoding="ascii"
+    )
+
+    target = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(ValueError, match="Authentification AES-GCM"):
+            restore_encrypted_logical_backup(
+                target, artifact, password,
+                target_identity="isolated-restore-db",
+                expected_target_identity="isolated-restore-db",
+                production_identity="chappie-db",
+            )
+        assert target.execute(
+            "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+        ).fetchall() == []
+    finally:
+        target.close()
+
+
+def test_encrypted_restore_rejects_wrong_password_before_target_access(tmp_path):
+    from storage.logical_backup import (
+        export_encrypted_logical_backup,
+        restore_encrypted_logical_backup,
+    )
+
+    source = _database()
+    artifact = tmp_path / "wrong-key.enc"
+    try:
+        export_encrypted_logical_backup(
+            source, artifact, "local-test-password-never-production"
+        )
+    finally:
+        source.close()
+
+    target = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(ValueError, match="Authentification AES-GCM"):
+            restore_encrypted_logical_backup(
+                target, artifact, "another-local-test-password",
+                target_identity="isolated-restore-db",
+                expected_target_identity="isolated-restore-db",
+                production_identity="chappie-db",
+            )
+        assert target.execute(
+            "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+        ).fetchall() == []
+    finally:
+        target.close()

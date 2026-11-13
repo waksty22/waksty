@@ -5765,7 +5765,7 @@ async def websocket_endpoint(
                                             live_turn_state["user"],
                                             "gemini_live_completed_turn",
                                             confidence=0.8,
-                                            metadata={"language": "fr", "chunk_count": len(live_turn_state.get("input_chunks", []))},
+                                            metadata={"language": "fr"},
                                         )
                                         link_temporally_cooccurring_observation(
                                             teaching_db, user_id, audio_observation["observation_id"]

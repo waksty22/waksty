@@ -79,3 +79,33 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
         return connection
 
     raise ValueError("Backend de stockage non pris en charge.")
+
+
+
+class ClosingConnection:
+    """Preserve DB-API calls while ensuring context-managed connections close.
+
+    sqlite3.Connection.__exit__ commits or rolls back but deliberately does not
+    close. The libSQL adapter mirrors that behavior. Application code commonly
+    uses a context-managed database resource, so this wrapper adds the missing
+    close without changing direct-use callers.
+    """
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+    def __enter__(self) -> "ClosingConnection":
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
+        try:
+            return bool(self._connection.__exit__(exc_type, exc, traceback))
+        finally:
+            self._connection.close()
+
+    def close(self) -> None:
+        self._connection.close()

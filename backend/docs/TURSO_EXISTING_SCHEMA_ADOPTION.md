@@ -1,8 +1,8 @@
-# Chappie V50.79 — adoption prudente d'un schéma Turso existant
+# Chappie V50.80 — adoption prudente d'un schéma Turso existant
 
 ## But
 
-Cette procédure permet de reprendre une base Turso qui contient déjà le schéma applicatif Chappie, mais aucun marqueur de stockage. Elle ne prétend pas qu'une migration SQLite a eu lieu.
+Cette procédure permet de reprendre une base Turso qui contient déjà le schéma applicatif Chappie, mais aucun marqueur de stockage. En mode adoption explicite, l'absence de la table `chappie_storage_migrations` est traitée comme une absence de marqueur à vérifier, et non comme une validation automatique : le contrôle en lecture seule des 13 tables et colonnes reste obligatoire avant toute initialisation. Elle ne prétend pas qu'une migration SQLite a eu lieu.
 
 ## Garde-fous
 

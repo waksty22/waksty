@@ -151,3 +151,45 @@ def test_existing_schema_adoption_marker_is_accepted_only_when_enabled(
             server._remote_turso_migration_completed()
     finally:
         remote.close()
+
+
+def test_existing_schema_adoption_allows_absent_marker_table_only_when_opted_in(
+    monkeypatch,
+):
+    import sys
+    import types
+    import server
+
+    remote = sqlite3.connect(":memory:")
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    try:
+        # The exact production case: Turso exists, but its marker table does not.
+        assert server._remote_turso_migration_completed(
+            allow_missing_marker=True,
+            allow_existing_schema_adoption=True,
+        ) is False
+
+        # The legacy explicit fresh-bootstrap gate remains supported.
+        assert server._remote_turso_migration_completed(
+            allow_missing_marker=True,
+        ) is False
+
+        # Without either opt-in, a missing marker remains fail-closed.
+        with pytest.raises(RuntimeError, match="vérification du marqueur Turso impossible"):
+            server._remote_turso_migration_completed()
+    finally:
+        remote.close()

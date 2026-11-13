@@ -569,3 +569,37 @@ def test_logical_backup_does_not_assume_sqlite_sequence_from_sql_comment(tmp_pat
 
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     assert payload["sequences"] == []
+
+
+
+def test_logical_export_cleans_partial_artifacts_when_verification_fails(tmp_path, monkeypatch):
+    import storage.logical_backup as backup
+
+    db = _database()
+    target = tmp_path / "unverified.json"
+    monkeypatch.setattr(
+        backup, "verify_logical_backup",
+        lambda path: {"valid": False, "reason": "forced_test_failure"},
+    )
+    try:
+        with pytest.raises(ValueError, match="local restore verification"):
+            backup.export_logical_backup(db, target)
+        assert not target.exists()
+        assert not target.with_suffix(target.suffix + ".sha256").exists()
+        assert not list(tmp_path.glob("*.tmp"))
+    finally:
+        db.close()
+
+
+def test_logical_export_refuses_existing_checksum_without_overwriting(tmp_path):
+    db = _database()
+    target = tmp_path / "backup.json"
+    checksum = target.with_suffix(target.suffix + ".sha256")
+    checksum.write_text("preserve this checksum", encoding="ascii")
+    try:
+        with pytest.raises(FileExistsError, match="checksum"):
+            export_logical_backup(db, target)
+        assert not target.exists()
+        assert checksum.read_text(encoding="ascii") == "preserve this checksum"
+    finally:
+        db.close()

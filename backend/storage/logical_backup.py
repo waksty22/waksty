@@ -57,6 +57,9 @@ def export_logical_backup(
     destination = Path(destination).expanduser().resolve()
     if destination.exists():
         raise FileExistsError(f"Refusing to overwrite existing backup: {destination}")
+    checksum_path = destination.with_suffix(destination.suffix + ".sha256")
+    if checksum_path.exists():
+        raise FileExistsError(f"Refusing to overwrite existing backup checksum: {checksum_path}")
     objects_sql = """
         SELECT type, name, tbl_name, sql
         FROM sqlite_master
@@ -160,11 +163,21 @@ def export_logical_backup(
         raise
 
     digest = hashlib.sha256(encoded).hexdigest()
-    checksum_path = destination.with_suffix(destination.suffix + ".sha256")
-    checksum_path.write_text(f"{digest}  {destination.name}\n", encoding="ascii")
-    verification = verify_logical_backup(destination)
-    if not verification["valid"]:
-        raise ValueError("Backup export failed local restore verification.")
+    checksum_temporary = checksum_path.with_name("." + checksum_path.name + ".tmp")
+    try:
+        with checksum_temporary.open("x", encoding="ascii") as handle:
+            handle.write(f"{digest}  {destination.name}\\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(checksum_temporary, checksum_path)
+        verification = verify_logical_backup(destination)
+        if not verification["valid"]:
+            raise ValueError("Backup export failed local restore verification.")
+    except Exception:
+        destination.unlink(missing_ok=True)
+        checksum_path.unlink(missing_ok=True)
+        checksum_temporary.unlink(missing_ok=True)
+        raise
     return {
         "path": str(destination),
         "sha256": digest,

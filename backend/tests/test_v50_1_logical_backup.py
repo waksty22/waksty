@@ -653,3 +653,41 @@ def test_logical_export_preserves_checksum_created_concurrently(tmp_path, monkey
         assert checksum.read_text(encoding="ascii") == "owned by competing exporter"
     finally:
         db.close()
+
+
+def test_encrypted_export_refuses_existing_checksum_without_deleting_it(tmp_path):
+    db = _database()
+    target = tmp_path / "encrypted-existing-checksum.enc"
+    checksum = target.with_suffix(target.suffix + ".sha256")
+    checksum.write_text("preserve existing checksum", encoding="ascii")
+    try:
+        with pytest.raises(FileExistsError, match="checksum"):
+            export_encrypted_logical_backup(db, target, "test-only-password-123")
+        assert not target.exists()
+        assert checksum.read_text(encoding="ascii") == "preserve existing checksum"
+    finally:
+        db.close()
+
+
+def test_encrypted_export_never_overwrites_concurrent_destination(tmp_path, monkeypatch):
+    import storage.logical_backup as backup
+    from pathlib import Path
+
+    db = _database()
+    target = tmp_path / "encrypted-racing.enc"
+    real_link = backup.os.link
+
+    def competing_link(source, destination):
+        if Path(destination) == target:
+            target.write_bytes(b"owned by competing exporter")
+        return real_link(source, destination)
+
+    monkeypatch.setattr(backup.os, "link", competing_link)
+    try:
+        with pytest.raises(FileExistsError):
+            backup.export_encrypted_logical_backup(db, target, "test-only-password-123")
+        assert target.read_bytes() == b"owned by competing exporter"
+        assert not target.with_suffix(target.suffix + ".sha256").exists()
+        assert not list(tmp_path.glob("*.tmp"))
+    finally:
+        db.close()

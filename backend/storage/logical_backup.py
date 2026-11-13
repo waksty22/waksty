@@ -428,9 +428,16 @@ def export_encrypted_logical_backup(
     if not isinstance(encryption_key, str) or len(encryption_key) < 12:
         raise ValueError("Une clé de chiffrement d'au moins 12 caractères est requise.")
     destination = Path(destination).expanduser().resolve()
+    checksum_path = destination.with_suffix(destination.suffix + ".sha256")
     if destination.exists():
         raise FileExistsError(f"Refusing to overwrite existing backup: {destination}")
+    if checksum_path.exists():
+        raise FileExistsError(f"Refusing to overwrite existing backup checksum: {checksum_path}")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    destination_created = False
+    checksum_created = False
+    temporary_path = None
+    checksum_temporary = None
     with tempfile.TemporaryDirectory(prefix="chappie-logical-") as work:
         plain_path = Path(work) / "snapshot.json"
         result = export_logical_backup(
@@ -444,28 +451,35 @@ def export_encrypted_logical_backup(
         encrypted = b"CHAPPIE-LOGICAL-V1" + salt + nonce + AESGCM(key).encrypt(
             nonce, plaintext, b"CHAPPIE-LOGICAL-V1"
         )
-        temporary = destination.with_name("." + destination.name + ".tmp")
-        try:
-            with temporary.open("xb") as handle:
-                handle.write(encrypted)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, destination)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
     digest = hashlib.sha256(encrypted).hexdigest()
-    checksum_path = destination.with_suffix(destination.suffix + ".sha256")
-    if checksum_path.exists():
-        destination.unlink(missing_ok=True)
-        raise FileExistsError(f"Refusing to overwrite existing checksum: {checksum_path}")
-    checksum_temporary = checksum_path.with_name("." + checksum_path.name + ".tmp")
     try:
-        with checksum_temporary.open("x", encoding="ascii") as handle:
-            handle.write(f"{digest}  {destination.name}\n")
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=destination.name + ".", suffix=".tmp", dir=destination.parent
+        )
+        temporary_path = Path(temporary_name)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(encrypted)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(checksum_temporary, checksum_path)
+        # Atomic no-clobber publication; a racing exporter keeps its file.
+        os.link(temporary_path, destination)
+        destination_created = True
+        temporary_path.unlink()
+        temporary_path = None
+
+        checksum_fd, checksum_name = tempfile.mkstemp(
+            prefix=checksum_path.name + ".", suffix=".tmp", dir=checksum_path.parent
+        )
+        checksum_temporary = Path(checksum_name)
+        with os.fdopen(checksum_fd, "w", encoding="ascii") as handle:
+            handle.write(f"{digest}  {destination.name}\\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(checksum_temporary, checksum_path)
+        checksum_created = True
+        checksum_temporary.unlink()
+        checksum_temporary = None
+
         # Verify the exact ciphertext artifact on disk, including checksum,
         # AES-GCM authentication, decryption, and logical restore integrity.
         verification = verify_encrypted_logical_backup(destination, encryption_key)
@@ -475,9 +489,14 @@ def export_encrypted_logical_backup(
                 + str(verification.get("reason", "unknown"))
             )
     except Exception:
-        destination.unlink(missing_ok=True)
-        checksum_path.unlink(missing_ok=True)
-        checksum_temporary.unlink(missing_ok=True)
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        if checksum_temporary is not None:
+            checksum_temporary.unlink(missing_ok=True)
+        if checksum_created:
+            checksum_path.unlink(missing_ok=True)
+        if destination_created:
+            destination.unlink(missing_ok=True)
         raise
     return {
         "path": str(destination),

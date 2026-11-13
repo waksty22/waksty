@@ -245,7 +245,7 @@ class HranaHttpTransaction:
             not isinstance(sql, str)
             or not sql.strip()
             or ";" in sql
-            or re.match(r"(?is)^\\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\\b", sql)
+            or re.match(r"(?is)^\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b", sql)
         ):
             raise PermissionError("Instruction SQL de restauration interdite.")
         encoded_args = []

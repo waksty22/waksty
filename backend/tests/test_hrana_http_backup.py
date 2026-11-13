@@ -225,3 +225,33 @@ def test_http_v2_decodes_null_integer_float_text_and_blob():
     })
     assert result.columns == ("n", "i", "f", "t", "b")
     assert result.rows == [(None, 9223372036854775807, 1.25, "hello", bytes([0, 1, 2]))]
+
+def test_http_v2_write_allows_trigger_body_semicolons_but_rejects_extra_statements():
+    server = FakeHranaServer()
+    client = _client(server)
+    transaction = None
+    trigger_sql = (
+        "CREATE TRIGGER memories_after_insert AFTER INSERT ON memories "
+        "BEGIN INSERT INTO memories(id, note) VALUES (NEW.id + 1000, NEW.note); END;"
+    )
+    try:
+        transaction = client.transaction()
+        result = transaction.execute_write(trigger_sql)
+        assert result.columns == ()
+        assert server.statements == ["BEGIN", trigger_sql]
+        with pytest.raises(PermissionError):
+            transaction.execute_write(trigger_sql + " DROP TABLE memories;")
+        with pytest.raises(PermissionError):
+            transaction.execute_write("/* harmless prefix */ COMMIT")
+        assert server.statements == ["BEGIN", trigger_sql]
+        transaction.rollback()
+    finally:
+        client.close()
+
+
+def test_single_statement_guard_accepts_trailing_comments_and_quoted_semicolons():
+    from storage.hrana_http import _is_single_sql_statement
+    assert _is_single_sql_statement("SELECT ';' /* trailing comment */")
+    assert _is_single_sql_statement("CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;")
+    assert not _is_single_sql_statement("SELECT 1; SELECT 2")
+    assert not _is_single_sql_statement("SELECT 1; -- comment\nDROP TABLE t")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+import sqlite3
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -56,6 +57,35 @@ def database_identity(database_url: str) -> str:
         raise ValueError("URL de base Turso contient des composants interdits.")
     return parsed.hostname.rstrip(".").lower()
 
+
+def _strip_leading_sql_comments(sql: str) -> str:
+    """Remove leading SQL comments before checking transaction-control keywords."""
+    remaining = sql.lstrip()
+    while remaining:
+        if remaining.startswith("--"):
+            newline = remaining.find("\n")
+            remaining = "" if newline < 0 else remaining[newline + 1 :].lstrip()
+            continue
+        if remaining.startswith("/*"):
+            end = remaining.find("*/", 2)
+            if end < 0:
+                return remaining
+            remaining = remaining[end + 2 :].lstrip()
+            continue
+        break
+    return remaining
+
+
+def _is_single_sql_statement(sql: str) -> bool:
+    """Reject appended SQL while allowing semicolons inside CREATE TRIGGER bodies."""
+    if not isinstance(sql, str) or not sql.strip():
+        return False
+    for index, character in enumerate(sql):
+        if character == ";" and sqlite3.complete_statement(sql[: index + 1]):
+            tail = sql[index + 1 :]
+            tail = re.sub(r"(?s)/\*.*?\*/|--[^\r\n]*", "", tail).strip()
+            return not tail
+    return True
 
 def _decode_value(value: dict[str, Any]) -> Any:
     kind = value.get("type")
@@ -241,11 +271,10 @@ class HranaHttpTransaction:
         """
         if not self._active or self._closed:
             raise HranaHttpError("Transaction Hrana inactive.")
+        normalized_sql = _strip_leading_sql_comments(sql) if isinstance(sql, str) else ""
         if (
-            not isinstance(sql, str)
-            or not sql.strip()
-            or ";" in sql
-            or re.match(r"(?is)^\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b", sql)
+            not _is_single_sql_statement(sql)
+            or re.match(r"(?is)^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b", normalized_sql)
         ):
             raise PermissionError("Instruction SQL de restauration interdite.")
         encoded_args = []

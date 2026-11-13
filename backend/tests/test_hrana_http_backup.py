@@ -258,3 +258,48 @@ def test_hrana_database_identity_is_normalized_and_rejects_credentials():
     assert database_identity("libsql://CHAPPIE-TEST.turso.io") == "chappie-test.turso.io"
     with pytest.raises(ValueError):
         database_identity("libsql://user:secret@chappie-test.turso.io")
+
+
+def test_guarded_restore_refuses_production_or_wrong_host_before_network():
+    from storage.hrana_http import open_guarded_restore_transaction
+
+    def unexpected_request(_request):
+        raise AssertionError("No network request is allowed for a rejected target")
+
+    http = httpx.Client(transport=httpx.MockTransport(unexpected_request))
+    try:
+        for expected, production in [
+            ("chappie-db.turso.io", "chappie-db.turso.io"),
+            ("another-test.turso.io", "chappie-db.turso.io"),
+        ]:
+            with pytest.raises(PermissionError):
+                open_guarded_restore_transaction(
+                    "libsql://chappie-db.turso.io",
+                    "test-token",
+                    expected_target_identity=expected,
+                    production_identity=production,
+                    http_client=http,
+                )
+    finally:
+        http.close()
+
+
+def test_guarded_restore_opens_transaction_only_for_exact_test_host():
+    from storage.hrana_http import open_guarded_restore_transaction
+
+    server = FakeHranaServer()
+    http = httpx.Client(transport=httpx.MockTransport(server.handle))
+    client, transaction = open_guarded_restore_transaction(
+        "libsql://isolated-test.turso.io",
+        "test-token",
+        expected_target_identity="isolated-test.turso.io",
+        production_identity="chappie-db.turso.io",
+        http_client=http,
+    )
+    try:
+        assert server.statements == ["BEGIN"]
+        transaction.rollback()
+        assert server.statements == ["BEGIN", "ROLLBACK"]
+        assert server.closed is True
+    finally:
+        client.close()

@@ -220,6 +220,54 @@ class HranaHttpTransaction:
         response = self._unwrap(results[0], "execute")
         return HranaHttpResult(response.get("result") or {})
 
+
+    def execute_write(self, sql: str, args: tuple[Any, ...] | list[Any] = ()) -> HranaHttpResult:
+        """Execute one parameterized statement inside an explicitly opened transaction.
+
+        This method is deliberately separate from execute(), which remains
+        SELECT-only for the backup transport. Transaction control SQL and
+        multi-statement payloads are never accepted here.
+        """
+        if not self._active or self._closed:
+            raise HranaHttpError("Transaction Hrana inactive.")
+        if (
+            not isinstance(sql, str)
+            or not sql.strip()
+            or ";" in sql
+            or re.match(r"(?is)^\\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\\b", sql)
+        ):
+            raise PermissionError("Instruction SQL de restauration interdite.")
+        encoded_args = []
+        for value in args:
+            if value is None:
+                encoded_args.append({"type": "null"})
+            elif isinstance(value, bool):
+                encoded_args.append({"type": "integer", "value": "1" if value else "0"})
+            elif isinstance(value, int):
+                encoded_args.append({"type": "integer", "value": str(value)})
+            elif isinstance(value, float):
+                encoded_args.append({"type": "float", "value": value})
+            elif isinstance(value, (bytes, bytearray, memoryview)):
+                encoded_args.append({
+                    "type": "blob",
+                    "base64": base64.b64encode(bytes(value)).decode("ascii"),
+                })
+            elif isinstance(value, str):
+                encoded_args.append({"type": "text", "value": value})
+            else:
+                raise TypeError("Type de paramètre Hrana non pris en charge.")
+        requests = [{
+            "type": "execute",
+            "stmt": {"sql": sql, "args": encoded_args},
+        }]
+        results = self._pipeline_with_baton(requests)
+        if not self._baton:
+            self._active = False
+            self._closed = True
+            raise HranaHttpError("Turso Hrana a fermé le flux pendant la restauration.")
+        response = self._unwrap(results[0], "execute")
+        return HranaHttpResult(response.get("result") or {})
+
     def commit(self) -> None:
         if self._active:
             self._execute_control("COMMIT")

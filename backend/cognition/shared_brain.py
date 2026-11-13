@@ -224,9 +224,13 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
 
 
 def merge_live_transcript(existing: str, incoming: str) -> str:
-    """Merge repeated or incremental transcription chunks without obvious duplication."""
-    old = str(existing or "").strip()
-    new = str(incoming or "").strip()
+    """Merge incremental transcript chunks and normalize punctuation spacing."""
+    def clean(value: str) -> str:
+        normalized = " ".join(str(value or "").split())
+        return re.sub(r"\\s+([,.;!?;:])", r"\\1", normalized).strip()
+
+    old = clean(existing)
+    new = clean(incoming)
     if not new:
         return old
     if not old:
@@ -240,5 +244,5 @@ def merge_live_transcript(existing: str, incoming: str) -> str:
     max_overlap = min(len(old), len(new), 500)
     for size in range(max_overlap, 0, -1):
         if old[-size:].casefold() == new[:size].casefold():
-            return " ".join((old + " " + new[size:]).split())
-    return (old + " " + new).strip()
+            return clean(old + " " + new[size:])
+    return clean(old + " " + new)

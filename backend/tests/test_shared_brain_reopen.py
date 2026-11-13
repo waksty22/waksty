@@ -29,7 +29,7 @@ def test_shared_brain_learning_survives_database_reopen(tmp_path):
             );
             CREATE TABLE skills (
                 id INTEGER PRIMARY KEY, user_id TEXT, skill_name TEXT, level REAL,
-                xp REAL, evidence TEXT, updated_at TEXT
+                evidence TEXT, updated_at TEXT
             );
             CREATE TABLE emotional_state (
                 user_id TEXT, joy REAL, fear REAL, curiosity REAL,

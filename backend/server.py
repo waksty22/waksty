@@ -121,6 +121,7 @@ from learning.perception_fusion import (
     init_perception_fusion_tables,
     link_temporally_cooccurring_observation,
     list_perception_fusions,
+    review_perception_fusion,
 )
 from cognition.reasoning import (
     init_cognition_tables,
@@ -4662,6 +4663,28 @@ async def api_list_perception_fusions(auth=Depends(require_auth)):
             "fusions": list_perception_fusions(db, user_id),
             "semantic_validation_required": True,
         }
+
+
+@app.post("/api/perception/fusions/{candidate_id}/review")
+async def api_review_perception_fusion(
+    candidate_id: int,
+    request: Request,
+    auth=Depends(require_auth),
+):
+    """Allow the authenticated creator to confirm or reject a cross-modal candidate."""
+    user_id = _authenticated_user(auth)
+    data = await request.json()
+    try:
+        with db_connection() as db:
+            result = review_perception_fusion(
+                db, user_id, candidate_id,
+                data.get("decision", ""),
+                data.get("evidence", ""),
+            )
+            db.commit()
+        return {"ok": True, "review": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.post("/api/vision/associate")

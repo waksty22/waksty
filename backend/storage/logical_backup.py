@@ -610,7 +610,7 @@ def restore_encrypted_logical_backup(
         verified_path = Path(work) / "snapshot.json"
         verified_path.write_bytes(plaintext)
         verified_path.with_suffix(".json.sha256").write_text(
-            f"{hashlib.sha256(plaintext).hexdigest()}  snapshot.json\\n",
+            f"{hashlib.sha256(plaintext).hexdigest()}  snapshot.json\n",
             encoding="ascii",
         )
         verification = verify_logical_backup(verified_path)

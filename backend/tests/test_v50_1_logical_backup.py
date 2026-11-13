@@ -480,3 +480,74 @@ def test_logical_restore_rejects_malformed_payload_before_target_changes(tmp_pat
         ).fetchall() == []
     finally:
         target.close()
+
+
+def test_logical_backup_preserves_autoincrement_sequence_after_deleted_rows(tmp_path):
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = sqlite3.connect(":memory:")
+    source.executescript("""
+        CREATE TABLE events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            description TEXT NOT NULL
+        );
+        INSERT INTO events(description) VALUES ('one'), ('two'), ('three'), ('four'), ('five');
+        DELETE FROM events;
+    """)
+    artifact = tmp_path / "autoincrement.json"
+    try:
+        export_logical_backup(source, artifact)
+    finally:
+        source.close()
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["sequences"] == [{"table": "events", "seq": 5}]
+    target = sqlite3.connect(":memory:")
+    try:
+        restore_logical_backup_payload(
+            target, payload,
+            target_identity="isolated-sequence-test",
+            expected_target_identity="isolated-sequence-test",
+            production_identity="chappie-db",
+        )
+        cursor = target.execute(
+            "INSERT INTO events(description) VALUES ('after restore')"
+        )
+        assert cursor.lastrowid == 6
+    finally:
+        target.close()
+
+
+def test_logical_backup_excludes_generated_columns_from_restore_inserts(tmp_path):
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = sqlite3.connect(":memory:")
+    source.executescript("""
+        CREATE TABLE measurements(
+            value INTEGER NOT NULL,
+            doubled INTEGER GENERATED ALWAYS AS (value * 2) STORED
+        );
+        INSERT INTO measurements(value) VALUES (7), (11);
+    """)
+    artifact = tmp_path / "generated-columns.json"
+    try:
+        result = export_logical_backup(source, artifact)
+        assert result["verified"] is True
+    finally:
+        source.close()
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["tables"][0]["columns"] == ["value"]
+    target = sqlite3.connect(":memory:")
+    try:
+        restore_logical_backup_payload(
+            target, payload,
+            target_identity="isolated-generated-test",
+            expected_target_identity="isolated-generated-test",
+            production_identity="chappie-db",
+        )
+        assert target.execute(
+            "SELECT value, doubled FROM measurements ORDER BY value"
+        ).fetchall() == [(7, 14), (11, 22)]
+    finally:
+        target.close()

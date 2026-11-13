@@ -166,7 +166,7 @@ from diagnostics.conversation_persistence import (
 
 load_dotenv(CURRENT_DIR / ".env", override=False)
 
-CHAPPIE_VERSION = "50.79"
+CHAPPIE_VERSION = "50.80"
 APP_NAME = f"Chappie V{CHAPPIE_VERSION} — architecture cognitive unifiée"
 
 BASE_DIR = Path(
@@ -412,7 +412,7 @@ def _remote_turso_migration_completed(
             "AND name='chappie_storage_migrations'"
         ).fetchone()
         if not exists:
-            if allow_missing_marker:
+            if allow_missing_marker or allow_existing_schema_adoption:
                 return False
             raise RuntimeError("Base SQLite absente et marqueur Turso introuvable.")
         rows = connection.execute(

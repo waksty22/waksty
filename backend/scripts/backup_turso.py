@@ -35,49 +35,65 @@ def create_backup_archive(
         raise FileExistsError(f"Refusing to overwrite backup archive: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="chappie-turso-job-") as work:
-        root = Path(work)
-        encrypted_path = root / "chappie-turso.json.enc"
-        report = export_encrypted_logical_backup(
-            connection,
-            encrypted_path,
-            encryption_key,
-            manage_snapshot=manage_snapshot,
-        )
-        checksum_path = encrypted_path.with_suffix(
-            encrypted_path.suffix + ".sha256"
-        )
-
-        with zipfile.ZipFile(output, mode="x", compression=zipfile.ZIP_STORED) as archive:
-            archive.write(encrypted_path, arcname=encrypted_path.name)
-            archive.write(checksum_path, arcname=checksum_path.name)
-
-        # Verify the exact artifact after packaging, not only the source file.
-        verify_dir = root / "archive-verification"
-        verify_dir.mkdir()
-        with zipfile.ZipFile(output, mode="r") as archive:
-            expected = {
-                encrypted_path.name,
-                checksum_path.name,
-            }
-            if set(archive.namelist()) != expected:
-                raise ValueError("Backup archive contains unexpected files.")
-            archive.extractall(verify_dir)
-
-        packaged_backup = verify_dir / encrypted_path.name
-        verification = verify_encrypted_logical_backup(
-            packaged_backup, encryption_key
-        )
-        if not verification.get("valid"):
-            raise ValueError(
-                "Packaged backup verification failed: "
-                + str(verification.get("reason", "unknown"))
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=output.name + ".", suffix=".tmp", dir=output.parent
+    )
+    os.close(fd)
+    temporary_archive = Path(temporary_name)
+    try:
+        with tempfile.TemporaryDirectory(prefix="chappie-turso-job-") as work:
+            root = Path(work)
+            encrypted_path = root / "chappie-turso.json.enc"
+            report = export_encrypted_logical_backup(
+                connection,
+                encrypted_path,
+                encryption_key,
+                manage_snapshot=manage_snapshot,
             )
+            checksum_path = encrypted_path.with_suffix(
+                encrypted_path.suffix + ".sha256"
+            )
+
+            with zipfile.ZipFile(
+                temporary_archive, mode="w", compression=zipfile.ZIP_STORED
+            ) as archive:
+                archive.write(encrypted_path, arcname=encrypted_path.name)
+                archive.write(checksum_path, arcname=checksum_path.name)
+
+            # Verify the exact temporary artifact before publishing it.
+            verify_dir = root / "archive-verification"
+            verify_dir.mkdir()
+            with zipfile.ZipFile(temporary_archive, mode="r") as archive:
+                expected = {
+                    encrypted_path.name,
+                    checksum_path.name,
+                }
+                if set(archive.namelist()) != expected:
+                    raise ValueError("Backup archive contains unexpected files.")
+                archive.extractall(verify_dir)
+
+            packaged_backup = verify_dir / encrypted_path.name
+            verification = verify_encrypted_logical_backup(
+                packaged_backup, encryption_key
+            )
+            if not verification.get("valid"):
+                raise ValueError(
+                    "Packaged backup verification failed: "
+                    + str(verification.get("reason", "unknown"))
+                )
+
+        size_bytes = temporary_archive.stat().st_size
+        # Publish atomically and never replace an archive created concurrently.
+        os.link(temporary_archive, output)
+        temporary_archive.unlink()
+    except Exception:
+        temporary_archive.unlink(missing_ok=True)
+        raise
 
     return {
         "archive": str(output),
         "sha256": report["sha256"],
-        "size_bytes": output.stat().st_size,
+        "size_bytes": size_bytes,
         "table_count": report["table_count"],
         "total_rows": report["total_rows"],
         "encrypted": True,

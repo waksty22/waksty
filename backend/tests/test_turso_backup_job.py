@@ -104,3 +104,43 @@ def test_backup_job_supports_serialized_hrana_select_transaction(tmp_path):
         assert result["total_rows"] == 1
     finally:
         db.close()
+
+
+def test_backup_job_cleans_partial_archive_when_packaged_verification_fails(tmp_path, monkeypatch):
+    import backup_turso
+
+    db = _database()
+    output = tmp_path / "unverified.zip"
+    monkeypatch.setattr(
+        backup_turso,
+        "verify_encrypted_logical_backup",
+        lambda path, key: {"valid": False, "reason": "forced_test_failure"},
+    )
+    try:
+        with pytest.raises(ValueError, match="Packaged backup verification failed"):
+            create_backup_archive(db, output, "test-only-backup-key-not-production")
+        assert not output.exists()
+        assert not list(tmp_path.glob("*.tmp"))
+    finally:
+        db.close()
+
+
+def test_backup_job_never_overwrites_archive_created_concurrently(tmp_path, monkeypatch):
+    import backup_turso
+
+    db = _database()
+    output = tmp_path / "racing.zip"
+    real_link = backup_turso.os.link
+
+    def competing_link(source, destination):
+        Path(destination).write_bytes(b"owned by competing exporter")
+        return real_link(source, destination)
+
+    monkeypatch.setattr(backup_turso.os, "link", competing_link)
+    try:
+        with pytest.raises(FileExistsError):
+            create_backup_archive(db, output, "test-only-backup-key-not-production")
+        assert output.read_bytes() == b"owned by competing exporter"
+        assert not list(tmp_path.glob("*.tmp"))
+    finally:
+        db.close()

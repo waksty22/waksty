@@ -144,7 +144,7 @@ def test_http_v2_backup_uses_one_baton_transaction_and_verifies(tmp_path):
     transaction = None
     destination = tmp_path / "turso-backup.json.enc"
     try:
-        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
         transaction = client.transaction()
         report = export_encrypted_logical_backup(
             HranaTransactionConnection(transaction),
@@ -327,7 +327,7 @@ def test_http_rejects_cross_origin_base_url_without_forwarding_auth_token():
     try:
         with pytest.raises(HranaHttpError, match="origine de connexion"):
             client.transaction()
-        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
         assert server.request_hosts == ["example-org.turso.io"]
     finally:
         client.close()

@@ -35,7 +35,7 @@ class HranaTransactionConnection:
     def execute(self, sql: str) -> HranaBackupCursor:
         if (
             not isinstance(sql, str)
-            or not re.match(r"(?i)^SELECT\b", sql.lstrip())
+            or not re.match(r"(?i)^SELECT\b", _strip_leading_sql_comments(sql))
             or not _is_single_sql_statement(sql)
         ):
             raise PermissionError("La sauvegarde Turso n'autorise que des requêtes SELECT uniques.")

@@ -1,0 +1,60 @@
+name: Chappie full-schema isolated Turso backup/restore E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chappie-full-schema-isolated-e2e
+  cancel-in-progress: false
+
+jobs:
+  full-schema-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CHAPPIE_TEST_TURSO_DATABASE_URL: ${{ secrets.CHAPPIE_TEST_TURSO_DATABASE_URL }}
+      CHAPPIE_TEST_TURSO_AUTH_TOKEN: ${{ secrets.CHAPPIE_TEST_TURSO_AUTH_TOKEN }}
+      CHAPPIE_PRODUCTION_TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/safe-logical-restore-core
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install CPU PyTorch
+        run: python -m pip install --disable-pip-version-check torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Verify isolated target and production identity are configured
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          expected = "chappie-test-isolated-chapoue.aws-eu-west-1.turso.io"
+          test_url = os.environ.get("CHAPPIE_TEST_TURSO_DATABASE_URL", "").strip()
+          test_token = os.environ.get("CHAPPIE_TEST_TURSO_AUTH_TOKEN", "").strip()
+          production_url = os.environ.get("CHAPPIE_PRODUCTION_TURSO_DATABASE_URL", "").strip()
+          if not test_url or not test_token or not production_url:
+              raise SystemExit("Required isolated test secrets or production identity are missing.")
+          test_host = (urlparse(test_url).hostname or "").lower()
+          production_host = (urlparse(production_url).hostname or "").lower()
+          if test_host != expected or test_host == production_host:
+              raise SystemExit("Refusing: target is not the approved isolated Turso database.")
+          print("Isolated target identity verified; production is used for identity comparison only.")
+          PY
+
+      - name: Run full Chappie schema encrypted backup and restore
+        working-directory: backend
+        run: PYTHONPATH=. python scripts/test_chappie_full_schema_turso_e2e.py

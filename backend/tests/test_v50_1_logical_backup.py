@@ -693,3 +693,43 @@ def test_encrypted_export_never_overwrites_concurrent_destination(tmp_path, monk
         assert not list(tmp_path.glob("*.tmp"))
     finally:
         db.close()
+
+
+@pytest.mark.parametrize(
+    ("summary_field", "bad_value"),
+    [
+        ("table_count", 999),
+        ("object_count", 999),
+        ("table_count", True),
+        ("object_count", "2"),
+    ],
+)
+def test_logical_restore_rejects_inconsistent_schema_summary_before_target_changes(
+    tmp_path, summary_field, bad_value
+):
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    artifact = tmp_path / "summary-source.json"
+    try:
+        export_logical_backup(source, artifact)
+    finally:
+        source.close()
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    payload["summary"][summary_field] = bad_value
+    target = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(ValueError, match="Résumé du nombre"):
+            restore_logical_backup_payload(
+                target,
+                payload,
+                target_identity="isolated-summary-test",
+                expected_target_identity="isolated-summary-test",
+                production_identity="chappie-db",
+            )
+        assert target.execute(
+            "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+        ).fetchall() == []
+    finally:
+        target.close()

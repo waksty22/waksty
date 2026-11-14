@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .hrana_http import _is_single_sql_statement
+
 
 class HranaBackupCursor:
     """Expose ResultSet columns and rows using the cursor API backup code needs."""
@@ -34,7 +36,7 @@ class HranaTransactionConnection:
         if (
             not isinstance(sql, str)
             or not re.match(r"(?i)^SELECT\b", sql.lstrip())
-            or ";" in sql
+            or not _is_single_sql_statement(sql)
         ):
             raise PermissionError("La sauvegarde Turso n'autorise que des requêtes SELECT uniques.")
         result = self._transaction.execute(sql)

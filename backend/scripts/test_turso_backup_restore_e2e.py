@@ -103,6 +103,9 @@ def main() -> int:
             preflight.rollback()
             raise
 
+        # Mark cleanup as required before the first write: even an ambiguous
+        # commit response must trigger best-effort removal of these exact names.
+        fixtures_created = True
         seed = client.transaction()
         try:
             for statement in FIXTURE_SQL:
@@ -126,7 +129,6 @@ def main() -> int:
                 (7, b"Chappie-Turso-probe\x00blob"),
             )
             seed.commit()
-            fixtures_created = True
         except Exception:
             seed.rollback()
             raise

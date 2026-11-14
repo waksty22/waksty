@@ -13,13 +13,12 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from urllib.parse import urlsplit
 
 BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from storage.backup_turso import create_backup_archive
+from scripts.backup_turso import create_backup_archive
 from storage.hrana_backup import HranaTransactionConnection
 from storage.hrana_http import HranaHttpClient, database_identity, open_guarded_restore_transaction
 from storage.hrana_backup import HranaRestoreConnection
@@ -88,7 +87,6 @@ def main() -> int:
     require(target != production, "Refusing: isolated test target matches production hostname.")
 
     client = open_client(url, token)
-    archive_path: Path | None = None
     test_key = secrets.token_urlsafe(48)  # ephemeral key; never stored in repository/secrets
     fixtures_created = False
     try:

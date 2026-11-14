@@ -17,11 +17,39 @@ def need(ok, message):
     if not ok: raise RuntimeError(message)
 def q(s):
     return '"' + s.replace('"', '""') + '"'
-def drop(client, objects):
+def drop(client, objects, table_dependencies):
+    """Remove only fixture objects, dropping dependent tables before parents."""
+    tables = {name for kind, name in objects if kind == "table"}
+    children = {name: set() for name in tables}
+    for child, parents in table_dependencies.items():
+        if child in tables:
+            for parent in parents:
+                if parent in tables and parent != child:
+                    children[parent].add(child)
+                elif parent == child:
+                    raise RuntimeError(f"Refusing cleanup: self-referencing table {child}.")
+    ordered_tables = []
+    visiting, visited = set(), set()
+    def visit(table):
+        if table in visiting:
+            raise RuntimeError("Refusing cleanup: cyclic foreign-key dependencies in fixture.")
+        if table in visited:
+            return
+        visiting.add(table)
+        for child in sorted(children[table]):
+            visit(child)
+        visiting.remove(table)
+        visited.add(table)
+        ordered_tables.append(table)
+    for table in sorted(tables):
+        visit(table)
+    # Non-table objects are removed first; table order is child-before-parent.
+    ordered = [(kind, name) for kind, name in objects if kind != "table"]
+    ordered.extend(("table", name) for name in ordered_tables)
     tx = client.transaction()
     try:
-        for kind, name in reversed(objects):
-            if kind in ("table","index","view","trigger"):
+        for kind, name in ordered:
+            if kind in ("table", "index", "view", "trigger"):
                 tx.execute_write(f"DROP {kind.upper()} IF EXISTS {q(name)}")
         tx.commit()
     except Exception:
@@ -60,6 +88,13 @@ def main():
         tables=[r["name"] for r in objs if r["type"]=="table"]
         need(len(tables)>=35,"Real Chappie schema has fewer than 35 tables.")
         names=[(r["type"],r["name"]) for r in objs]
+        table_dependencies = {
+            table: {
+                str(fk[2]) for fk in src.execute(f"PRAGMA foreign_key_list({q(table)})")
+                if fk[2]
+            }
+            for table in tables
+        }
         cols={}
         rows={}
         for t in tables:
@@ -84,7 +119,7 @@ def main():
                 pre.commit()
                 if existing_objects:
                     print(f"E2E_STAGE stale_fixture_cleanup objects={len(existing_objects)}", flush=True)
-                    drop(client, existing_objects)
+                    drop(client, existing_objects, table_dependencies)
                     print("E2E_STAGE stale_fixture_cleanup_complete", flush=True)
             except Exception:
                 pre.rollback(); raise
@@ -126,7 +161,7 @@ def main():
                 enc=root/"unpacked"/"chappie-turso.json.enc"
                 need(verify_encrypted_logical_backup(enc,key).get("valid") is True,"Independent archive verification failed.")
                 print("E2E_STAGE backup_verified_drop_start", flush=True)
-                drop(client,names); created=False
+                drop(client,names,table_dependencies); created=False
                 print("E2E_STAGE drop_complete_restore_start", flush=True)
                 rc,rtx=open_guarded_restore_transaction(url,token,expected_target_identity=EXPECTED,production_identity=production)
                 try:

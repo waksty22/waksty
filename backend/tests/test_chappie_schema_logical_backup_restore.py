@@ -139,6 +139,199 @@ def _seed_chappie_state(db: sqlite3.Connection) -> None:
         ("creator", "observation:object", 1, 85, '{"evidence":"test"}',
          "2026-11-14T10:13:00Z"),
     )
+    # Conversation summaries, intentions and free-form thoughts.
+    db.execute(
+        "INSERT INTO conversations(user_id,role,content,created_at) VALUES(?,?,?,?)",
+        ("creator", "assistant", "Je me souviens de cette conversation.", "2026-11-14T10:14:00Z"),
+    )
+    conversation_ids = [
+        row[0] for row in db.execute(
+            "SELECT id FROM conversations WHERE user_id='creator' ORDER BY id"
+        ).fetchall()
+    ]
+    db.execute(
+        """INSERT INTO conversation_summaries
+           (user_id,summary,through_conversation_id,created_at)
+           VALUES(?,?,?,?)""",
+        ("creator", "Résumé de test conservé.", conversation_ids[-1],
+         "2026-11-14T10:15:00Z"),
+    )
+    db.execute(
+        """INSERT INTO user_intentions
+           (user_id,current_intent,confidence,details,updated_at)
+           VALUES(?,?,?,?,?)""",
+        ("creator", "apprendre", 0.9, '{"source":"test"}', "2026-11-14T10:15:00Z"),
+    )
+    db.execute(
+        "INSERT INTO thoughts(user_id,content,created_at) VALUES(?,?,?)",
+        ("creator", "Pensée persistante de test.", "2026-11-14T10:15:00Z"),
+    )
+
+    # Autobiographical episodes and their explicit link to source conversations.
+    event_ids = []
+    for conversation_id, actor, content in (
+        (conversation_ids[0], "user", "Le créateur enseigne un mot."),
+        (conversation_ids[1], "assistant", "Chappie répète le mot."),
+    ):
+        cur = db.execute(
+            """INSERT INTO autobiographical_events
+               (user_id,source_conversation_id,actor,event_type,content,
+                happened_at,importance,created_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            ("creator", conversation_id, actor, "dialogue", content,
+             "2026-11-14T10:16:00Z", 3, "2026-11-14T10:16:00Z"),
+        )
+        event_ids.append(cur.lastrowid)
+    db.execute(
+        """INSERT INTO autobiographical_links
+           (user_id,source_event_id,target_event_id,relation_type,created_at)
+           VALUES(?,?,?,?,?)""",
+        ("creator", event_ids[0], event_ids[1], "same_dialogue_turn",
+         "2026-11-14T10:16:00Z"),
+    )
+
+    # Consent-based spatial memory: session, location sample and place record.
+    db.execute(
+        """INSERT INTO spatial_sessions
+           (session_id,user_id,device_label,consented,started_at,ended_at,created_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        ("session-test", "creator", "test-device", 1,
+         "2026-11-14T10:17:00Z", None, "2026-11-14T10:17:00Z"),
+    )
+    db.execute(
+        """INSERT INTO spatial_visits
+           (user_id,session_id,latitude,longitude,accuracy_m,recorded_at,source,created_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        ("creator", "session-test", 48.3, -2.7, 10.0,
+         "2026-11-14T10:18:00Z", "browser_geolocation", "2026-11-14T10:18:00Z"),
+    )
+    db.execute(
+        """INSERT INTO place_memories
+           (place_id,user_id,label,description,visual_signature,session_id,
+            latitude,longitude,confidence,identity_status,first_seen_at,
+            last_seen_at,observations_count,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("place-test", "creator", "Lieu test", "Un lieu de test.",
+         "signature-test", "session-test", 48.3, -2.7, 0.6, "candidate",
+         "2026-11-14T10:18:00Z", "2026-11-14T10:18:00Z", 1,
+         "2026-11-14T10:18:00Z", "2026-11-14T10:18:00Z"),
+    )
+
+    # Audio/vision observations, association and cautious cross-modal candidate.
+    for observation_id, modality, content in (
+        ("audio-test", "audio", "Un son de ballon."),
+        ("vision-test", "vision", "Un ballon rond."),
+    ):
+        db.execute(
+            """INSERT INTO sensory_observations
+               (observation_id,user_id,modality,content,source,confidence,
+                metadata_json,created_at)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (observation_id, "creator", modality, content, "test", 0.9, '{}',
+             "2026-11-14T10:19:00Z"),
+        )
+    db.execute(
+        """INSERT INTO word_visual_associations
+           (user_id,word,observation_id,evidence,created_at)
+           VALUES(?,?,?,?,?)""",
+        ("creator", "ballon", "vision-test", "Association visuelle de test.",
+         "2026-11-14T10:19:00Z"),
+    )
+    db.execute(
+        """INSERT INTO perception_fusion_candidates
+           (user_id,audio_observation_id,vision_observation_id,
+            time_delta_seconds,status,evidence_json,created_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        ("creator", "audio-test", "vision-test", 1.5, "candidate",
+         '{"reason":"temporal_cooccurrence"}', "2026-11-14T10:19:00Z"),
+    )
+
+    # Object properties/experiences are tied to a known world entity.
+    db.execute(
+        """INSERT INTO object_properties
+           (user_id,object_id,property_key,property_value,source_type,
+            confidence,evidence,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        ("creator", "entity-a", "couleur", "orange", "taught", 0.95,
+         "Le créateur l'a enseigné.", "2026-11-14T10:20:00Z",
+         "2026-11-14T10:20:00Z"),
+    )
+    db.execute(
+        """INSERT INTO object_experiences
+           (user_id,object_id,action,outcome,evidence,source_type,
+            confidence,created_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        ("creator", "entity-a", "rouler", "Le ballon avance.",
+         "Expérience de test.", "observed", 0.8, "2026-11-14T10:20:00Z"),
+    )
+
+    # Supervised imitation records and one practice attempt.
+    imitation = db.execute(
+        """INSERT INTO imitation_examples
+           (user_id,behavior,context,source_type,evidence,status,
+            supervisor_approved,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        ("creator", "Répéter un mot", "apprentissage du langage",
+         "demonstrated", "Démonstration enregistrée.", "practiced", 1,
+         "2026-11-14T10:21:00Z", "2026-11-14T10:21:00Z"),
+    ).lastrowid
+    db.execute(
+        """INSERT INTO imitation_attempts
+           (user_id,example_id,result,evidence,successful,created_at)
+           VALUES(?,?,?,?,?,?)""",
+        ("creator", imitation, "Répétition correcte.",
+         "Pratique supervisée.", 1, "2026-11-14T10:21:00Z"),
+    )
+
+    # Cognitive milestones, reasoning traces and metacognitive audits.
+    db.execute(
+        """INSERT INTO cognitive_milestones
+           (user_id,stage_name,min_maturity,status,achieved_at)
+           VALUES(?,?,?,?,?)""",
+        ("creator", "observation", 0.2, "in_progress", None),
+    )
+    db.execute(
+        """INSERT INTO cognitive_traces
+           (user_id,thought_type,context_summary,decision_made,confidence,created_at)
+           VALUES(?,?,?,?,?,?)""",
+        ("creator", "reasoning", "Contexte de test.", "Observer avant de conclure.",
+         0.85, "2026-11-14T10:22:00Z"),
+    )
+    db.execute(
+        """INSERT INTO metacognition_logs
+           (user_id,audit_type,confidence_average,confidence_trend,doubt_count,
+            trace_count,findings,recommendations,created_at)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        ("creator", "test", 0.8, "stable", 1, 1, '{"finding":"test"}',
+         '{"recommendation":"verify"}', "2026-11-14T10:22:00Z"),
+    )
+
+    # Affective history, decision journal and explicit preference evidence.
+    db.execute(
+        """INSERT INTO affective_history
+           (user_id,source,event_label,state_json,created_at)
+           VALUES(?,?,?,?,?)""",
+        ("creator", "test", "interaction",
+         '{"joy":40,"fear":10,"curiosity":75,"frustration":2,"sadness":3,"energy":95}',
+         "2026-11-14T10:23:00Z"),
+    )
+    db.execute(
+        """INSERT INTO decision_journal
+           (user_id,question,options_json,chosen_option,reasons,evidence_json,
+            confidence,outcome,status,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        ("creator", "Que faire ?", '["observer","demander"]', "observer",
+         "Réduire l'incertitude.", '["observation-test"]', 0.8, "En attente",
+         "chosen", "2026-11-14T10:23:00Z", "2026-11-14T10:23:00Z"),
+    )
+    db.execute(
+        """INSERT INTO preference_evidence
+           (user_id,domain,preference,evidence,basis,confidence,created_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        ("creator", "learning", "apprentissage progressif",
+         "Préférence explicite de test.", "explicit_statement", 0.95,
+         "2026-11-14T10:23:00Z"),
+    )
     db.commit()
 
 

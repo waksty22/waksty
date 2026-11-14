@@ -80,6 +80,8 @@ def main():
             created=True
             tx=client.transaction()
             try:
+                # Defer FK checks: Chappie tables can reference rows inserted later.
+                tx.execute("PRAGMA defer_foreign_keys=ON")
                 for r in objs:
                     if r["type"]=="table":
                         need(bool(r["sql"]),"Missing table DDL.")

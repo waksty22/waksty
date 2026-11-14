@@ -266,12 +266,10 @@ class HranaHttpTransaction:
             self._closed = True
 
     def execute(self, sql: str) -> HranaHttpResult:
-        if (
-            not isinstance(sql, str)
-            or not re.match(r"(?i)^SELECT\b", _strip_leading_sql_comments(sql))
-            or not _is_single_sql_statement(sql)
-        ):
-            raise PermissionError("La sauvegarde Turso n'autorise que des requêtes SELECT uniques.")
+        if not isinstance(sql, str) or not re.match(r"(?i)^SELECT\b", _strip_leading_sql_comments(sql)):
+            raise PermissionError("La sauvegarde Turso exige une requête SELECT.")
+        if not _is_single_sql_statement(sql):
+            raise PermissionError("La sauvegarde Turso refuse les requêtes SQL multiples.")
         results = self._pipeline_with_baton(
             [{"type": "execute", "stmt": {"sql": sql}}]
         )

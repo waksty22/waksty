@@ -14,6 +14,9 @@ if str(BACKEND_DIR) not in sys.path:
 import libsql
 
 from storage.libsql_adapter import adapt_libsql_connection
+from cognition.shared_brain import get_shared_brain_snapshot
+from learning.language import init_language_tables, record_heard_word
+from learning.sensory import init_sensory_tables, record_observation
 from memory.episodic_memory import (
     init_memory_tables,
     save_episodic_memory,
@@ -106,3 +109,38 @@ def test_core_memory_world_modules_share_one_libsql_connection():
         ).fetchone()[0] == 0
     finally:
         db.close()
+
+
+
+def test_shared_brain_memory_survives_local_libsql_reconnect(tmp_path):
+    database_path = str(tmp_path / "chappie-persistence.db")
+    first = adapt_libsql_connection(libsql.connect(database=database_path))
+    try:
+        init_language_tables(first)
+        init_sensory_tables(first)
+        record_heard_word(first, "owner", "bonjour", "mot entendu dans un test")
+        observation = record_observation(
+            first, "owner", "audio", "Bonjour Chappie",
+            "test-local-libsql", confidence=0.9,
+        )
+        first.commit()
+        observation_id = observation["observation_id"]
+    finally:
+        first.close()
+
+    second = adapt_libsql_connection(libsql.connect(database=database_path))
+    try:
+        snapshot = get_shared_brain_snapshot(second, "owner")
+        words = snapshot["vocabulary"]
+        observations = snapshot["sensory_observations"]
+
+        assert any(item["word"] == "bonjour" and item["state"] == "heard" for item in words)
+        assert any(
+            item["observation_id"] == observation_id
+            and item["modality"] == "audio"
+            for item in observations
+        )
+        assert snapshot["statistics"]["totals"]["vocabulary"] == 1
+        assert snapshot["statistics"]["totals"]["sensory_observations"] == 1
+    finally:
+        second.close()

@@ -89,6 +89,10 @@ def test_hrana_backup_adapter_allows_semicolons_inside_quoted_sql_literals():
     assert result.fetchall() == [("a;b",)]
     assert transaction.statements == ["SELECT 'a;b' AS value"]
 
+    commented = connection.execute("/* export */ SELECT 1")
+    assert commented.fetchall() == [("a;b",)]
+    assert transaction.statements[-1] == "/* export */ SELECT 1"
+
 
 def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
     transaction = _Transaction()

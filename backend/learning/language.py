@@ -137,6 +137,33 @@ def record_explicit_word_teaching(
             recorded.append(dict(row))
     return recorded
 
+
+
+def record_user_text_learning(
+    db: sqlite3.Connection,
+    user_id: str,
+    text: str,
+    source: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """Apply the same cautious lexical-learning rules to chat and Live text."""
+    channel = str(source or "").strip().casefold()
+    evidence_labels = {
+        "classic_chat": (
+            "Message écrit reçu par le chat classique",
+            "Enseignement explicite via le chat classique",
+        ),
+        "gemini_live": (
+            "Transcription confirmée par Gemini Live",
+            "Enseignement explicite via Gemini Live",
+        ),
+    }
+    if channel not in evidence_labels:
+        raise ValueError("Source d'apprentissage textuel non prise en charge.")
+    heard_evidence, teaching_evidence = evidence_labels[channel]
+    heard = record_heard_text(db, user_id, text, evidence=heard_evidence, max_tokens=30)
+    taught = record_explicit_word_teaching(db, user_id, text, evidence=teaching_evidence)
+    return {"heard": heard, "taught": taught}
+
 def advance_word(
     db: sqlite3.Connection,
     user_id: str,

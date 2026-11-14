@@ -14,6 +14,7 @@ from learning.language import (
     init_language_tables,
     record_heard_word,
     record_heard_text,
+    record_user_text_learning,
     text_uses_only_allowed_words,
 )
 
@@ -105,3 +106,26 @@ def test_newborn_chat_falls_back_to_one_word_heard_in_current_message(language_d
     assert gate_spoken_text("...", allowed, max_words=1) == ""
     assert imitation_fallback == "Bonjour"
     assert text_uses_only_allowed_words(imitation_fallback, allowed)
+
+
+@pytest.mark.parametrize("source", ["classic_chat", "gemini_live"])
+def test_both_text_channels_store_explicit_definitions_as_heard(language_db, source):
+    learning = record_user_text_learning(
+        language_db, "creator",
+        "Le mot pomme signifie un fruit rond.",
+        source=source,
+    )
+    assert "pomme" in {item["word"] for item in learning["heard"]}
+    assert len(learning["taught"]) == 1
+    assert learning["taught"][0]["word"] == "pomme"
+    assert learning["taught"][0]["meaning"] == "un fruit rond"
+    assert learning["taught"][0]["state"] == "heard"
+    assert "pomme" in get_repeatable_words(language_db, "creator")
+    assert get_usable_words(language_db, "creator") == set()
+
+
+def test_text_learning_rejects_unknown_channel(language_db):
+    with pytest.raises(ValueError):
+        record_user_text_learning(
+            language_db, "creator", "Le mot pomme signifie un fruit.", source="unknown"
+        )

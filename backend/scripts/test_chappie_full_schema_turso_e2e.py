@@ -133,5 +133,5 @@ def main():
 if __name__=="__main__":
     try: raise SystemExit(main())
     except Exception as exc:
-        print(f"FULL_SCHEMA_E2E_FAILED {type(exc).__name__}",file=sys.stderr)
+        print(f"FULL_SCHEMA_E2E_FAILED {type(exc).__name__}: {exc!r}",file=sys.stderr)
         raise SystemExit(1)

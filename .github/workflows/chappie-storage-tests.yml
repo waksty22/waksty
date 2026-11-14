@@ -12,6 +12,7 @@ on:
       - "backend/tests/test_turso_backup_job.py"
       - "backend/tests/test_data_migration.py"
       - "backend/tests/test_v50_1_logical_backup.py"
+      - "backend/tests/test_chappie_schema_logical_backup_restore.py"
       - "backend/tests/test_hrana_backup_adapter.py"
       - "backend/tests/test_hrana_http_backup.py"
       - "backend/tests/test_logical_backup_transactions.py"
@@ -38,6 +39,7 @@ on:
       - "backend/tests/test_turso_backup_job.py"
       - "backend/tests/test_data_migration.py"
       - "backend/tests/test_v50_1_logical_backup.py"
+      - "backend/tests/test_chappie_schema_logical_backup_restore.py"
       - "backend/tests/test_hrana_backup_adapter.py"
       - "backend/tests/test_hrana_http_backup.py"
       - "backend/tests/test_logical_backup_transactions.py"
@@ -87,6 +89,7 @@ jobs:
             tests/test_data_migration.py \
             tests/test_turso_backup_job.py \
             tests/test_v50_1_logical_backup.py \
+            tests/test_chappie_schema_logical_backup_restore.py \
             tests/test_hrana_backup_adapter.py \
             tests/test_hrana_http_backup.py \
             tests/test_logical_backup_transactions.py \

@@ -1,6 +1,12 @@
 name: Chappie full-schema isolated Turso backup/restore E2E
 
 on:
+  push:
+    branches:
+      - feat/safe-logical-restore-core
+    paths:
+      - ".github/workflows/chappie-full-schema-isolated-e2e.yml"
+      - "backend/**"
   workflow_dispatch:
 
 permissions:

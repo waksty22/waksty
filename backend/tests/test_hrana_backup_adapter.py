@@ -20,6 +20,8 @@ class _Transaction:
 
     def execute(self, sql):
         self.statements.append(sql)
+        if "name = 'sqlite_sequence'" in sql:
+            return _Result(("1",), [])
         if "sqlite_master" in sql:
             return _Result(
                 ("type", "name", "tbl_name", "sql"),
@@ -83,7 +85,7 @@ def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
         assert report["verified"] is True
         assert report["total_rows"] == 1
         assert verify_logical_backup(destination)["valid"] is True
-        assert len(transaction.statements) == 3
+        assert len(transaction.statements) == 4
     finally:
         destination.unlink(missing_ok=True)
         destination.with_suffix(destination.suffix + ".sha256").unlink(missing_ok=True)

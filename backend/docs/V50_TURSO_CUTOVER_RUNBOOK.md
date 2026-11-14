@@ -2,9 +2,9 @@
 
 ## État vérifié dans le dépôt (branche main au 8 novembre 2026)
 
-- Le stockage réellement utilisé par l'application reste SQLite : `backend/server.py` définit `db_connection()` avec `sqlite3.connect(DB_PATH)`.
-- `backend/storage/connection_factory.py` sait ouvrir SQLite ou Turso selon `CHAPPIE_STORAGE_BACKEND`, mais son en-tête précise qu'il n'est pas encore raccordé à `server.db_connection()`.
-- `backend/storage/libsql_adapter.py` fournit une compatibilité DB-API partielle et des tests isolés ; cela ne prouve pas encore la compatibilité de tout le backend.
+- `server.db_connection()` est raccordé à `open_storage_connection()` : SQLite reste le choix par défaut et Turso est sélectionnable explicitement via `CHAPPIE_STORAGE_BACKEND=turso`.
+- Le mode Turso reste protégé par les contrôles de démarrage (`CHAPPIE_TURSO_CUTOVER_READY`, marqueurs de migration/bootstrap/adoption) ; aucun basculement n'est automatique.
+- `backend/storage/libsql_adapter.py` fournit une compatibilité DB-API partielle et des tests isolés ; cela ne prouve pas encore la compatibilité réelle de tout le backend ni la persistance sur Render.
 - `backend/storage/schema_migration.py` prépare/applique des changements de schéma. Il ne copie aucune ligne métier.
 - `backend/storage/logical_backup.py` sait exporter une base Turso en archive logique chiffrée et vérifier l'intégrité de la restauration temporaire.
 - Les diagnostics de schéma/inventaire sont conçus pour exposer des métadonnées et des volumes, pas le contenu des souvenirs.
@@ -102,7 +102,7 @@ Revenir à SQLite si le démarrage échoue, si une table manque, si une écritur
 
 - [x] Sauvegarde logique Turso chiffrée avec vérification locale.
 - [x] Outil de comparaison de schéma et de plan de migration non destructif présent.
-- [x] Fabrique de connexions et adaptateur libsql présents, isolés du stockage actif.
+- [x] Fabrique de connexions raccordée à `server.db_connection()` ; SQLite par défaut, sélection Turso explicite et protégée par les garde-fous de démarrage.
 - [x] Diagnostic en lecture seule du chemin SQLite réellement ouvert (V50.20, code/tests prêts ; exécution sur Render à faire après déploiement approuvé).
 - [ ] Audit réel des deux bases et rapport de compatibilité.
 - [ ] Compatibilité complète du backend avec libsql.

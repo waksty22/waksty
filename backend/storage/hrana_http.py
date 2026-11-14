@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+import sqlite3
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -45,6 +46,46 @@ def _pipeline_url(database_url: str) -> str:
         endpoint_path = path + "/v2/pipeline"
     return urlunsplit((scheme, parsed.netloc, endpoint_path, "", ""))
 
+
+
+def database_identity(database_url: str) -> str:
+    """Return the normalized database host used as an explicit restore identity."""
+    parsed = urlsplit(database_url.strip())
+    if parsed.scheme.lower() not in {"libsql", "https"} or not parsed.hostname:
+        raise ValueError("URL de base Turso invalide pour identifier la cible.")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("URL de base Turso contient des composants interdits.")
+    return parsed.hostname.rstrip(".").lower()
+
+
+def _strip_leading_sql_comments(sql: str) -> str:
+    """Remove leading SQL comments before checking transaction-control keywords."""
+    remaining = sql.lstrip()
+    while remaining:
+        if remaining.startswith("--"):
+            newline = remaining.find("\n")
+            remaining = "" if newline < 0 else remaining[newline + 1 :].lstrip()
+            continue
+        if remaining.startswith("/*"):
+            end = remaining.find("*/", 2)
+            if end < 0:
+                return remaining
+            remaining = remaining[end + 2 :].lstrip()
+            continue
+        break
+    return remaining
+
+
+def _is_single_sql_statement(sql: str) -> bool:
+    """Reject appended SQL while allowing semicolons inside CREATE TRIGGER bodies."""
+    if not isinstance(sql, str) or not sql.strip():
+        return False
+    for index, character in enumerate(sql):
+        if character == ";" and sqlite3.complete_statement(sql[: index + 1]):
+            tail = sql[index + 1 :]
+            tail = re.sub(r"(?s)/\*.*?\*/|--[^\r\n]*", "", tail).strip()
+            return not tail
+    return True
 
 def _decode_value(value: dict[str, Any]) -> Any:
     kind = value.get("type")
@@ -156,10 +197,31 @@ class HranaHttpTransaction:
             self._active = False
             self._closed = True
             raise HranaHttpError("Réponse Hrana incomplète.")
+        # Advance the baton before validating an optional endpoint update. If
+        # the update is rejected, callers can still roll back through the
+        # already-trusted endpoint; credentials are never sent cross-origin.
+        self._baton = payload.get("baton")
         next_base = payload.get("base_url")
         if next_base:
-            self._client._endpoint = _pipeline_url(str(next_base))
-        self._baton = payload.get("baton")
+            try:
+                candidate = _pipeline_url(str(next_base))
+                current = urlsplit(self._client._endpoint)
+                proposed = urlsplit(candidate)
+                current_port = current.port or 443
+                proposed_port = proposed.port or 443
+                same_origin = (
+                    proposed.scheme == "https"
+                    and (proposed.hostname or "").rstrip(".").lower()
+                    == (current.hostname or "").rstrip(".").lower()
+                    and proposed_port == current_port
+                )
+            except ValueError:
+                same_origin = False
+            if not same_origin:
+                raise HranaHttpError(
+                    "Turso Hrana a proposé une origine de connexion non autorisée."
+                )
+            self._client._endpoint = candidate
         results = payload["results"]
         if len(results) != len(requests):
             self._baton = None
@@ -220,6 +282,53 @@ class HranaHttpTransaction:
         response = self._unwrap(results[0], "execute")
         return HranaHttpResult(response.get("result") or {})
 
+
+    def execute_write(self, sql: str, args: tuple[Any, ...] | list[Any] = ()) -> HranaHttpResult:
+        """Execute one parameterized statement inside an explicitly opened transaction.
+
+        This method is deliberately separate from execute(), which remains
+        SELECT-only for the backup transport. Transaction control SQL and
+        multi-statement payloads are never accepted here.
+        """
+        if not self._active or self._closed:
+            raise HranaHttpError("Transaction Hrana inactive.")
+        normalized_sql = _strip_leading_sql_comments(sql) if isinstance(sql, str) else ""
+        if (
+            not _is_single_sql_statement(sql)
+            or re.match(r"(?is)^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b", normalized_sql)
+        ):
+            raise PermissionError("Instruction SQL de restauration interdite.")
+        encoded_args = []
+        for value in args:
+            if value is None:
+                encoded_args.append({"type": "null"})
+            elif isinstance(value, bool):
+                encoded_args.append({"type": "integer", "value": "1" if value else "0"})
+            elif isinstance(value, int):
+                encoded_args.append({"type": "integer", "value": str(value)})
+            elif isinstance(value, float):
+                encoded_args.append({"type": "float", "value": value})
+            elif isinstance(value, (bytes, bytearray, memoryview)):
+                encoded_args.append({
+                    "type": "blob",
+                    "base64": base64.b64encode(bytes(value)).decode("ascii"),
+                })
+            elif isinstance(value, str):
+                encoded_args.append({"type": "text", "value": value})
+            else:
+                raise TypeError("Type de paramètre Hrana non pris en charge.")
+        requests = [{
+            "type": "execute",
+            "stmt": {"sql": sql, "args": encoded_args},
+        }]
+        results = self._pipeline_with_baton(requests)
+        if not self._baton:
+            self._active = False
+            self._closed = True
+            raise HranaHttpError("Turso Hrana a fermé le flux pendant la restauration.")
+        response = self._unwrap(results[0], "execute")
+        return HranaHttpResult(response.get("result") or {})
+
     def commit(self) -> None:
         if self._active:
             self._execute_control("COMMIT")
@@ -227,3 +336,35 @@ class HranaHttpTransaction:
     def rollback(self) -> None:
         if self._active:
             self._execute_control("ROLLBACK")
+
+
+def open_guarded_restore_transaction(
+    database_url: str,
+    auth_token: str,
+    *,
+    expected_target_identity: str,
+    production_identity: str,
+    http_client: httpx.Client | None = None,
+    timeout: float = 30.0,
+) -> tuple[HranaHttpClient, HranaHttpTransaction]:
+    """Open a write transaction only after exact host identity checks.
+
+    The identity values must be the full normalized Turso database hostnames,
+    not display labels or user-provided aliases.
+    """
+    actual = database_identity(database_url)
+    expected = expected_target_identity.strip().lower().rstrip(".")
+    production = production_identity.strip().lower().rstrip(".")
+    if not expected or actual != expected:
+        raise PermissionError("La cible Turso ne correspond pas à l'identité attendue.")
+    if not production or actual == production:
+        raise PermissionError("La restauration vers la base de production est interdite.")
+    client = HranaHttpClient(
+        database_url, auth_token, http_client=http_client, timeout=timeout
+    )
+    try:
+        transaction = client.transaction()
+    except Exception:
+        client.close()
+        raise
+    return client, transaction

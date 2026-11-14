@@ -66,6 +66,8 @@ class FakeHranaServer:
                 result = {"cols": [], "rows": []}
             elif sql.startswith("CREATE TRIGGER"):
                 result = {"cols": [], "rows": []}
+            elif sql == "SELECT 'a;b' AS value":
+                result = {"cols": [{"name": "value", "decltype": "TEXT"}], "rows": [[_typed("a;b")]]}
             elif "name = 'sqlite_sequence'" in sql:
                 result = {"cols": [{"name": "1", "decltype": "INTEGER"}], "rows": []}
             elif "sqlite_master" in sql:
@@ -368,5 +370,21 @@ def test_http_rejects_deceptive_or_downgraded_base_url_updates(base_url):
             client.transaction()
         assert server.request_hosts == ["example-org.turso.io"]
         assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
+    finally:
+        client.close()
+
+
+def test_http_v2_backup_allows_quoted_semicolons_and_rejects_multiple_statements():
+    server = FakeHranaServer()
+    client = _client(server)
+    transaction = None
+    try:
+        transaction = client.transaction()
+        cursor = HranaTransactionConnection(transaction).execute("SELECT 'a;b' AS value")
+        assert cursor.fetchall() == [("a;b",)]
+        with pytest.raises(PermissionError):
+            HranaTransactionConnection(transaction).execute("SELECT 1; DELETE FROM memories")
+        assert server.statements == ["BEGIN", "SELECT 'a;b' AS value"]
+        transaction.rollback()
     finally:
         client.close()

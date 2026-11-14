@@ -74,9 +74,18 @@ def main():
         try:
             pre=client.transaction()
             try:
-                existing=pre.execute("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type IN ('table','index','view','trigger')").rows
-                need(not existing,"Refusing to write: isolated Turso database is not empty.")
+                existing=pre.execute("SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type IN ('table','index','view','trigger')").rows
+                expected_objects={(kind,name) for kind,name in names}
+                existing_objects=[(str(row[0]),str(row[1])) for row in existing]
+                unexpected=[item for item in existing_objects if item not in expected_objects]
+                need(not unexpected,
+                     "Refusing cleanup: isolated Turso contains objects outside this exact Chappie fixture: "
+                     + repr(unexpected[:10]))
                 pre.commit()
+                if existing_objects:
+                    print(f"E2E_STAGE stale_fixture_cleanup objects={len(existing_objects)}", flush=True)
+                    drop(client, existing_objects)
+                    print("E2E_STAGE stale_fixture_cleanup_complete", flush=True)
             except Exception:
                 pre.rollback(); raise
             created=True

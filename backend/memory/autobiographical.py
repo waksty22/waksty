@@ -107,6 +107,7 @@ def sync_autobiographical_events(
           ON a.user_id=u.user_id
          AND a.happened_at=u.happened_at
          AND a.actor='assistant'
+         AND a.source_conversation_id=u.source_conversation_id + 1
         WHERE u.user_id=? AND u.actor='user'
         """,
         (user_id,),

@@ -269,7 +269,7 @@ class HranaHttpTransaction:
         if (
             not isinstance(sql, str)
             or not re.match(r"(?i)^SELECT\b", sql.lstrip())
-            or ";" in sql
+            or not _is_single_sql_statement(sql)
         ):
             raise PermissionError("La sauvegarde Turso n'autorise que des requêtes SELECT uniques.")
         results = self._pipeline_with_baton(

@@ -56,6 +56,21 @@ def drop(client, objects, table_dependencies):
         tx.rollback()
         raise
 
+def assert_empty(client):
+    """Confirm cleanup left no user-owned schema objects in the isolated database."""
+    tx = client.transaction()
+    try:
+        remaining = tx.execute(
+            "SELECT type,name FROM sqlite_master "
+            "WHERE name NOT LIKE 'sqlite_%' "
+            "AND type IN ('table','index','view','trigger')"
+        ).rows
+        tx.commit()
+    except Exception:
+        tx.rollback()
+        raise
+    need(not remaining, "Isolated Turso cleanup left schema objects: " + repr(remaining[:10]))
+
 def main():
     url=os.environ.get("CHAPPIE_TEST_TURSO_DATABASE_URL","").strip()
     token=os.environ.get("CHAPPIE_TEST_TURSO_AUTH_TOKEN","").strip()
@@ -120,6 +135,7 @@ def main():
                 if existing_objects:
                     print(f"E2E_STAGE stale_fixture_cleanup objects={len(existing_objects)}", flush=True)
                     drop(client, existing_objects, table_dependencies)
+                    assert_empty(client)
                     print("E2E_STAGE stale_fixture_cleanup_complete", flush=True)
             except Exception:
                 pre.rollback(); raise
@@ -181,9 +197,14 @@ def main():
                 finally: rc.close()
                 success_message = (f"FULL_SCHEMA_E2E_SUCCESS target={target} tables={restored['table_count']} rows={restored['total_rows']} encrypted=true archive_verified=true seeded_tables={sum(bool(v) for v in rows.values())} artifact_sha256={restored['artifact_sha256']} foreign_keys=ok")
         finally:
-            if created: drop(client,names,table_dependencies)
-            client.close()
-            src.close()
+            try:
+                if created:
+                    drop(client, names, table_dependencies)
+                    assert_empty(client)
+                    print("E2E_STAGE final_cleanup_verified", flush=True)
+            finally:
+                client.close()
+                src.close()
         print(success_message, flush=True)
 if __name__=="__main__":
     try: raise SystemExit(main())

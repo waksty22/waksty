@@ -127,8 +127,8 @@ def main():
                 finally: rc.close()
                 print(f"FULL_SCHEMA_E2E_SUCCESS target={target} tables={restored['table_count']} rows={restored['total_rows']} encrypted=true archive_verified=true seeded_tables={sum(bool(v) for v in rows.values())} artifact_sha256={restored['artifact_sha256']} foreign_keys=ok")
         finally:
-            client.close()
             if created: drop(client,names)
+            client.close()
             src.close()
 if __name__=="__main__":
     try: raise SystemExit(main())

@@ -71,6 +71,25 @@ def test_hrana_backup_adapter_rejects_non_select_sql(sql):
     assert transaction.statements == []
 
 
+
+def test_hrana_backup_adapter_allows_semicolons_inside_quoted_sql_literals():
+    class RecordingTransaction:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql):
+            self.statements.append(sql)
+            return _Result(("value",), [("a;b",)])
+
+    transaction = RecordingTransaction()
+    connection = HranaTransactionConnection(transaction)
+
+    result = connection.execute("SELECT 'a;b' AS value")
+
+    assert result.fetchall() == [("a;b",)]
+    assert transaction.statements == ["SELECT 'a;b' AS value"]
+
+
 def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
     transaction = _Transaction()
     connection = HranaTransactionConnection(transaction)

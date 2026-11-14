@@ -315,6 +315,12 @@ def restore_logical_backup_payload(
         raise ValueError("Comptage des lignes attendu invalide.")
     if any(type(count) is not int or count < 0 for count in expected_counts.values()):
         raise ValueError("Comptage des lignes attendu invalide.")
+    # Validate every redundant summary field, not only row_counts/total_rows.
+    # These counters are part of the backup contract and must not silently drift.
+    if type(summary.get("table_count")) is not int or summary["table_count"] != len(tables):
+        raise ValueError("Résumé du nombre de tables incohérent.")
+    if type(summary.get("object_count")) is not int or summary["object_count"] != len(objects):
+        raise ValueError("Résumé du nombre d'objets de schéma incohérent.")
     normalized_expected = dict(expected_counts)
     if type(summary.get("total_rows")) is not int or summary["total_rows"] != sum(normalized_expected.values()):
         raise ValueError("Résumé du nombre total de lignes incohérent.")

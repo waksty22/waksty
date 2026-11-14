@@ -7,6 +7,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from learning.language import init_language_tables, record_heard_word, advance_word
+from learning.perception_fusion import (
+    init_perception_fusion_tables,
+    link_temporally_cooccurring_observation,
+    list_perception_fusions,
+)
 from learning.sensory import (
     init_sensory_tables,
     record_observation,
@@ -77,3 +82,34 @@ def test_observations_are_isolated_by_user(db):
         associate_word_with_observation(
             db, "other", "objet", observation["observation_id"]
         )
+
+
+
+def test_merged_live_turn_creates_one_audio_observation_and_reviewable_fusion(db):
+    init_perception_fusion_tables(db)
+    visual = record_observation(
+        db, "creator", "vision", "Une pomme rouge sur une table.",
+        "camera_snapshot", confidence=0.45,
+    )
+    merged_audio = record_observation(
+        db, "creator", "audio", "Regarde la pomme sur la table.",
+        "gemini_live_completed_turn", confidence=0.8,
+    )
+
+    candidates = link_temporally_cooccurring_observation(
+        db, "creator", merged_audio["observation_id"]
+    )
+    saved_audio = list_observations(db, "creator")
+    fusions = list_perception_fusions(db, "creator")
+
+    assert len([item for item in saved_audio if item["modality"] == "audio"]) == 1
+    assert candidates == [{
+        "audio_observation_id": merged_audio["observation_id"],
+        "vision_observation_id": visual["observation_id"],
+        "time_delta_seconds": candidates[0]["time_delta_seconds"],
+        "status": "candidate",
+        "requires_validation": True,
+    }]
+    assert len(fusions) == 1
+    assert fusions[0]["status"] == "candidate"
+    assert fusions[0]["evidence"]["rule"] == "temporal_cooccurrence_only"

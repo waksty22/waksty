@@ -6,6 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from cognition.shared_brain import merge_live_transcript
+
 from learning.language import (
     advance_word,
     gate_spoken_text,
@@ -14,6 +16,7 @@ from learning.language import (
     init_language_tables,
     record_heard_word,
     record_heard_text,
+    record_explicit_word_teaching,
     text_uses_only_allowed_words,
 )
 
@@ -105,3 +108,48 @@ def test_newborn_chat_falls_back_to_one_word_heard_in_current_message(language_d
     assert gate_spoken_text("...", allowed, max_words=1) == ""
     assert imitation_fallback == "Bonjour"
     assert text_uses_only_allowed_words(imitation_fallback, allowed)
+
+
+
+def test_explicit_definition_does_not_count_as_a_second_word_exposure(language_db):
+    record_heard_text(language_db, "creator", "La pomme est rouge.")
+    taught = record_explicit_word_teaching(
+        language_db, "creator", "Le mot pomme signifie un fruit."
+    )
+
+    row = language_db.execute(
+        "SELECT state, meaning, exposure_count FROM personal_vocabulary "
+        "WHERE user_id=? AND word=?",
+        ("creator", "pomme"),
+    ).fetchone()
+
+    assert taught
+    assert row["state"] == "heard"
+    assert row["meaning"] == "un fruit"
+    assert row["exposure_count"] == 1
+
+
+def test_live_incremental_transcript_is_learned_once_after_merge(language_db):
+    merged = ""
+    for chunk in ("Bonjour Chappie, regarde", "regarde la pomme", "la pomme."):
+        merged = merge_live_transcript(merged, chunk)
+
+    heard = record_heard_text(
+        language_db,
+        "creator",
+        merged,
+        evidence="Transcription complète confirmée par Gemini Live",
+    )
+
+    assert merged == "Bonjour Chappie, regarde la pomme."
+    assert {item["word"] for item in heard} == {
+        "bonjour", "chappie", "regarde", "la", "pomme"
+    }
+    rows = language_db.execute(
+        "SELECT word, exposure_count FROM personal_vocabulary "
+        "WHERE user_id=? ORDER BY word",
+        ("creator",),
+    ).fetchall()
+    assert {row["word"]: row["exposure_count"] for row in rows} == {
+        "bonjour": 1, "chappie": 1, "la": 1, "pomme": 1, "regarde": 1
+    }

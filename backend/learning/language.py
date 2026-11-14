@@ -125,7 +125,6 @@ def record_explicit_word_teaching(
                VALUES (?, ?, ?, 'heard', 1, ?, ?, ?)
                ON CONFLICT(user_id, word) DO UPDATE SET
                  meaning=excluded.meaning,
-                 exposure_count=personal_vocabulary.exposure_count+1,
                  evidence=excluded.evidence, updated_at=excluded.updated_at""",
             (user_id, word, meaning, str(evidence)[:500], now, now),
         )

@@ -5688,19 +5688,6 @@ async def websocket_endpoint(
                                         sensory_db, user_id, live_emotions,
                                         source="gemini_live", event_label="transcription utilisateur",
                                     )
-                                    record_heard_text(
-                                        sensory_db, user_id, heard_text,
-                                        evidence="Transcription confirmée par Gemini Live",
-                                    )
-                                    audio_observation = record_observation(
-                                        sensory_db, user_id, "audio", heard_text,
-                                        "gemini_live_transcription",
-                                        confidence=0.8,
-                                        metadata={"language": "fr"},
-                                    )
-                                    link_temporally_cooccurring_observation(
-                                        sensory_db, user_id, audio_observation["observation_id"]
-                                    )
                                     sensory_db.commit()
                             except Exception:
                                 log.exception("[GEMINI LIVE] Échec mémorisation transcription")
@@ -5762,12 +5749,32 @@ async def websocket_endpoint(
                         if live_turn_state["user"] or assistant_text:
                             try:
                                 with db_connection() as teaching_db:
+                                    heard = record_heard_text(
+                                        teaching_db, user_id, live_turn_state["user"],
+                                        evidence="Transcription complète confirmée par Gemini Live",
+                                        max_tokens=30,
+                                    )
                                     taught = record_explicit_word_teaching(
                                         teaching_db, user_id, live_turn_state["user"],
                                         evidence="Enseignement explicite via Gemini Live",
                                     )
-                                    if taught:
+                                    audio_observation = None
+                                    if live_turn_state["user"]:
+                                        audio_observation = record_observation(
+                                            teaching_db, user_id, "audio",
+                                            live_turn_state["user"],
+                                            "gemini_live_completed_turn",
+                                            confidence=0.8,
+                                            metadata={"language": "fr"},
+                                        )
+                                        link_temporally_cooccurring_observation(
+                                            teaching_db, user_id, audio_observation["observation_id"]
+                                        )
+                                    if heard or taught or audio_observation:
                                         teaching_db.commit()
+                                    if heard:
+                                        log.info("[APPRENTISSAGE PARTAGÉ] Exposition Live enregistrée après fusion : %s mot(s)", len(heard))
+                                    if taught:
                                         log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live", len(taught))
                             except Exception:
                                 log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")

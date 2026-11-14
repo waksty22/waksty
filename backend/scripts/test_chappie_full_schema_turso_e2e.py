@@ -179,11 +179,12 @@ def main():
                 except Exception:
                     rtx.rollback(); raise
                 finally: rc.close()
-                print(f"FULL_SCHEMA_E2E_SUCCESS target={target} tables={restored['table_count']} rows={restored['total_rows']} encrypted=true archive_verified=true seeded_tables={sum(bool(v) for v in rows.values())} artifact_sha256={restored['artifact_sha256']} foreign_keys=ok")
+                success_message = (f"FULL_SCHEMA_E2E_SUCCESS target={target} tables={restored['table_count']} rows={restored['total_rows']} encrypted=true archive_verified=true seeded_tables={sum(bool(v) for v in rows.values())} artifact_sha256={restored['artifact_sha256']} foreign_keys=ok")
         finally:
-            if created: drop(client,names)
+            if created: drop(client,names,table_dependencies)
             client.close()
             src.close()
+        print(success_message, flush=True)
 if __name__=="__main__":
     try: raise SystemExit(main())
     except Exception as exc:

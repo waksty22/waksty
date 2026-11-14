@@ -55,3 +55,33 @@ def test_storage_backend_rejects_unknown_values(monkeypatch):
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "postgres")
     with pytest.raises(ValueError, match="sqlite ou turso"):
         StorageSettings.from_env()
+
+
+
+def test_sqlite_factory_persists_data_after_connection_is_reopened(tmp_path):
+    database_path = tmp_path / "durable" / "chappie.sqlite3"
+    first = open_storage_connection(
+        StorageSettings(backend="sqlite", sqlite_path=str(database_path))
+    )
+    try:
+        first.execute(
+            "CREATE TABLE durable_memory (id INTEGER PRIMARY KEY, content TEXT NOT NULL)"
+        )
+        first.execute(
+            "INSERT INTO durable_memory(content) VALUES (?)",
+            ("souvenir conservé après fermeture",),
+        )
+        first.commit()
+    finally:
+        first.close()
+
+    second = open_storage_connection(
+        StorageSettings(backend="sqlite", sqlite_path=str(database_path))
+    )
+    try:
+        row = second.execute(
+            "SELECT content FROM durable_memory WHERE id=1"
+        ).fetchone()
+        assert row["content"] == "souvenir conservé après fermeture"
+    finally:
+        second.close()

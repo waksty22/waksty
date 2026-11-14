@@ -49,6 +49,7 @@ def main():
         server.STORAGE_MIGRATION_PENDING_CUTOVER=False
         server.init_db()
         from tests.test_chappie_schema_logical_backup_restore import _seed_chappie_state
+        print("E2E_STAGE local_seed_start", flush=True)
         src=sqlite3.connect(source_path)
         src.execute("PRAGMA foreign_keys=ON")
         _seed_chappie_state(src)
@@ -65,6 +66,7 @@ def main():
             cols[t]=[r["name"] for r in src.execute(f"PRAGMA table_xinfo({q(t)})") if r["hidden"]==0]
             rows[t]=[tuple(r) for r in src.execute(f"SELECT {','.join(q(c) for c in cols[t])} FROM {q(t)}")]
         total=sum(map(len,rows.values()))
+        print(f"E2E_STAGE local_seed_complete tables={len(tables)} rows={total}", flush=True)
         need(total>20 and sum(bool(v) for v in rows.values())>=15,"Representative records missing across Chappie tables.")
 
         client=HranaHttpClient(url,token,timeout=60)
@@ -78,6 +80,7 @@ def main():
             except Exception:
                 pre.rollback(); raise
             created=True
+            print("E2E_STAGE turso_seed_start", flush=True)
             tx=client.transaction()
             try:
                 # Defer FK checks: Chappie tables can reference rows inserted later.
@@ -93,6 +96,7 @@ def main():
                 for r in objs:
                     if r["type"]!="table" and r["sql"]: tx.execute_write(r["sql"])
                 tx.commit()
+                print("E2E_STAGE turso_seed_commit_ok", flush=True)
             except Exception:
                 tx.rollback(); raise
 
@@ -102,6 +106,7 @@ def main():
                 try:
                     report=create_backup_archive(HranaTransactionConnection(btx),archive,key,manage_snapshot=False)
                     btx.commit()
+                    print("E2E_STAGE backup_commit_ok", flush=True)
                 except Exception:
                     btx.rollback(); raise
                 need(report["encrypted"] and report["verified_after_packaging"],"Encrypted archive verification failed.")
@@ -111,11 +116,14 @@ def main():
                     z.extractall(root/"unpacked")
                 enc=root/"unpacked"/"chappie-turso.json.enc"
                 need(verify_encrypted_logical_backup(enc,key).get("valid") is True,"Independent archive verification failed.")
+                print("E2E_STAGE backup_verified_drop_start", flush=True)
                 drop(client,names); created=False
+                print("E2E_STAGE drop_complete_restore_start", flush=True)
                 rc,rtx=open_guarded_restore_transaction(url,token,expected_target_identity=EXPECTED,production_identity=production)
                 try:
                     restored=restore_encrypted_logical_backup(HranaRestoreConnection(rtx),enc,key,
                         target_identity=target,expected_target_identity=EXPECTED,production_identity=production)
+                    print("E2E_STAGE restore_function_complete", flush=True)
                     need(restored["restored"] and restored["table_count"]==len(tables) and restored["total_rows"]==total,"Restore summary mismatch.")
                     check=HranaRestoreConnection(rtx)
                     for t in tables:

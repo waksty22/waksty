@@ -265,6 +265,7 @@ def test_http_v2_write_allows_trigger_body_semicolons_but_rejects_extra_statemen
 def test_single_statement_guard_accepts_trailing_comments_and_quoted_semicolons():
     from storage.hrana_http import _is_single_sql_statement
     assert _is_single_sql_statement("SELECT ';' /* trailing comment */")
+    assert _is_single_sql_statement("/* leading comment */ SELECT 1")
     assert _is_single_sql_statement("CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;")
     assert not _is_single_sql_statement("SELECT 1; SELECT 2")
     assert not _is_single_sql_statement("SELECT 1; -- comment\nDROP TABLE t")

@@ -1,0 +1,55 @@
+name: Chappie isolated Turso backup and restore E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-turso-backup-restore:
+    name: encrypted-backup-restore-on-isolated-db
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CHAPPIE_TEST_TURSO_DATABASE_URL: ${{ secrets.CHAPPIE_TEST_TURSO_DATABASE_URL }}
+      CHAPPIE_TEST_TURSO_AUTH_TOKEN: ${{ secrets.CHAPPIE_TEST_TURSO_AUTH_TOKEN }}
+      # Read only for hostname comparison; the production DB is never connected to.
+      CHAPPIE_PRODUCTION_TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+    steps:
+      - name: Checkout guarded restore implementation
+        uses: actions/checkout@v7
+        with:
+          ref: feat/safe-logical-restore-core
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install isolated E2E dependencies
+        run: python -m pip install --disable-pip-version-check libsql httpx cryptography
+
+      - name: Validate required isolated test configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CHAPPIE_TEST_TURSO_DATABASE_URL"
+          test -n "$CHAPPIE_TEST_TURSO_AUTH_TOKEN"
+          test -n "$CHAPPIE_PRODUCTION_TURSO_DATABASE_URL"
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          expected = "chappie-test-isolated-chapoue.aws-eu-west-1.turso.io"
+          test_url = urlparse(os.environ["CHAPPIE_TEST_TURSO_DATABASE_URL"])
+          prod_url = urlparse(os.environ["CHAPPIE_PRODUCTION_TURSO_DATABASE_URL"])
+          if test_url.scheme != "libsql" or test_url.hostname != expected:
+              raise SystemExit("Refusing: isolated test target hostname mismatch.")
+          if not prod_url.hostname or prod_url.hostname == test_url.hostname:
+              raise SystemExit("Refusing: production and test database identities are not distinct.")
+          print("Target identity checks passed; production URL is used only for comparison.")
+          PY
+
+      - name: Run encrypted backup, empty-target restore, and cleanup test
+        working-directory: backend
+        run: python scripts/test_turso_backup_restore_e2e.py

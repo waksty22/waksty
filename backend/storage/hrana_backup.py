@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .hrana_http import _is_single_sql_statement
+from .hrana_http import _is_single_sql_statement, _strip_leading_sql_comments
 
 
 class HranaBackupCursor:

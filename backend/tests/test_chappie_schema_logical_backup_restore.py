@@ -332,6 +332,32 @@ def _seed_chappie_state(db: sqlite3.Connection) -> None:
          "Préférence explicite de test.", "explicit_statement", 0.95,
          "2026-11-14T10:23:00Z"),
     )
+    # Remaining core persistence tables: voice profile, journal, mood and maintenance.
+    db.execute(
+        """INSERT INTO voice_profiles
+           (user_id,profile_name,embedding_json,created_at,updated_at)
+           VALUES(?,?,?,?,?)""",
+        ("creator", "voice-test", '[0.1,0.2,0.3]',
+         "2026-11-14T10:24:00Z", "2026-11-14T10:24:00Z"),
+    )
+    db.execute(
+        "INSERT INTO journal(user_id,entry,kind,created_at) VALUES(?,?,?,?)",
+        ("creator", "Entrée de journal persistante.", "reflection",
+         "2026-11-14T10:24:00Z"),
+    )
+    db.execute(
+        """INSERT INTO mood_events
+           (user_id,event,valence,arousal,created_at)
+           VALUES(?,?,?,?,?)""",
+        ("creator", "interaction de test", 0.7, 0.4, "2026-11-14T10:24:00Z"),
+    )
+    db.execute(
+        """INSERT INTO maintenance_state
+           (user_id,last_active_at,last_dream_at,updated_at)
+           VALUES(?,?,?,?)""",
+        ("creator", "2026-11-14T10:24:00Z", "2026-11-14T09:00:00Z",
+         "2026-11-14T10:24:00Z"),
+    )
     db.commit()
 
 

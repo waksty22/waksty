@@ -83,7 +83,11 @@ def record_heard_text(
     max_tokens: int = 30,
 ) -> list[dict[str, Any]]:
     """Record only lexical exposure, never comprehension or mastery."""
-    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", str(text), flags=re.UNICODE)
+    if not isinstance(text, str):
+        raise ValueError("Le texte entendu doit être une chaîne de caractères.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'exposition doit être du texte.")
+    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
     recorded: list[dict[str, Any]] = []
     seen: set[str] = set()
     for token in tokens[:max_tokens]:
@@ -133,7 +137,7 @@ def record_explicit_word_teaching(
                  meaning=excluded.meaning,
                  exposure_count=personal_vocabulary.exposure_count+1,
                  evidence=excluded.evidence, updated_at=excluded.updated_at""",
-            (user_id, word, meaning, str(evidence)[:500], now, now),
+            (user_id, word, meaning, evidence[:500], now, now),
         )
         row = db.execute(
             "SELECT * FROM personal_vocabulary WHERE user_id=? AND word=?",

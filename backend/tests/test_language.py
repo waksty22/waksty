@@ -228,3 +228,21 @@ def test_heard_text_rejects_invalid_token_limits_without_writing(language_db, in
     assert language_db.execute(
         "SELECT COUNT(*) FROM personal_vocabulary"
     ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_state", [None, 7, True, {}, []])
+def test_word_progression_rejects_invalid_state_without_updating(language_db, invalid_state):
+    record_heard_word(language_db, "creator", "pomme")
+    with pytest.raises(ValueError, match="État"):
+        advance_word(language_db, "creator", "pomme", invalid_state)
+    row = language_db.execute(
+        "SELECT state FROM personal_vocabulary WHERE user_id=? AND word=?",
+        ("creator", "pomme"),
+    ).fetchone()
+    assert row["state"] == "heard"
+
+
+@pytest.mark.parametrize("invalid_limit", [0, -1, True, False, 1.5, "2", {}])
+def test_spoken_text_gate_rejects_invalid_word_limits(invalid_limit):
+    with pytest.raises(ValueError, match="limite|entier"):
+        gate_spoken_text("bonjour", {"bonjour"}, max_words=invalid_limit)

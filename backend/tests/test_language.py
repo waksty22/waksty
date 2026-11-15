@@ -137,10 +137,10 @@ def test_chat_and_live_lexical_exposure_share_persistent_user_vocabulary(tmp_pat
 
     reopened = connect()
     try:
+        from learning.language import list_vocabulary
+
         vocabulary = {
-            item["word"]: item
-            for item in __import__("learning.language", fromlist=["list_vocabulary"])
-            .list_vocabulary(reopened, "creator")
+            item["word"]: item for item in list_vocabulary(reopened, "creator")
         }
         assert {"la", "chaussure", "est", "ici", "là", "voici", "le", "vélo"} <= set(vocabulary)
         assert vocabulary["chaussure"]["exposure_count"] == 2

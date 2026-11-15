@@ -49,7 +49,9 @@ def link_temporally_cooccurring_observation(
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
 ) -> list[dict[str, Any]]:
     """Create cautious cross-modal candidates around one new observation."""
-    window = max(1, min(int(window_seconds), MAX_WINDOW_SECONDS))
+    if isinstance(window_seconds, bool) or not isinstance(window_seconds, int):
+        raise ValueError("La fenêtre temporelle doit être un entier.")
+    window = max(1, min(window_seconds, MAX_WINDOW_SECONDS))
     current = db.execute(
         """SELECT observation_id, modality, content, created_at
            FROM sensory_observations
@@ -120,7 +122,9 @@ def link_temporally_cooccurring_observation(
 def list_perception_fusions(
     db: sqlite3.Connection, user_id: str, limit: int = 50
 ) -> list[dict[str, Any]]:
-    limit = max(1, min(int(limit), 100))
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
+    limit = max(1, min(limit, 100))
     rows = db.execute(
         """SELECT id,audio_observation_id,vision_observation_id,
                   time_delta_seconds,status,evidence_json,created_at

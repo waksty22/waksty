@@ -60,6 +60,26 @@ def test_duplicate_evidence_does_not_increase_skill_level():
     assert profile["sens"]["reconnaissance_visuelle"]["level"] == 9
 
 
+def test_duplicate_proof_cannot_upgrade_score_with_repeated_submission():
+    proof = "Chappie a correctement identifié le même mot dans un exercice contrôlé."
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": proof,
+    }
+    rows = [
+        {"test_name": "mots:vocabulaire", "passed": 1, "score": 70,
+         "tested_at": "2026-11-01T10:00:00Z", "details": details},
+        {"test_name": "mots:vocabulaire", "passed": 1, "score": 100,
+         "tested_at": "2026-11-02T10:00:00Z", "details": details},
+    ]
+    profile, count = build_validated_skill_data(rows)
+    assert count == 1
+    assert profile["mots"]["vocabulaire"]["confidence"] == 1 / 3
+    # The earliest score is retained; a duplicate cannot raise the level.
+    assert profile["mots"]["vocabulaire"]["level"] == 7
+
+
 def test_failed_or_unapproved_assessment_is_ignored():
     rows = [
         {

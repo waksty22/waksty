@@ -2,9 +2,22 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from cognition.catalog import COGNITIVE_CATALOG
+
+MIN_EVIDENCE_LENGTH = 20
+MAX_EVIDENCE_LENGTH = 2000
+
+
+def _assessment_details(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+    return value if isinstance(value, dict) else None
 
 
 def build_validated_skill_data(
@@ -13,39 +26,62 @@ def build_validated_skill_data(
 ) -> tuple[dict[str, Any], int]:
     """Return engine-shaped branch data and the number of unique passing proofs.
 
-    Each row must come from a passing competency_tests record. Its details JSON
-    must explicitly identify a supervisor-approved supervised_assessment and
-    contain a non-empty evidence string. Duplicate evidence never adds levels.
+    A row must contain an exact branch key, a finite numeric passing score,
+    explicit supervisor approval, the supervised-assessment source, and
+    meaningful textual evidence. Invalid/coerced values are ignored.
     """
     source_catalog = catalog or COGNITIVE_CATALOG
     grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    if not isinstance(rows, list):
+        return {}, 0
+
     for row in rows:
-        try:
-            system_key, branch_key = str(row["test_name"]).split(":", 1)
-            details = row.get("details", {})
-            if isinstance(details, str):
-                details = json.loads(details or "{}")
-            if not isinstance(details, dict):
-                continue
-            score = float(row["score"])
-            passed = row.get("passed", 1)
-        except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+        if not isinstance(row, dict):
             continue
-        if system_key not in source_catalog or passed not in (1, True) or not 70 <= score <= 100:
+        test_name = row.get("test_name")
+        if not isinstance(test_name, str) or test_name.count(":") != 1:
             continue
+        system_key, branch_key = (part.strip() for part in test_name.split(":", 1))
+        if not system_key or not branch_key or system_key not in source_catalog:
+            continue
+
+        details = _assessment_details(row.get("details", {}))
+        if not isinstance(details, dict):
+            continue
+
+        raw_score = row.get("score")
+        if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
+            continue
+        score = float(raw_score)
+        if not math.isfinite(score) or not 70 <= score <= 100:
+            continue
+
+        passed = row.get("passed", 1)
+        if isinstance(passed, bool) or not isinstance(passed, int) or passed != 1:
+            continue
+
         branches = source_catalog[system_key].get("sub_branches", {})
-        if branch_key not in branches:
+        if not isinstance(branches, dict) or branch_key not in branches:
             continue
-        evidence = str(details.get("evidence", "")).strip()
+
+        evidence_value = details.get("evidence")
+        if not isinstance(evidence_value, str):
+            continue
+        evidence = evidence_value.strip()
+        if not MIN_EVIDENCE_LENGTH <= len(evidence) <= MAX_EVIDENCE_LENGTH:
+            continue
         if (
             details.get("supervisor_approved") is not True
             or details.get("source") != "supervised_assessment"
-            or not evidence
         ):
+            continue
+
+        tested_at = row.get("tested_at", "")
+        if not isinstance(tested_at, str):
             continue
         grouped.setdefault((system_key, branch_key), {})[evidence] = {
             "score": score,
-            "tested_at": str(row.get("tested_at", "")),
+            "tested_at": tested_at,
         }
 
     engine_data: dict[str, Any] = {}

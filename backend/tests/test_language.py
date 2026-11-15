@@ -246,3 +246,36 @@ def test_word_progression_rejects_invalid_state_without_updating(language_db, in
 def test_spoken_text_gate_rejects_invalid_word_limits(invalid_limit):
     with pytest.raises(ValueError, match="limite|entier"):
         gate_spoken_text("bonjour", {"bonjour"}, max_words=invalid_limit)
+
+
+@pytest.mark.parametrize("invalid_user_id", [None, "", "   ", 7, True, {}, []])
+def test_vocabulary_write_paths_reject_invalid_user_identity_without_writing(
+    language_db, invalid_user_id
+):
+    with pytest.raises(ValueError, match="Identifiant utilisateur"):
+        record_heard_word(language_db, invalid_user_id, "pomme")
+    with pytest.raises(ValueError, match="Identifiant utilisateur"):
+        record_heard_text(language_db, invalid_user_id, "bonjour")
+    from learning.language import record_explicit_word_teaching
+    with pytest.raises(ValueError, match="Identifiant utilisateur"):
+        record_explicit_word_teaching(
+            language_db, invalid_user_id, "pomme signifie un fruit"
+        )
+    assert language_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary"
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_user_id", [None, "", "   ", 7, True, {}, []])
+def test_vocabulary_read_and_progression_paths_reject_invalid_user_identity(
+    language_db, invalid_user_id
+):
+    from learning.language import list_vocabulary
+    for operation in (
+        lambda: advance_word(language_db, invalid_user_id, "pomme", "imitated"),
+        lambda: list_vocabulary(language_db, invalid_user_id),
+        lambda: get_usable_words(language_db, invalid_user_id),
+        lambda: get_repeatable_words(language_db, invalid_user_id),
+    ):
+        with pytest.raises(ValueError, match="Identifiant utilisateur"):
+            operation()

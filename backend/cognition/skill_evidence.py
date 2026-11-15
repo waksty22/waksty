@@ -32,7 +32,7 @@ def build_validated_skill_data(
     """
     source_catalog = COGNITIVE_CATALOG if catalog is None else catalog
     grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-    if not isinstance(rows, list):
+    if not isinstance(rows, list) or not isinstance(source_catalog, dict):
         return {}, 0
 
     for row in rows:
@@ -43,6 +43,9 @@ def build_validated_skill_data(
             continue
         system_key, branch_key = (part.strip() for part in test_name.split(":", 1))
         if not system_key or not branch_key or system_key not in source_catalog:
+            continue
+        system_info = source_catalog[system_key]
+        if not isinstance(system_info, dict):
             continue
 
         details = _assessment_details(row.get("details", {}))
@@ -60,7 +63,7 @@ def build_validated_skill_data(
         if isinstance(passed, bool) or not isinstance(passed, int) or passed != 1:
             continue
 
-        branches = source_catalog[system_key].get("sub_branches", {})
+        branches = system_info.get("sub_branches", {})
         if not isinstance(branches, dict) or branch_key not in branches:
             continue
 

@@ -202,3 +202,10 @@ def test_skill_profile_accepts_valid_json_details_but_deduplicates_evidence():
     profile, count = build_validated_skill_data([row, row])
     assert count == 1
     assert profile["tete"]["raisonnement_causal"]["confidence"] == 1 / 3
+
+
+def test_assessment_duplicate_guard_ignores_non_object_historical_details():
+    route = SERVER.split('@app.post("/api/cognition/skills/assessments")', 1)[1].split('@app.post("/api/skills/update")', 1)[0]
+    assert 'old_details = json.loads(row["details"] or "{}")' in route
+    assert "if not isinstance(old_details, dict):" in route
+    assert 'old_details.get("evidence") == evidence' in route

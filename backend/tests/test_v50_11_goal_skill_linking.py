@@ -131,3 +131,19 @@ def test_goal_skill_assessment_lookup_rejects_another_users_goal():
     except ValueError:
         pass
     db.close()
+
+
+
+def test_supervised_assessment_route_rejects_coerced_payload_values():
+    route = SERVER.split('@app.post("/api/cognition/skills/assessments")', 1)[1].split('@app.post("/api/skills/update")', 1)[0]
+    assert 'system_value = data.get("system", "")' in route
+    assert 'branch_value = data.get("branch", "")' in route
+    assert 'evidence_value = data.get("evidence", "")' in route
+    assert "all(isinstance(value, str)" in route
+    assert 'raw_score = data.get("score")' in route
+    assert 'not isinstance(raw_score, (int, float))' in route
+    assert 'isinstance(raw_score, bool)' in route
+    assert "goal_id = int(goal_id)" not in route
+    assert "goal_step_id = int(goal_step_id)" not in route
+    assert "isinstance(goal_id, bool)" in route
+    assert "isinstance(goal_step_id, bool)" in route

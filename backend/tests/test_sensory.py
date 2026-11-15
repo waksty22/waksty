@@ -70,7 +70,7 @@ def test_visual_association_requires_imitation_then_recognizes_word(db):
     assert row["state"] == "recognized"
 
 
-@pytest.mark.parametrize("invalid_evidence", [None, 7, True, {}, [], "   "])
+@pytest.mark.parametrize("invalid_evidence", [None, 7, True, {}, [], "   ", "x" * 501])
 def test_visual_association_rejects_non_text_or_blank_evidence(db, invalid_evidence):
     record_heard_word(db, "creator", "coq")
     advance_word(db, "creator", "coq", "imitated")

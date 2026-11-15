@@ -60,6 +60,31 @@ def test_duplicate_evidence_does_not_increase_skill_level():
     assert profile["sens"]["reconnaissance_visuelle"]["level"] == 9
 
 
+
+def test_duplicate_evidence_ignores_case_and_whitespace_variations():
+    rows = [
+        {
+            "test_name": "mots:vocabulaire", "passed": 1, "score": 90,
+            "tested_at": "2026-11-01T10:00:00Z",
+            "details": {
+                "source": "supervised_assessment", "supervisor_approved": True,
+                "evidence": "Chappie reconnaît correctement le mot appris.",
+            },
+        },
+        {
+            "test_name": "mots:vocabulaire", "passed": 1, "score": 100,
+            "tested_at": "2026-11-02T10:00:00Z",
+            "details": {
+                "source": "supervised_assessment", "supervisor_approved": True,
+                "evidence": "  CHAPPIE   RECONNAÎT correctement le mot appris.  ",
+            },
+        },
+    ]
+    profile, count = build_validated_skill_data(rows)
+    assert count == 1
+    assert profile["mots"]["vocabulaire"]["confidence"] == 1 / 3
+    assert profile["mots"]["vocabulaire"]["level"] == 9
+
 def test_duplicate_proof_cannot_upgrade_score_with_repeated_submission():
     proof = "Chappie a correctement identifié le même mot dans un exercice contrôlé."
     details = {

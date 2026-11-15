@@ -82,6 +82,23 @@ def test_duplicate_proof_cannot_upgrade_score_with_repeated_submission():
     assert profile["mots"]["vocabulaire"]["level"] == 7
 
 
+
+def test_explicitly_empty_catalog_does_not_fall_back_to_default():
+    rows = [{
+        "test_name": "mots:vocabulaire",
+        "passed": 1,
+        "score": 90,
+        "tested_at": "2026-11-03T10:00:00Z",
+        "details": {
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": "Chappie a répété correctement le mot observé.",
+        },
+    }]
+    profile, count = build_validated_skill_data(rows, catalog={})
+    assert profile == {}
+    assert count == 0
+
 def test_failed_or_unapproved_assessment_is_ignored():
     rows = [
         {

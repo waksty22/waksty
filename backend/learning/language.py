@@ -87,6 +87,8 @@ def record_heard_text(
         raise ValueError("Le texte entendu doit être une chaîne de caractères.")
     if not isinstance(evidence, str):
         raise ValueError("La preuve d'exposition doit être du texte.")
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
+        raise ValueError("La limite de mots doit être un entier positif.")
     tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
     recorded: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -220,8 +222,10 @@ def get_repeatable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
 
 def text_uses_only_allowed_words(text: str, allowed_words: set[str]) -> bool:
     """Return True only when a non-empty transcript uses known lexical items."""
+    if not isinstance(text, str):
+        return False
     tokens = re.findall(
-        r"[\wÀ-ÖØ-öø-ÿ'-]+", str(text or "").casefold(), flags=re.UNICODE
+        r"[\wÀ-ÖØ-öø-ÿ'-]+", text.casefold(), flags=re.UNICODE
     )
     return bool(tokens) and all(token in allowed_words for token in tokens)
 
@@ -232,7 +236,7 @@ def gate_spoken_text(
     max_words: int | None = None,
 ) -> str:
     """Filter lexical output; newborn mode can be restricted to isolated words."""
-    if not usable_words:
+    if not isinstance(text, str) or not usable_words:
         return ""
     tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+|[^\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
     output: list[str] = []

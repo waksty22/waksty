@@ -4675,8 +4675,8 @@ async def api_associate_visual_word(
         with db_connection() as db:
             result = associate_word_with_observation(
                 db, user_id,
-                str(data.get("word", "")),
-                str(data.get("observation_id", "")),
+                data.get("word", ""),
+                data.get("observation_id", ""),
                 data.get("evidence", ""),
             )
             word = result["word"]

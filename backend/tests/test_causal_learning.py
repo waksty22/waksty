@@ -139,3 +139,32 @@ def test_dashboard_is_scoped_to_user(db):
     assert list_causal_learning(db, "bob") == {
         "observations": [], "hypotheses": [], "experiments": []
     }
+
+
+
+@pytest.mark.parametrize("bad", [None, 7, True, {}, []])
+def test_observation_rejects_non_text_evidence_without_writing(db, bad):
+    with pytest.raises(ValueError):
+        record_observation(db, "creator", "événement", "résultat", evidence=bad)
+    assert db.execute("SELECT COUNT(*) FROM causal_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [True, False])
+def test_causal_confidence_rejects_boolean_values(db, bad):
+    with pytest.raises(ValueError):
+        record_observation(db, "creator", "événement", "résultat", confidence=bad)
+    assert db.execute("SELECT COUNT(*) FROM causal_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [None, "", "   ", 7, True, {}, []])
+def test_causal_observation_rejects_invalid_user_identity(db, bad):
+    with pytest.raises(ValueError):
+        record_observation(db, bad, "événement", "résultat")
+    assert db.execute("SELECT COUNT(*) FROM causal_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "5", None])
+def test_causal_review_rejects_invalid_limit(db, bad):
+    from learning.causal_learning import review_causal_learning
+    with pytest.raises(ValueError):
+        review_causal_learning(db, "creator", limit=bad)

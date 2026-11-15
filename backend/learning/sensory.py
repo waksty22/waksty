@@ -118,7 +118,7 @@ def associate_word_with_observation(
     user_id: str,
     word: str,
     observation_id: str,
-    evidence: str = "Association visuelle validée par le créateur",
+    evidence: str,
 ) -> dict[str, Any]:
     word = str(word or "").strip().casefold()
     if not word or len(word) > 80 or len(word.split()) != 1:

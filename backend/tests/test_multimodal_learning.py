@@ -151,3 +151,20 @@ def test_visual_association_rejects_unknown_or_other_users_observations(tmp_path
             )
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("invalid_content", [None, 7, True, {}, []])
+def test_sensory_observation_rejects_non_text_content_without_writing(
+    tmp_path, invalid_content
+):
+    db = open_db(tmp_path / "invalid-content.sqlite3")
+    try:
+        with pytest.raises(ValueError, match="contenu|texte"):
+            record_observation(
+                db, "creator", "vision", invalid_content, "camera"
+            )
+        assert db.execute(
+            "SELECT COUNT(*) FROM sensory_observations"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()

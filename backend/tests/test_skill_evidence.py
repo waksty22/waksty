@@ -119,6 +119,23 @@ def test_malformed_catalog_entries_are_ignored_safely():
         assert profile == {}
         assert count == 0
 
+
+def test_overflowing_persisted_score_is_ignored_without_crashing():
+    row = {
+        "test_name": "mots:vocabulaire",
+        "passed": 1,
+        "score": 10 ** 10000,
+        "tested_at": "2026-11-03T10:00:00Z",
+        "details": {
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": "Chappie a répété correctement le mot observé.",
+        },
+    }
+    profile, count = build_validated_skill_data([row])
+    assert profile == {}
+    assert count == 0
+
 def test_failed_or_unapproved_assessment_is_ignored():
     rows = [
         {

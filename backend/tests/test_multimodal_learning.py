@@ -90,7 +90,7 @@ def test_audio_vision_cooccurrence_is_only_a_candidate_until_validated(tmp_path)
 
 @pytest.mark.parametrize(
     "confidence",
-    [None, "not-a-number", float("inf"), float("nan")],
+    [None, "not-a-number", float("inf"), float("nan"), True, False],
 )
 def test_sensory_observation_rejects_invalid_confidence_without_writing(
     tmp_path, confidence

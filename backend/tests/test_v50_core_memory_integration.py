@@ -201,3 +201,13 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
     assert "format_shared_brain_context" in identity_source
     assert "retrieve_acquired_knowledge" in identity_source
     assert "format_acquired_knowledge_context" in identity_source
+
+    # Both entrypoints must feed confirmed user text into the same durable
+    # vocabulary table, while keeping lexical exposure distinct from mastery.
+    chat_brain_source = inspect.getsource(server.run_brain)
+    assert "record_heard_text(" in chat_brain_source
+    assert "Message écrit reçu par le chat classique" in chat_brain_source
+    assert "record_heard_text(" in live_source
+    assert "Transcription confirmée par Gemini Live" in live_source
+    assert "record_explicit_word_teaching(" in chat_brain_source
+    assert "record_explicit_word_teaching(" in live_source

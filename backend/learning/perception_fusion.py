@@ -49,6 +49,10 @@ def link_temporally_cooccurring_observation(
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
 ) -> list[dict[str, Any]]:
     """Create cautious cross-modal candidates around one new observation."""
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    if not isinstance(observation_id, str) or not observation_id.strip():
+        raise ValueError("Identifiant d’observation invalide.")
     if isinstance(window_seconds, bool) or not isinstance(window_seconds, int):
         raise ValueError("La fenêtre temporelle doit être un entier.")
     window = max(1, min(window_seconds, MAX_WINDOW_SECONDS))
@@ -122,6 +126,8 @@ def link_temporally_cooccurring_observation(
 def list_perception_fusions(
     db: sqlite3.Connection, user_id: str, limit: int = 50
 ) -> list[dict[str, Any]]:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise ValueError("La limite doit être un entier.")
     limit = max(1, min(limit, 100))

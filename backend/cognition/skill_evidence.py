@@ -55,7 +55,10 @@ def build_validated_skill_data(
         raw_score = row.get("score")
         if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
             continue
-        score = float(raw_score)
+        try:
+            score = float(raw_score)
+        except (OverflowError, TypeError, ValueError):
+            continue
         if not math.isfinite(score) or not 70 <= score <= 100:
             continue
 

@@ -288,3 +288,24 @@ def test_supervised_skill_profile_rebuilds_after_database_restart(tmp_path):
     branch = restored_profile["systems"]["mots"]["sub_branches"]["vocabulaire"]
     assert branch["confidence"] == 1.0
     assert branch["level"] == 24
+
+
+def test_skill_assessment_route_rejects_overflowing_score_with_422(monkeypatch):
+    import asyncio
+    import server
+    from fastapi import HTTPException
+
+    class FakeRequest:
+        async def json(self):
+            return {
+                "system": "mots",
+                "branch": "vocabulaire",
+                "evidence": "Chappie a correctement répété le mot observé.",
+                "supervisor_approved": True,
+                "score": 10 ** 10000,
+            }
+
+    monkeypatch.setattr(server, "_authenticated_user", lambda auth: "owner")
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(server.api_record_skill_assessment(FakeRequest(), auth="creator"))
+    assert error.value.status_code == 422

@@ -158,7 +158,7 @@ def advance_word(
     evidence: str = "",
 ) -> dict[str, Any]:
     clean = normalize_word(word)
-    if target_state not in STATE_RANK:
+    if not isinstance(target_state, str) or target_state not in STATE_RANK:
         raise ValueError("État d'apprentissage invalide.")
     if not isinstance(meaning, str):
         raise ValueError("La définition doit être du texte.")
@@ -236,6 +236,10 @@ def gate_spoken_text(
     max_words: int | None = None,
 ) -> str:
     """Filter lexical output; newborn mode can be restricted to isolated words."""
+    if max_words is not None and (
+        isinstance(max_words, bool) or not isinstance(max_words, int) or max_words < 1
+    ):
+        raise ValueError("La limite de mots doit être un entier positif.")
     if not isinstance(text, str) or not usable_words:
         return ""
     tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+|[^\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)

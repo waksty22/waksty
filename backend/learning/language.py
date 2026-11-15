@@ -158,7 +158,11 @@ def advance_word(
     clean = normalize_word(word)
     if target_state not in STATE_RANK:
         raise ValueError("État d'apprentissage invalide.")
-    meaning = (meaning or "").strip()
+    if not isinstance(meaning, str):
+        raise ValueError("La définition doit être du texte.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve de progression doit être du texte.")
+    meaning = meaning.strip()
     if len(meaning) > MAX_MEANING_LENGTH:
         raise ValueError("La définition est trop longue.")
     row = db.execute(

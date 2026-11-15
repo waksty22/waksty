@@ -3851,9 +3851,14 @@ async def api_cognitive_skill_catalog(auth=Depends(require_auth)):
 async def api_record_skill_assessment(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
     data = await request.json()
-    system_key = str(data.get("system", "")).strip()
-    branch_key = str(data.get("branch", "")).strip()
-    evidence = str(data.get("evidence", "")).strip()
+    system_value = data.get("system", "")
+    branch_value = data.get("branch", "")
+    evidence_value = data.get("evidence", "")
+    if not all(isinstance(value, str) for value in (system_value, branch_value, evidence_value)):
+        raise HTTPException(status_code=422, detail="Système, sous-compétence et preuve doivent être du texte.")
+    system_key = system_value.strip()
+    branch_key = branch_value.strip()
+    evidence = evidence_value.strip()
     if system_key not in COGNITIVE_CATALOG:
         raise HTTPException(status_code=422, detail="Système cognitif inconnu.")
     branches = COGNITIVE_CATALOG[system_key].get("sub_branches", {})
@@ -3863,10 +3868,10 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
         raise HTTPException(status_code=403, detail="Une validation explicite du superviseur est obligatoire.")
     if len(evidence) < 20 or len(evidence) > 2000:
         raise HTTPException(status_code=422, detail="Décris une preuve concrète (20 à 2000 caractères).")
-    try:
-        score = float(data.get("score"))
-    except (TypeError, ValueError):
+    raw_score = data.get("score")
+    if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
         raise HTTPException(status_code=422, detail="Score invalide.")
+    score = float(raw_score)
     if not math.isfinite(score) or not 0 <= score <= 100:
         raise HTTPException(status_code=422, detail="Le score doit être compris entre 0 et 100.")
     test_name = system_key + ":" + branch_key
@@ -3875,10 +3880,10 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
     if (goal_id is None) != (goal_step_id is None):
         raise HTTPException(status_code=422, detail="Pour relier une évaluation à un objectif, indique aussi l'étape concernée.")
     if goal_id is not None:
-        try:
-            goal_id = int(goal_id)
-            goal_step_id = int(goal_step_id)
-        except (TypeError, ValueError, OverflowError):
+        if (
+            isinstance(goal_id, bool) or not isinstance(goal_id, int) or goal_id < 1
+            or isinstance(goal_step_id, bool) or not isinstance(goal_step_id, int) or goal_step_id < 1
+        ):
             raise HTTPException(status_code=422, detail="Identifiants d'objectif ou d'étape invalides.")
         with db_connection() as db:
             linked_step = db.execute(

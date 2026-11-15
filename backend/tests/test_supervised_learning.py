@@ -113,3 +113,31 @@ def test_dashboard_is_scoped_to_user(db):
     state = list_imitation_learning(db, "bob")
     assert state["examples"] == []
     assert state["total"] == 0
+
+
+
+@pytest.mark.parametrize("bad", [None, "", "   ", 7, True, {}, []])
+def test_demonstration_rejects_invalid_user_id_without_writing(db, bad):
+    with pytest.raises(ValueError):
+        record_demonstration(db, bad, "saluer", "preuve")
+    assert db.execute("SELECT COUNT(*) FROM imitation_examples").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [None, 7, True, {}, []])
+def test_demonstration_rejects_non_text_context_without_writing(db, bad):
+    with pytest.raises(ValueError):
+        record_demonstration(db, "creator", "saluer", "preuve", context=bad)
+    assert db.execute("SELECT COUNT(*) FROM imitation_examples").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "1", None])
+def test_practice_rejects_invalid_example_id(db, bad):
+    with pytest.raises(ValueError):
+        record_practice(db, "creator", bad, "résultat", "preuve", True)
+    assert db.execute("SELECT COUNT(*) FROM imitation_attempts").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "10", None])
+def test_imitation_listing_rejects_invalid_limit(db, bad):
+    with pytest.raises(ValueError):
+        list_imitation_learning(db, "creator", limit=bad)

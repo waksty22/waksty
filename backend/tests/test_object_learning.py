@@ -14,6 +14,9 @@ from learning.object_learning import (
     compare_known_objects,
     record_object_experience,
 )
+from learning.sensory import (
+    init_sensory_tables, record_observation, associate_word_with_observation,
+)
 from world.world_model import init_world_tables, upsert_world_entity
 
 
@@ -23,15 +26,27 @@ def db():
     connection.row_factory = sqlite3.Row
     init_language_tables(connection)
     init_world_tables(connection)
+    init_sensory_tables(connection)
     init_object_learning_tables(connection)
     yield connection
     connection.close()
+
+
+def validate_visual_association(db, word):
+    observation = record_observation(
+        db, "creator", "vision", f"image de {word}", "camera_frame", 0.9
+    )
+    associate_word_with_observation(
+        db, "creator", word, observation["observation_id"],
+        "Association visuelle explicitement validée",
+    )
 
 
 def add_recognized_object(db, word):
     record_heard_word(db, "creator", word)
     advance_word(db, "creator", word, "imitated")
     advance_word(db, "creator", word, "recognized")
+    validate_visual_association(db, word)
     upsert_world_entity(
         db, "creator", "object:" + word, "object",
         {"label": word}, source_type="taught", confidence=0.65,
@@ -48,6 +63,7 @@ def test_object_properties_require_recognized_word_and_visual_entity(db):
         teach_object_property(db, "creator", "pomme", "couleur", "rouge")
 
     advance_word(db, "creator", "pomme", "recognized")
+    validate_visual_association(db, "pomme")
     upsert_world_entity(
         db, "creator", "object:pomme", "object",
         {"label": "pomme"}, source_type="taught", confidence=0.65,

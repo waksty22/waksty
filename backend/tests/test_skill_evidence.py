@@ -107,3 +107,76 @@ def test_three_distinct_supervised_proofs_unlock_full_score_level():
     assert count == 3
     assert profile["mots"]["vocabulaire"]["confidence"] == 1.0
     assert profile["mots"]["vocabulaire"]["level"] == 24
+
+
+
+def test_supervised_skill_profile_rebuilds_after_database_restart(tmp_path):
+    import sqlite3
+
+    from cognition.engine import CognitiveEngine
+    from learning.curriculum import init_learning_tables, evaluate_competency_test
+
+    database_path = tmp_path / "chappie-learning.sqlite3"
+    proof_rows = [
+        "Chappie distingue correctement le mot prononcé pendant le premier exercice.",
+        "Chappie répète le mot correctement dans un contexte différent.",
+        "Chappie reconnaît et réutilise le mot sans aide supplémentaire.",
+    ]
+
+    first_connection = sqlite3.connect(database_path)
+    first_connection.row_factory = sqlite3.Row
+    try:
+        init_learning_tables(first_connection)
+        for index, proof in enumerate(proof_rows):
+            evaluate_competency_test(
+                first_connection,
+                "owner",
+                "mots:vocabulaire",
+                True,
+                80 + index,
+                {
+                    "source": "supervised_assessment",
+                    "supervisor_approved": True,
+                    "evidence": proof,
+                },
+            )
+        first_connection.commit()
+        persisted_rows = [
+            dict(row)
+            for row in first_connection.execute(
+                """SELECT test_name, passed, score, details, tested_at
+                   FROM competency_tests WHERE user_id=?
+                   ORDER BY tested_at ASC, id ASC""",
+                ("owner",),
+            ).fetchall()
+        ]
+    finally:
+        first_connection.close()
+
+    # Simule un nouveau processus : la connexion et le cache cognitif repartent de zéro.
+    second_connection = sqlite3.connect(database_path)
+    second_connection.row_factory = sqlite3.Row
+    try:
+        restored_rows = [
+            dict(row)
+            for row in second_connection.execute(
+                """SELECT test_name, passed, score, details, tested_at
+                   FROM competency_tests WHERE user_id=?
+                   ORDER BY tested_at ASC, id ASC""",
+                ("owner",),
+            ).fetchall()
+        ]
+    finally:
+        second_connection.close()
+
+    assert restored_rows == persisted_rows
+    restored_skill_data, evidence_count = build_validated_skill_data(restored_rows)
+    assert evidence_count == 3
+
+    restarted_engine = CognitiveEngine(cache_ttl=3600)
+    restored_profile = restarted_engine.compute_cognitive_profile(
+        "owner", restored_skill_data, force_recompute=True,
+    )
+    branch = restored_profile["systems"]["mots"]["sub_branches"]["vocabulaire"]
+    assert branch["confidence"] == 1.0
+    assert branch["level"] == 24

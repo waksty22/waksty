@@ -176,6 +176,62 @@ def main():
                     z.extractall(root/"unpacked")
                 enc=root/"unpacked"/"chappie-turso.json.enc"
                 need(verify_encrypted_logical_backup(enc,key).get("valid") is True,"Independent archive verification failed.")
+
+                # A valid restore must refuse a populated database without
+                # changing even one row. Exercise that guard on real Turso.
+                guard_client, guard_tx = open_guarded_restore_transaction(
+                    url, token, expected_target_identity=EXPECTED,
+                    production_identity=production,
+                )
+                try:
+                    guard_connection = HranaRestoreConnection(guard_tx)
+                    try:
+                        restore_encrypted_logical_backup(
+                            guard_connection, enc, key,
+                            target_identity=target,
+                            expected_target_identity=EXPECTED,
+                            production_identity=production,
+                        )
+                    except PermissionError as exc:
+                        need(
+                            "n'est pas vide" in str(exc).lower(),
+                            "Populated-target restore failed for an unexpected reason.",
+                        )
+                        guard_tx.rollback()
+                        print("E2E_STAGE populated_target_refusal_verified", flush=True)
+                    else:
+                        guard_tx.rollback()
+                        raise RuntimeError("Restore unexpectedly accepted a populated Turso target.")
+                except Exception:
+                    if guard_tx._active:
+                        guard_tx.rollback()
+                    raise
+                finally:
+                    guard_client.close()
+
+                # Reopen again and prove the rejected operation preserved data.
+                client.close()
+                client = HranaHttpClient(url, token, timeout=60)
+                preserve_tx = client.transaction()
+                try:
+                    preserve_check = HranaRestoreConnection(preserve_tx)
+                    for t in tables:
+                        count = preserve_check.execute(
+                            f"SELECT COUNT(*) FROM {q(t)}"
+                        ).fetchone()[0]
+                        need(
+                            count == len(rows[t]),
+                            f"Populated-target refusal changed row count in {t}.",
+                        )
+                    preserve_tx.commit()
+                    print(
+                        f"E2E_STAGE populated_target_preserved tables={len(tables)} rows={total}",
+                        flush=True,
+                    )
+                except Exception:
+                    preserve_tx.rollback()
+                    raise
+
                 print("E2E_STAGE backup_verified_drop_start", flush=True)
                 drop(client,names,table_dependencies); created=False
                 print("E2E_STAGE drop_complete_restore_start", flush=True)

@@ -105,3 +105,48 @@ def test_newborn_chat_falls_back_to_one_word_heard_in_current_message(language_d
     assert gate_spoken_text("...", allowed, max_words=1) == ""
     assert imitation_fallback == "Bonjour"
     assert text_uses_only_allowed_words(imitation_fallback, allowed)
+
+
+def test_chat_and_live_lexical_exposure_share_persistent_user_vocabulary(tmp_path):
+    """Confirmed text from both modalities survives a fresh DB connection."""
+    database_path = tmp_path / "shared-vocabulary.sqlite3"
+
+    def connect():
+        db = sqlite3.connect(database_path)
+        db.row_factory = sqlite3.Row
+        init_language_tables(db)
+        return db
+
+    first = connect()
+    try:
+        record_heard_text(
+            first,
+            "creator",
+            "La chaussure est ici.",
+            evidence="Message écrit reçu par le chat classique",
+        )
+        record_heard_text(
+            first,
+            "creator",
+            "La chaussure est là, voici le vélo.",
+            evidence="Transcription confirmée par Gemini Live",
+        )
+        first.commit()
+    finally:
+        first.close()
+
+    reopened = connect()
+    try:
+        vocabulary = {
+            item["word"]: item
+            for item in __import__("learning.language", fromlist=["list_vocabulary"])
+            .list_vocabulary(reopened, "creator")
+        }
+        assert {"la", "chaussure", "est", "ici", "là", "voici", "le", "vélo"} <= set(vocabulary)
+        assert vocabulary["chaussure"]["exposure_count"] == 2
+        assert vocabulary["chaussure"]["state"] == "heard"
+        assert get_repeatable_words(reopened, "creator") >= {"chaussure", "vélo"}
+        assert get_usable_words(reopened, "creator") == set()
+        assert get_repeatable_words(reopened, "another-user") == set()
+    finally:
+        reopened.close()

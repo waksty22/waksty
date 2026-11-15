@@ -123,7 +123,9 @@ def associate_word_with_observation(
     word = str(word or "").strip().casefold()
     if not word or len(word) > 80 or len(word.split()) != 1:
         raise ValueError("Indique un seul mot valide.")
-    evidence = str(evidence or "").strip()
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve de validation visuelle doit être un texte explicite.")
+    evidence = evidence.strip()
     if not evidence or len(evidence) > 500:
         raise ValueError("Décris la validation visuelle (1 à 500 caractères).")
     observation = db.execute(

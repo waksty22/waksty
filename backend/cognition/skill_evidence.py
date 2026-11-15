@@ -30,7 +30,7 @@ def build_validated_skill_data(
     explicit supervisor approval, the supervised-assessment source, and
     meaningful textual evidence. Invalid/coerced values are ignored.
     """
-    source_catalog = catalog or COGNITIVE_CATALOG
+    source_catalog = COGNITIVE_CATALOG if catalog is None else catalog
     grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     if not isinstance(rows, list):
         return {}, 0

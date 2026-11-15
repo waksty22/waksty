@@ -54,7 +54,7 @@ def test_visual_association_requires_imitation_then_recognizes_word(db):
     )
     with pytest.raises(ValueError):
         associate_word_with_observation(
-            db, "creator", "coq", observation["observation_id"]
+            db, "creator", "coq", observation["observation_id"], "Test de validation visuelle explicite"
         )
 
     advance_word(db, "creator", "coq", "imitated")
@@ -75,5 +75,5 @@ def test_observations_are_isolated_by_user(db):
     )
     with pytest.raises(ValueError):
         associate_word_with_observation(
-            db, "other", "objet", observation["observation_id"]
+            db, "other", "objet", observation["observation_id"], "Test d’isolation utilisateur"
         )

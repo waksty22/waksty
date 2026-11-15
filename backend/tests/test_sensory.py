@@ -91,3 +91,62 @@ def test_observations_are_isolated_by_user(db):
         associate_word_with_observation(
             db, "other", "objet", observation["observation_id"], "Test d’isolation utilisateur"
         )
+
+
+@pytest.mark.parametrize("invalid_modality", [None, 7, True, {}, []])
+def test_observation_rejects_invalid_modality_without_writing(db, invalid_modality):
+    with pytest.raises(ValueError, match="Modalité"):
+        record_observation(
+            db, "creator", invalid_modality, "Un son", "microphone"
+        )
+    assert db.execute("SELECT COUNT(*) FROM sensory_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_source", [None, 7, True, {}, [], "", "x" * 81])
+def test_observation_rejects_invalid_source_without_writing(db, invalid_source):
+    with pytest.raises(ValueError, match="source"):
+        record_observation(
+            db, "creator", "audio", "Un son", invalid_source
+        )
+    assert db.execute("SELECT COUNT(*) FROM sensory_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_metadata", [[], "texte", 7, True, float("nan"), {"x": float("inf")}])
+def test_observation_rejects_invalid_metadata_without_writing(db, invalid_metadata):
+    with pytest.raises(ValueError, match="métadonnées"):
+        record_observation(
+            db, "creator", "vision", "Objet", "camera", metadata=invalid_metadata
+        )
+    assert db.execute("SELECT COUNT(*) FROM sensory_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_limit", [None, "10", 1.5, True, False, 0, -1, {}])
+def test_list_observations_rejects_invalid_limit(db, invalid_limit):
+    with pytest.raises(ValueError, match="limite"):
+        list_observations(db, "creator", invalid_limit)
+
+
+def test_list_observations_returns_object_for_malformed_or_non_object_metadata(db):
+    observation = record_observation(
+        db, "creator", "vision", "Objet", "camera"
+    )
+    db.execute(
+        "UPDATE sensory_observations SET metadata_json='[]' WHERE observation_id=?",
+        (observation["observation_id"],),
+    )
+    assert list_observations(db, "creator")[0]["metadata"] == {}
+
+
+@pytest.mark.parametrize("invalid_word", [None, 7, True, {}, []])
+def test_visual_association_rejects_non_text_word_without_writing(db, invalid_word):
+    record_heard_word(db, "creator", "coq")
+    advance_word(db, "creator", "coq", "imitated")
+    observation = record_observation(
+        db, "creator", "vision", "Un animal", "camera"
+    )
+    with pytest.raises(ValueError, match="mot"):
+        associate_word_with_observation(
+            db, "creator", invalid_word, observation["observation_id"],
+            "Validation explicite du mot"
+        )
+    assert db.execute("SELECT COUNT(*) FROM word_visual_associations").fetchone()[0] == 0

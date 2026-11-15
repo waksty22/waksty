@@ -63,11 +63,15 @@ def test_object_properties_require_recognized_word_and_visual_entity(db):
         teach_object_property(db, "creator", "pomme", "couleur", "rouge")
 
     advance_word(db, "creator", "pomme", "recognized")
-    validate_visual_association(db, "pomme")
     upsert_world_entity(
         db, "creator", "object:pomme", "object",
         {"label": "pomme"}, source_type="taught", confidence=0.65,
     )
+    # A world entity alone must not bypass explicit sensory validation.
+    with pytest.raises(ValueError, match="valide son association visuelle"):
+        teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+
+    validate_visual_association(db, "pomme")
     learned = teach_object_property(
         db, "creator", "pomme", "couleur", "rouge",
         evidence="Le créateur lui montre une pomme rouge.",

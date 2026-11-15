@@ -4723,10 +4723,10 @@ async def api_teach_object_property(
         with db_connection() as db:
             result = teach_object_property(
                 db, user_id,
-                str(data.get("word", "")),
-                str(data.get("property", "")),
-                str(data.get("value", "")),
-                evidence=str(data.get("evidence", "Enseignement du créateur")),
+                data.get("word", ""),
+                data.get("property", ""),
+                data.get("value", ""),
+                evidence=data.get("evidence", ""),
                 confidence=data.get("confidence", 0.9),
                 source_type="taught",
             )
@@ -4759,10 +4759,10 @@ async def api_record_object_experience(
         with db_connection() as db:
             result = record_object_experience(
                 db, user_id,
-                str(data.get("word", "")),
-                str(data.get("action", "")),
-                str(data.get("outcome", "")),
-                evidence=str(data.get("evidence", "Expérience supervisée")),
+                data.get("word", ""),
+                data.get("action", ""),
+                data.get("outcome", ""),
+                evidence=data.get("evidence", ""),
                 confidence=data.get("confidence", 0.6),
                 source_type="observed",
             )
@@ -4783,8 +4783,8 @@ async def api_compare_known_objects(
         with db_connection() as db:
             comparison = compare_known_objects(
                 db, user_id,
-                str(data.get("first", "")),
-                str(data.get("second", "")),
+                data.get("first", ""),
+                data.get("second", ""),
             )
         return {"ok": True, "comparison": comparison}
     except (ValueError, PermissionError) as exc:

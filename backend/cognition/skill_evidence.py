@@ -101,7 +101,7 @@ def build_validated_skill_data(
         else:
             existing_date = existing["tested_at"]
             if tested_at and (not existing_date or tested_at < existing_date):
-                evidence_map[evidence] = candidate
+                evidence_map[evidence_key] = candidate
 
     engine_data: dict[str, Any] = {}
     total = 0

@@ -143,11 +143,11 @@ def test_visual_association_rejects_unknown_or_other_users_observations(tmp_path
         )
         with pytest.raises(ValueError):
             associate_word_with_observation(
-                db, "another-user", "coq", observation["observation_id"]
+                db, "another-user", "coq", observation["observation_id"], "Test d’isolation utilisateur"
             )
         with pytest.raises(ValueError):
             associate_word_with_observation(
-                db, "creator", "inconnu", observation["observation_id"]
+                db, "creator", "inconnu", observation["observation_id"], "Test de mot inconnu"
             )
     finally:
         db.close()

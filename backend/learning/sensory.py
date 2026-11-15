@@ -63,7 +63,10 @@ def record_observation(
     content = str(content or "").strip()
     if not content or len(content) > 12000:
         raise ValueError("Observation vide ou trop longue.")
-    confidence = float(confidence)
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Confiance sensorielle invalide.") from exc
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("La confiance doit être comprise entre 0 et 1.")
     metadata_json = json.dumps(metadata or {}, ensure_ascii=False, allow_nan=False)

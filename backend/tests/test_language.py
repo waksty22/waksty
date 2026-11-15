@@ -150,3 +150,34 @@ def test_chat_and_live_lexical_exposure_share_persistent_user_vocabulary(tmp_pat
         assert get_repeatable_words(reopened, "another-user") == set()
     finally:
         reopened.close()
+
+
+@pytest.mark.parametrize("invalid_text", [None, 7, True, {}, []])
+def test_heard_text_rejects_non_text_input_without_writing(language_db, invalid_text):
+    with pytest.raises(ValueError, match="texte|chaîne"):
+        record_heard_text(language_db, "creator", invalid_text)
+    assert language_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary"
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_text", [None, 7, True, {}, []])
+def test_explicit_teaching_rejects_non_text_input_without_writing(language_db, invalid_text):
+    from learning.language import record_explicit_word_teaching
+
+    with pytest.raises(ValueError, match="texte|chaîne"):
+        record_explicit_word_teaching(language_db, "creator", invalid_text)
+    assert language_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary"
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_evidence", [None, 7, True, {}, []])
+def test_heard_word_rejects_non_text_evidence_without_writing(language_db, invalid_evidence):
+    with pytest.raises(ValueError, match="preuve|texte"):
+        record_heard_word(
+            language_db, "creator", "pomme", evidence=invalid_evidence
+        )
+    assert language_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary"
+    ).fetchone()[0] == 0

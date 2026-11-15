@@ -150,6 +150,11 @@ def test_supervised_skill_profile_rebuilds_after_database_restart(tmp_path):
                 ("owner",),
             ).fetchall()
         ]
+        initial_skill_data, initial_count = build_validated_skill_data(persisted_rows)
+        initial_engine = CognitiveEngine(cache_ttl=3600)
+        initial_profile = initial_engine.compute_cognitive_profile(
+            "owner", initial_skill_data, force_recompute=True,
+        )
     finally:
         first_connection.close()
 
@@ -171,12 +176,14 @@ def test_supervised_skill_profile_rebuilds_after_database_restart(tmp_path):
 
     assert restored_rows == persisted_rows
     restored_skill_data, evidence_count = build_validated_skill_data(restored_rows)
-    assert evidence_count == 3
+    assert initial_count == evidence_count == 3
 
     restarted_engine = CognitiveEngine(cache_ttl=3600)
     restored_profile = restarted_engine.compute_cognitive_profile(
         "owner", restored_skill_data, force_recompute=True,
     )
+    assert restored_profile["global_maturity"] == initial_profile["global_maturity"]
+    assert restored_profile["systems"] == initial_profile["systems"]
     branch = restored_profile["systems"]["mots"]["sub_branches"]["vocabulaire"]
     assert branch["confidence"] == 1.0
     assert branch["level"] == 24

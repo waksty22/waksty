@@ -84,6 +84,20 @@ def _require_known_object(
             "Chappie doit d'abord avoir imité puis reconnu ce mot."
         )
     object_id = "object:" + word
+    association = db.execute(
+        """SELECT 1
+           FROM word_visual_associations a
+           JOIN sensory_observations o
+             ON o.observation_id = a.observation_id
+           WHERE a.user_id=? AND a.word=?
+             AND o.user_id=a.user_id AND o.modality='vision'
+           LIMIT 1""",
+        (user_id, word),
+    ).fetchone()
+    if association is None:
+        raise ValueError(
+            "Montre d'abord cet objet à Chappie et valide son association visuelle."
+        )
     entity = db.execute(
         """SELECT id FROM world_entities
            WHERE id=? AND user_id=? AND entity_type='object'""",

@@ -144,3 +144,51 @@ def test_real_libsql_cursor_reports_dml_rowcount(tmp_path):
         connection.commit()
     finally:
         connection.close()
+
+
+
+def test_real_libsql_dml_rowcount_matches_sqlite_dbapi(tmp_path):
+    """Verify DML rowcount on the native driver used by the opt-in backend."""
+    libsql = pytest.importorskip("libsql")
+    database_path = tmp_path / "rowcount-contract.db"
+    connection = adapt_libsql_connection(
+        libsql.connect(database=str(database_path))
+    )
+
+    try:
+        connection.execute(
+            "CREATE TABLE rowcount_probe "
+            "(id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
+        )
+        connection.commit()
+
+        inserted = connection.execute(
+            "INSERT INTO rowcount_probe(label) VALUES (?)",
+            ("first",),
+        )
+        assert inserted.rowcount == 1
+        assert inserted.lastrowid == 1
+        connection.commit()
+
+        updated = connection.execute(
+            "UPDATE rowcount_probe SET label=? WHERE id=?",
+            ("updated", 1),
+        )
+        assert updated.rowcount == 1
+        connection.commit()
+
+        unmatched = connection.execute(
+            "UPDATE rowcount_probe SET label=? WHERE id=?",
+            ("missing", 999),
+        )
+        assert unmatched.rowcount == 0
+        connection.commit()
+
+        deleted = connection.execute(
+            "DELETE FROM rowcount_probe WHERE id=?",
+            (1,),
+        )
+        assert deleted.rowcount == 1
+        connection.commit()
+    finally:
+        connection.close()

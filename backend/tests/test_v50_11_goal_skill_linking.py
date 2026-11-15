@@ -171,6 +171,9 @@ def test_skill_profile_rejects_coerced_scores_pass_flags_and_evidence():
     }.items():
         for value in values:
             invalid_rows.append({**base, field: value})
+    missing_pass_flag = dict(base)
+    missing_pass_flag.pop("passed")
+    invalid_rows.append(missing_pass_flag)
     for value in (None, 7, True, {}, [], "trop court"):
         invalid_rows.append({
             **base,

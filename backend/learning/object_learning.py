@@ -80,6 +80,8 @@ def _clean_optional_evidence(evidence: str) -> str:
 def _require_known_object(
     db: sqlite3.Connection, user_id: str, word: str
 ) -> tuple[str, str]:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
     word = _clean(word, "Mot", 80).casefold()
     vocab = db.execute(
         """SELECT state FROM personal_vocabulary
@@ -135,7 +137,7 @@ def teach_object_property(
         raise ValueError("Type de propriété non autorisé.")
     value = _clean(property_value, "Valeur", MAX_VALUE_LENGTH)
     evidence = _clean_optional_evidence(evidence)
-    if source_type not in {"taught", "observed", "confirmed"}:
+    if not isinstance(source_type, str) or source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
     if isinstance(confidence, bool):
         raise ValueError("Confiance invalide.")
@@ -168,6 +170,8 @@ def teach_object_property(
 
 
 def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
     objects = db.execute(
         """SELECT e.id, e.properties_json
            FROM world_entities e

@@ -48,7 +48,8 @@ def test_language_perception_object_and_imitation_share_libsql_connection():
             "local_test_image", confidence=0.8,
         )
         association = associate_word_with_observation(
-            db, "owner", "pomme", observation["observation_id"]
+            db, "owner", "pomme", observation["observation_id"],
+            "Validation visuelle explicite du test",
         )
         assert association["vocabulary_state"] == "recognized"
 

@@ -162,6 +162,7 @@ def test_object_properties_are_blocked_before_visual_validation(tmp_path):
     db = open_db(tmp_path / "gated-object.sqlite3")
     try:
         record_heard_word(db, "creator", "vélo", "Transcription confirmée")
+        advance_word(db, "creator", "vélo", "imitated")
         advance_word(db, "creator", "vélo", "recognized")
         # Even an imitated word is not yet an object Chappie may describe.
         with pytest.raises(ValueError, match="valide son association visuelle"):

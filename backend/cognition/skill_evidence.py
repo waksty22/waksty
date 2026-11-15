@@ -79,13 +79,20 @@ def build_validated_skill_data(
         tested_at = row.get("tested_at", "")
         if not isinstance(tested_at, str):
             continue
-        # Keep the first chronological result for an exact proof.
+        # Keep the earliest dated result for an exact proof, regardless
+        # of input order. If legacy rows have no timestamp, prefer a dated
+        # result; if both are undated, retain the first encountered result.
         # Re-submitting identical evidence with a higher score must not
         # silently upgrade the skill; independent evidence is required.
-        grouped.setdefault((system_key, branch_key), {}).setdefault(evidence, {
-            "score": score,
-            "tested_at": tested_at,
-        })
+        evidence_map = grouped.setdefault((system_key, branch_key), {})
+        existing = evidence_map.get(evidence)
+        candidate = {"score": score, "tested_at": tested_at}
+        if existing is None:
+            evidence_map[evidence] = candidate
+        else:
+            existing_date = existing["tested_at"]
+            if tested_at and (not existing_date or tested_at < existing_date):
+                evidence_map[evidence] = candidate
 
     engine_data: dict[str, Any] = {}
     total = 0

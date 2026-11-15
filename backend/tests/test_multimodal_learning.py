@@ -88,6 +88,30 @@ def test_audio_vision_cooccurrence_is_only_a_candidate_until_validated(tmp_path)
         reopened.close()
 
 
+def test_visual_association_requires_nonempty_validation_evidence(tmp_path):
+    db = open_db(tmp_path / "validation-evidence.sqlite3")
+    try:
+        record_heard_word(db, "creator", "pomme")
+        advance_word(db, "creator", "pomme", "imitated")
+        observation = record_observation(
+            db, "creator", "vision", "forme rouge", "camera"
+        )
+        with pytest.raises(ValueError, match="validation visuelle"):
+            associate_word_with_observation(
+                db, "creator", "pomme", observation["observation_id"], evidence="   "
+            )
+        assert db.execute(
+            "SELECT COUNT(*) FROM word_visual_associations"
+        ).fetchone()[0] == 0
+        association = associate_word_with_observation(
+            db, "creator", "pomme", observation["observation_id"],
+            evidence="Le Créateur confirme que l'image montre une pomme.",
+        )
+        assert association["association_saved"] is True
+    finally:
+        db.close()
+
+
 def test_visual_association_rejects_unknown_or_other_users_observations(tmp_path):
     db = open_db(tmp_path / "isolation.sqlite3")
     try:

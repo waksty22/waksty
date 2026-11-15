@@ -120,6 +120,12 @@ def test_observation_rejects_invalid_metadata_without_writing(db, invalid_metada
     assert db.execute("SELECT COUNT(*) FROM sensory_observations").fetchone()[0] == 0
 
 
+@pytest.mark.parametrize("invalid_user_id", [None, 7, True, {}, [], "   "])
+def test_list_observations_rejects_invalid_user_identity(db, invalid_user_id):
+    with pytest.raises(ValueError, match="Identifiant utilisateur"):
+        list_observations(db, invalid_user_id)
+
+
 @pytest.mark.parametrize("invalid_limit", [None, "10", 1.5, True, False, 0, -1, {}])
 def test_list_observations_rejects_invalid_limit(db, invalid_limit):
     with pytest.raises(ValueError, match="limite"):

@@ -178,3 +178,26 @@ def test_shared_brain_reuses_chat_memory_after_connection_restart(tmp_path):
         )
     finally:
         second.close()
+
+
+def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
+    """Guard the two production entrypoints against memory-context drift."""
+    import inspect
+    import server
+
+    chat_source = inspect.getsource(server.call_gemini)
+    live_source = inspect.getsource(server.websocket_endpoint)
+    identity_source = inspect.getsource(server.get_identity_prompt)
+
+    # Both modalities must build their system prompt through the same function.
+    assert "get_identity_prompt(user_id, query=query)" in chat_source
+    assert "get_identity_prompt(user_id)" in live_source
+
+    # That shared prompt must read durable autobiographical and shared-brain
+    # state, not depend on a process-local conversation buffer.
+    assert "sync_autobiographical_events" in identity_source
+    assert "list_autobiographical_events" in identity_source
+    assert "get_shared_brain_snapshot" in identity_source
+    assert "format_shared_brain_context" in identity_source
+    assert "retrieve_acquired_knowledge" in identity_source
+    assert "format_acquired_knowledge_context" in identity_source

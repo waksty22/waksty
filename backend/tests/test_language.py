@@ -181,3 +181,33 @@ def test_heard_word_rejects_non_text_evidence_without_writing(language_db, inval
     assert language_db.execute(
         "SELECT COUNT(*) FROM personal_vocabulary"
     ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_evidence", [None, 7, True, {}, []])
+def test_heard_text_rejects_non_text_evidence_without_writing(language_db, invalid_evidence):
+    with pytest.raises(ValueError, match="preuve|texte"):
+        record_heard_text(
+            language_db, "creator", "Bonjour Chappie", evidence=invalid_evidence
+        )
+    assert language_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary"
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_value", [None, 7, True, {}, []])
+@pytest.mark.parametrize("field", ["meaning", "evidence"])
+def test_word_progression_rejects_non_text_metadata_without_updating(
+    language_db, invalid_value, field
+):
+    record_heard_word(language_db, "creator", "pomme")
+    kwargs = {field: invalid_value}
+    with pytest.raises(ValueError, match="texte"):
+        advance_word(
+            language_db, "creator", "pomme", "imitated", **kwargs
+        )
+    row = language_db.execute(
+        "SELECT state, meaning FROM personal_vocabulary WHERE user_id=? AND word=?",
+        ("creator", "pomme"),
+    ).fetchone()
+    assert row["state"] == "heard"
+    assert row["meaning"] == ""

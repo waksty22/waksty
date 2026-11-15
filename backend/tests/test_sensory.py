@@ -59,7 +59,8 @@ def test_visual_association_requires_imitation_then_recognizes_word(db):
 
     advance_word(db, "creator", "coq", "imitated")
     result = associate_word_with_observation(
-        db, "creator", "coq", observation["observation_id"]
+        db, "creator", "coq", observation["observation_id"],
+        "Le créateur confirme que le mot coq correspond à l’observation visuelle.",
     )
     assert result["vocabulary_state"] == "recognized"
     row = db.execute(

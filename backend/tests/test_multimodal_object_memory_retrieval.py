@@ -206,3 +206,28 @@ def test_object_properties_cannot_cross_user_boundaries(tmp_path):
         assert list_known_objects(db, "another-user") == []
     finally:
         db.close()
+
+
+def test_object_learning_routes_preserve_raw_inputs_and_never_invent_evidence():
+    server_source = (Path(__file__).resolve().parents[1] / "server.py").read_text(
+        encoding="utf-8"
+    )
+    property_start = server_source.index('@app.post("/api/learning/object-property")')
+    experience_start = server_source.index('@app.post("/api/learning/object-experience")')
+    compare_start = server_source.index('@app.post("/api/learning/object-compare")')
+    property_route = server_source[property_start:experience_start]
+    experience_route = server_source[experience_start:compare_start]
+    compare_route = server_source[compare_start:server_source.index("def reset_turso_life", compare_start)]
+
+    for route in (property_route, experience_route, compare_route):
+        assert 'str(data.get(' not in route
+
+    assert 'evidence=data.get("evidence", "")' in property_route
+    assert 'evidence=data.get("evidence", "")' in experience_route
+    assert "Enseignement du créateur" not in property_route
+    assert "Expérience supervisée" not in experience_route
+    assert 'data.get("word", "")' in property_route
+    assert 'data.get("property", "")' in property_route
+    assert 'data.get("value", "")' in property_route
+    assert 'data.get("action", "")' in experience_route
+    assert 'data.get("outcome", "")' in experience_route

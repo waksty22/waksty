@@ -195,7 +195,38 @@ def main():
                 except Exception:
                     rtx.rollback(); raise
                 finally: rc.close()
-                success_message = (f"FULL_SCHEMA_E2E_SUCCESS target={target} tables={restored['table_count']} rows={restored['total_rows']} encrypted=true archive_verified=true seeded_tables={sum(bool(v) for v in rows.values())} artifact_sha256={restored['artifact_sha256']} foreign_keys=ok")
+
+                # Prove durability across a genuinely new HTTP client and Hrana stream.
+                client.close()
+                client = HranaHttpClient(url, token, timeout=60)
+                reconnect_tx = client.transaction()
+                try:
+                    reconnect_check = HranaRestoreConnection(reconnect_tx)
+                    for t in tables:
+                        actual_rows = sorted(
+                            (tuple(row) for row in reconnect_check.execute(
+                                f"SELECT {','.join(q(c) for c in cols[t])} FROM {q(t)}"
+                            ).fetchall()),
+                            key=repr,
+                        )
+                        need(
+                            actual_rows == sorted(rows[t], key=repr),
+                            f"Data not durable after remote reconnect in {t}.",
+                        )
+                    need(
+                        not reconnect_check.execute("PRAGMA foreign_key_check").fetchall(),
+                        "Foreign-key check failed after remote reconnect.",
+                    )
+                    reconnect_tx.commit()
+                    print(
+                        f"E2E_STAGE remote_reconnect_verified tables={len(tables)} rows={total}",
+                        flush=True,
+                    )
+                except Exception:
+                    reconnect_tx.rollback()
+                    raise
+
+                success_message = (f"FULL_SCHEMA_E2E_SUCCESS target={target} tables={restored['table_count']} rows={restored['total_rows']} encrypted=true archive_verified=true seeded_tables={sum(bool(v) for v in rows.values())} remote_reconnect_verified=true artifact_sha256={restored['artifact_sha256']} foreign_keys=ok")
         finally:
             try:
                 if created:

@@ -79,10 +79,13 @@ def build_validated_skill_data(
         tested_at = row.get("tested_at", "")
         if not isinstance(tested_at, str):
             continue
-        grouped.setdefault((system_key, branch_key), {})[evidence] = {
+        # Keep the first chronological result for an exact proof.
+        # Re-submitting identical evidence with a higher score must not
+        # silently upgrade the skill; independent evidence is required.
+        grouped.setdefault((system_key, branch_key), {}).setdefault(evidence, {
             "score": score,
             "tested_at": tested_at,
-        }
+        })
 
     engine_data: dict[str, Any] = {}
     total = 0

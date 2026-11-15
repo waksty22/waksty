@@ -107,6 +107,28 @@ def test_supervised_experience_is_not_promoted_to_general_property(db):
     assert objects[0]["properties"] == []
 
 
+@pytest.mark.parametrize("invalid_evidence", [None, 7, True, {}, []])
+def test_object_property_rejects_non_text_evidence_without_writing(db, invalid_evidence):
+    add_recognized_object(db, "pomme")
+    with pytest.raises(ValueError, match="preuve|texte"):
+        teach_object_property(
+            db, "creator", "pomme", "couleur", "rouge",
+            evidence=invalid_evidence,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_properties").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_evidence", [None, 7, True, {}, []])
+def test_object_experience_rejects_non_text_evidence_without_writing(db, invalid_evidence):
+    add_recognized_object(db, "balle")
+    with pytest.raises(ValueError, match="preuve|texte"):
+        record_object_experience(
+            db, "creator", "balle", "lancer", "la balle roule",
+            evidence=invalid_evidence,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_experiences").fetchone()[0] == 0
+
+
 @pytest.mark.parametrize(
     "confidence",
     [None, "not-a-number", float("inf"), float("nan"), True, False],

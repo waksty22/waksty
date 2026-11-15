@@ -282,6 +282,62 @@ def main():
                     reconnect_tx.rollback()
                     raise
 
+
+                # Exercise the actual production libsql adapter against the
+                # isolated remote database, not only the Hrana backup client.
+                from storage.connection_factory import StorageSettings, open_storage_connection
+                probe = "chappie_libsql_adapter_probe_" + secrets.token_hex(6)
+                names.append(("table", probe))
+                table_dependencies[probe] = set()
+                adapter_settings = StorageSettings(
+                    backend="turso",
+                    turso_database_url=url,
+                    turso_auth_token=token,
+                )
+                adapter = open_storage_connection(adapter_settings)
+                try:
+                    adapter.execute(
+                        f"CREATE TABLE {q(probe)} "
+                        "(id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL)"
+                    )
+                    adapter.commit()
+                    inserted = adapter.execute(
+                        f"INSERT INTO {q(probe)}(value) VALUES (?)",
+                        ("native-libsql-adapter",),
+                    )
+                    need(inserted.rowcount == 1, "Native libsql adapter INSERT rowcount mismatch.")
+                    need(inserted.lastrowid == 1, "Native libsql adapter lastrowid mismatch.")
+                    adapter.commit()
+                    adapter.execute(
+                        f"INSERT INTO {q(probe)}(value) VALUES (?)",
+                        ("must-rollback",),
+                    )
+                    adapter.rollback()
+                finally:
+                    adapter.close()
+
+                # A fresh native libsql connection must observe the committed
+                # row and not the rolled-back row.
+                adapter = open_storage_connection(adapter_settings)
+                try:
+                    probe_rows = adapter.execute(
+                        f"SELECT id, value FROM {q(probe)} ORDER BY id"
+                    ).fetchall()
+                    need(
+                        [(row["id"], row["value"]) for row in probe_rows]
+                        == [(1, "native-libsql-adapter")],
+                        "Native libsql adapter reconnect/rollback contract failed.",
+                    )
+                    adapter.execute(f"DROP TABLE {q(probe)}")
+                    adapter.commit()
+                    print(
+                        "E2E_STAGE native_libsql_adapter_remote_verified "
+                        "rowcount=true lastrowid=true rollback=true reconnect=true",
+                        flush=True,
+                    )
+                finally:
+                    adapter.close()
+
                 success_message = (f"FULL_SCHEMA_E2E_SUCCESS target={target} tables={restored['table_count']} rows={restored['total_rows']} encrypted=true archive_verified=true seeded_tables={sum(bool(v) for v in rows.values())} remote_reconnect_verified=true artifact_sha256={restored['artifact_sha256']} foreign_keys=ok")
         finally:
             try:

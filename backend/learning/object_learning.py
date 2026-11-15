@@ -68,6 +68,15 @@ def _clean(value: Any, label: str, maximum: int) -> str:
     return value
 
 
+def _clean_optional_evidence(evidence: str) -> str:
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve doit être du texte.")
+    evidence = evidence.strip()
+    if len(evidence) > MAX_EVIDENCE_LENGTH:
+        raise ValueError("La preuve est trop longue.")
+    return evidence
+
+
 def _require_known_object(
     db: sqlite3.Connection, user_id: str, word: str
 ) -> tuple[str, str]:
@@ -125,7 +134,7 @@ def teach_object_property(
     if key not in ALLOWED_PROPERTY_KEYS:
         raise ValueError("Type de propriété non autorisé.")
     value = _clean(property_value, "Valeur", MAX_VALUE_LENGTH)
-    evidence = str(evidence or "").strip()[:MAX_EVIDENCE_LENGTH]
+    evidence = _clean_optional_evidence(evidence)
     if source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
     if isinstance(confidence, bool):
@@ -250,7 +259,7 @@ def record_object_experience(
     word, object_id = _require_known_object(db, user_id, word)
     action = _clean(action, "Action", 300)
     outcome = _clean(outcome, "Résultat", 1000)
-    evidence = str(evidence or "").strip()[:MAX_EVIDENCE_LENGTH]
+    evidence = _clean_optional_evidence(evidence)
     if source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
     if isinstance(confidence, bool):

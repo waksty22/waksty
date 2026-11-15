@@ -56,7 +56,7 @@ def build_validated_skill_data(
         if not math.isfinite(score) or not 70 <= score <= 100:
             continue
 
-        passed = row.get("passed", 1)
+        passed = row.get("passed")
         if isinstance(passed, bool) or not isinstance(passed, int) or passed != 1:
             continue
 

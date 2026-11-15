@@ -70,6 +70,19 @@ def test_visual_association_requires_imitation_then_recognizes_word(db):
     assert row["state"] == "recognized"
 
 
+@pytest.mark.parametrize("invalid_evidence", [None, 7, True, {}, [], "   "])
+def test_visual_association_rejects_non_text_or_blank_evidence(db, invalid_evidence):
+    record_heard_word(db, "creator", "coq")
+    advance_word(db, "creator", "coq", "imitated")
+    observation = record_observation(
+        db, "creator", "vision", "Un animal à plumes.", "camera_snapshot"
+    )
+    with pytest.raises(ValueError, match="preuve|validation visuelle"):
+        associate_word_with_observation(
+            db, "creator", "coq", observation["observation_id"], invalid_evidence
+        )
+
+
 def test_observations_are_isolated_by_user(db):
     observation = record_observation(
         db, "creator", "vision", "Objet rouge", "camera_snapshot"

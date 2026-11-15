@@ -3871,7 +3871,10 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
     raw_score = data.get("score")
     if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
         raise HTTPException(status_code=422, detail="Score invalide.")
-    score = float(raw_score)
+    try:
+        score = float(raw_score)
+    except (OverflowError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Score invalide.")
     if not math.isfinite(score) or not 0 <= score <= 100:
         raise HTTPException(status_code=422, detail="Le score doit être compris entre 0 et 100.")
     test_name = system_key + ":" + branch_key

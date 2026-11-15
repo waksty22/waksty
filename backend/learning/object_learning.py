@@ -251,7 +251,10 @@ def record_object_experience(
     evidence = str(evidence or "").strip()[:MAX_EVIDENCE_LENGTH]
     if source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
-    confidence = float(confidence)
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Confiance invalide.") from exc
     if not 0 <= confidence <= 1:
         raise ValueError("La confiance doit être comprise entre 0 et 1.")
     now = utc_now()

@@ -60,7 +60,9 @@ def record_observation(
 ) -> dict[str, Any]:
     if modality not in {"audio", "vision"}:
         raise ValueError("Modalité sensorielle invalide.")
-    content = str(content or "").strip()
+    if not isinstance(content, str):
+        raise ValueError("Le contenu de l’observation doit être du texte.")
+    content = content.strip()
     if not content or len(content) > 12000:
         raise ValueError("Observation vide ou trop longue.")
     if isinstance(confidence, bool):

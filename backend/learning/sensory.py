@@ -115,6 +115,8 @@ def record_observation(
 def list_observations(
     db: sqlite3.Connection, user_id: str, limit: int = 30
 ) -> list[dict[str, Any]]:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("La limite doit être un entier positif.")
     limit = min(limit, 100)

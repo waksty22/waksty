@@ -24,6 +24,22 @@ def _clean_text(value: Any, field: str, limit: int) -> str:
     return value
 
 
+def _user_id(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    return value.strip()
+
+
+def _positive_id(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{field} invalide.")
+    return value
+
+
+def _limit(value: Any, maximum: int) -> int:
+    return min(_positive_id(value, "Limite"), maximum)
+
+
 def _normalize(value: str) -> str:
     return " ".join(value.casefold().split())
 
@@ -32,7 +48,8 @@ def suggest_personal_learning_goals(
     db: sqlite3.Connection, user_id: str, limit: int = 5
 ) -> dict[str, Any]:
     """Derive measurable goal proposals without writing any database row."""
-    limit = max(1, min(int(limit), MAX_GOALS))
+    user_id = _user_id(user_id)
+    limit = _limit(limit, MAX_GOALS)
     agenda = suggest_supervised_learning_agenda(db, user_id, limit=limit)
     existing = db.execute(
         "SELECT title FROM goals WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 100",
@@ -91,7 +108,8 @@ def suggest_personal_learning_goals(
 def list_personal_learning_goals(
     db: sqlite3.Connection, user_id: str, limit: int = 30
 ) -> dict[str, Any]:
-    limit = max(1, min(int(limit), 100))
+    user_id = _user_id(user_id)
+    limit = _limit(limit, 100)
     rows = db.execute(
         """SELECT id, title, status, progress, created_at, updated_at
            FROM goals WHERE user_id=? ORDER BY id DESC LIMIT ?""",
@@ -123,6 +141,9 @@ def record_personal_goal_step(
     completed: bool = True,
 ) -> dict[str, Any]:
     """Record evidence for one step, verifying ownership through the parent goal."""
+    user_id = _user_id(user_id)
+    goal_id = _positive_id(goal_id, "Identifiant d’objectif")
+    step_id = _positive_id(step_id, "Identifiant d’étape")
     if not isinstance(completed, bool):
         raise ValueError("completed doit être un booléen.")
     evidence = _clean_text(evidence, "Preuve", MAX_EVIDENCE)
@@ -171,6 +192,8 @@ def list_goal_skill_assessments(
     db: sqlite3.Connection, user_id: str, goal_id: int
 ) -> list[dict[str, Any]]:
     """Return only supervisor-approved assessment records explicitly linked to this user's goal."""
+    user_id = _user_id(user_id)
+    goal_id = _positive_id(goal_id, "Identifiant d’objectif")
     owner = db.execute(
         "SELECT id FROM goals WHERE id=? AND user_id=?",
         (goal_id, user_id),

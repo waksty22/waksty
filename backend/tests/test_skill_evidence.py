@@ -67,11 +67,13 @@ def test_duplicate_proof_cannot_upgrade_score_with_repeated_submission():
         "supervisor_approved": True,
         "evidence": proof,
     }
+    # Deliberately provide the newer, higher score first: the result
+    # must be based on chronology, not database/input iteration order.
     rows = [
-        {"test_name": "mots:vocabulaire", "passed": 1, "score": 70,
-         "tested_at": "2026-11-01T10:00:00Z", "details": details},
         {"test_name": "mots:vocabulaire", "passed": 1, "score": 100,
          "tested_at": "2026-11-02T10:00:00Z", "details": details},
+        {"test_name": "mots:vocabulaire", "passed": 1, "score": 70,
+         "tested_at": "2026-11-01T10:00:00Z", "details": details},
     ]
     profile, count = build_validated_skill_data(rows)
     assert count == 1

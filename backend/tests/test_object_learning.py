@@ -150,3 +150,35 @@ def test_users_cannot_read_or_teach_another_users_object(db):
     add_recognized_object(db, "montre")
     with pytest.raises(ValueError):
         teach_object_property(db, "other", "montre", "matiere", "metal")
+
+
+@pytest.mark.parametrize("invalid_source_type", [None, 7, True, {}, [], "unknown"])
+def test_object_property_rejects_invalid_provenance_without_writing(db, invalid_source_type):
+    add_recognized_object(db, "pomme")
+    with pytest.raises(ValueError, match="Provenance"):
+        teach_object_property(
+            db, "creator", "pomme", "couleur", "rouge",
+            source_type=invalid_source_type,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_properties").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_source_type", [None, 7, True, {}, [], "unknown"])
+def test_object_experience_rejects_invalid_provenance_without_writing(db, invalid_source_type):
+    add_recognized_object(db, "balle")
+    with pytest.raises(ValueError, match="Provenance"):
+        record_object_experience(
+            db, "creator", "balle", "lancer", "la balle roule",
+            source_type=invalid_source_type,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_experiences").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalid_user_id", [None, 7, True, {}, [], "   "])
+def test_object_learning_rejects_invalid_user_identity(db, invalid_user_id):
+    with pytest.raises(ValueError, match="Identifiant utilisateur"):
+        list_known_objects(db, invalid_user_id)
+    with pytest.raises(ValueError, match="Identifiant utilisateur"):
+        teach_object_property(
+            db, invalid_user_id, "pomme", "couleur", "rouge"
+        )

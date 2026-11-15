@@ -107,6 +107,23 @@ def test_supervised_experience_is_not_promoted_to_general_property(db):
     assert objects[0]["properties"] == []
 
 
+@pytest.mark.parametrize(
+    "confidence",
+    [None, "not-a-number", float("inf"), float("nan")],
+)
+def test_object_experience_rejects_invalid_confidence_without_writing(db, confidence):
+    add_recognized_object(db, "balle")
+    with pytest.raises(ValueError, match="Confiance|confiance"):
+        record_object_experience(
+            db, "creator", "balle", "lancer", "la balle roule",
+            confidence=confidence,
+        )
+    count = db.execute(
+        "SELECT COUNT(*) FROM object_experiences"
+    ).fetchone()[0]
+    assert count == 0
+
+
 def test_users_cannot_read_or_teach_another_users_object(db):
     add_recognized_object(db, "montre")
     with pytest.raises(ValueError):

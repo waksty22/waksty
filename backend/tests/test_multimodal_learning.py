@@ -198,3 +198,40 @@ def test_perception_fusion_list_rejects_non_integer_limit(tmp_path, invalid_limi
             list_perception_fusions(db, "creator", limit=invalid_limit)
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("invalid_user_id", [None, 7, True, {}, [], "   "])
+def test_perception_fusion_rejects_invalid_user_identity(tmp_path, invalid_user_id):
+    db = open_db(tmp_path / "invalid-fusion-user.sqlite3")
+    try:
+        audio = record_observation(
+            db, "creator", "audio", "bonjour", "confirmed_transcription"
+        )
+        with pytest.raises(ValueError, match="Identifiant utilisateur"):
+            link_temporally_cooccurring_observation(
+                db, invalid_user_id, audio["observation_id"]
+            )
+        with pytest.raises(ValueError, match="Identifiant utilisateur"):
+            list_perception_fusions(db, invalid_user_id)
+        assert db.execute(
+            "SELECT COUNT(*) FROM perception_fusion_candidates"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("invalid_observation_id", [None, 7, True, {}, [], "   "])
+def test_perception_fusion_rejects_invalid_observation_identity(
+    tmp_path, invalid_observation_id
+):
+    db = open_db(tmp_path / "invalid-fusion-observation.sqlite3")
+    try:
+        with pytest.raises(ValueError, match="Identifiant d’observation"):
+            link_temporally_cooccurring_observation(
+                db, "creator", invalid_observation_id
+            )
+        assert db.execute(
+            "SELECT COUNT(*) FROM perception_fusion_candidates"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()

@@ -3914,6 +3914,8 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
                     old_details = json.loads(row["details"] or "{}")
                 except (TypeError, ValueError):
                     continue
+                if not isinstance(old_details, dict):
+                    continue
                 if old_details.get("evidence") == evidence:
                     raise HTTPException(status_code=409, detail="Cette preuve a déjà été utilisée pour cette sous-compétence.")
             result = evaluate_competency_test(

@@ -211,3 +211,20 @@ def test_word_progression_rejects_non_text_metadata_without_updating(
     ).fetchone()
     assert row["state"] == "heard"
     assert row["meaning"] == ""
+
+
+@pytest.mark.parametrize("invalid_text", [None, 7, True, {}, []])
+def test_vocabulary_text_gate_fails_closed_for_non_text_input(invalid_text):
+    assert not text_uses_only_allowed_words(invalid_text, {"bonjour"})
+    assert gate_spoken_text(invalid_text, {"bonjour"}) == ""
+
+
+@pytest.mark.parametrize("invalid_limit", [None, 0, -1, True, 1.5, "2"])
+def test_heard_text_rejects_invalid_token_limits_without_writing(language_db, invalid_limit):
+    with pytest.raises(ValueError, match="limite|entier"):
+        record_heard_text(
+            language_db, "creator", "Bonjour Chappie", max_tokens=invalid_limit
+        )
+    assert language_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary"
+    ).fetchone()[0] == 0

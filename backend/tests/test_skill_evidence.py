@@ -99,6 +99,26 @@ def test_explicitly_empty_catalog_does_not_fall_back_to_default():
     assert profile == {}
     assert count == 0
 
+
+def test_malformed_catalog_entries_are_ignored_safely():
+    row = {
+        "test_name": "mots:vocabulaire",
+        "passed": 1,
+        "score": 90,
+        "tested_at": "2026-11-03T10:00:00Z",
+        "details": {
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": "Chappie a répété correctement le mot observé.",
+        },
+    }
+    for catalog in (None, [], {"mots": None}, {"mots": {"sub_branches": []}}):
+        if catalog is None:
+            continue  # None deliberately selects the built-in catalog.
+        profile, count = build_validated_skill_data([row], catalog=catalog)
+        assert profile == {}
+        assert count == 0
+
 def test_failed_or_unapproved_assessment_is_ignored():
     rows = [
         {

@@ -109,7 +109,7 @@ def test_supervised_experience_is_not_promoted_to_general_property(db):
 
 @pytest.mark.parametrize(
     "confidence",
-    [None, "not-a-number", float("inf"), float("nan")],
+    [None, "not-a-number", float("inf"), float("nan"), True, False],
 )
 def test_object_experience_rejects_invalid_confidence_without_writing(db, confidence):
     add_recognized_object(db, "balle")

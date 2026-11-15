@@ -106,3 +106,75 @@ def test_core_memory_world_modules_share_one_libsql_connection():
         ).fetchone()[0] == 0
     finally:
         db.close()
+
+
+def test_shared_brain_reuses_chat_memory_after_connection_restart(tmp_path):
+    """The persisted memory is visible to both chat and Live context builders."""
+    from cognition.shared_brain import (
+        get_shared_brain_snapshot,
+        format_shared_brain_context,
+    )
+    from memory.knowledge_acquisition import (
+        retrieve_acquired_knowledge,
+        format_acquired_knowledge_context,
+    )
+    from storage.connection_factory import StorageSettings, open_storage_connection
+
+    database_path = tmp_path / "shared-brain.sqlite3"
+    settings = StorageSettings(
+        backend="sqlite",
+        sqlite_path=str(database_path),
+    )
+    taught_fact = "Le compagnon apprend que le mot chaussure désigne un objet porté aux pieds."
+
+    first = open_storage_connection(settings)
+    try:
+        init_memory_tables(first)
+        saved = save_episodic_memory(
+            first,
+            user_id="owner",
+            content=taught_fact,
+            category="vocabulary",
+            importance=5,
+            source_type="taught",
+            confidence=0.95,
+            tags=["chaussure", "objet"],
+        )
+        assert saved["saved"] is True
+        first.commit()
+    finally:
+        first.close()
+
+    # Simulate an application restart: a completely new connection reads the
+    # same persisted row through both context builders used by chat and Live.
+    second = open_storage_connection(settings)
+    try:
+        chat_snapshot = get_shared_brain_snapshot(second, "owner", limit=20)
+        live_snapshot = get_shared_brain_snapshot(second, "owner", limit=20)
+        assert chat_snapshot == live_snapshot
+        assert any(
+            item.get("content") == taught_fact
+            for item in chat_snapshot["memories"]
+        )
+
+        chat_context = format_shared_brain_context(chat_snapshot)
+        live_context = format_shared_brain_context(live_snapshot)
+        assert chat_context == live_context
+        assert taught_fact in chat_context
+
+        acquired = retrieve_acquired_knowledge(
+            second, "owner", query="chaussure", limit=10
+        )
+        acquired_context = format_acquired_knowledge_context(acquired)
+        assert taught_fact in acquired_context
+        assert acquired["user_scoped"] is True
+        assert acquired["read_only"] is True
+
+        # The same memory must not leak into another user's context.
+        other_user = get_shared_brain_snapshot(second, "another-user", limit=20)
+        assert not any(
+            item.get("content") == taught_fact
+            for item in other_user["memories"]
+        )
+    finally:
+        second.close()

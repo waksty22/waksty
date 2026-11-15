@@ -58,7 +58,9 @@ def record_observation(
     confidence: float = 0.5,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if modality not in {"audio", "vision"}:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    if not isinstance(modality, str) or modality not in {"audio", "vision"}:
         raise ValueError("Modalité sensorielle invalide.")
     if not isinstance(content, str):
         raise ValueError("Le contenu de l’observation doit être du texte.")
@@ -73,7 +75,21 @@ def record_observation(
         raise ValueError("Confiance sensorielle invalide.") from exc
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("La confiance doit être comprise entre 0 et 1.")
-    metadata_json = json.dumps(metadata or {}, ensure_ascii=False, allow_nan=False)
+    if not isinstance(source, str):
+        raise ValueError("La source de l’observation doit être du texte.")
+    source = source.strip()
+    if not source or len(source) > 80:
+        raise ValueError("La source doit contenir entre 1 et 80 caractères.")
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError("Les métadonnées doivent être un objet.")
+    try:
+        metadata_json = json.dumps(
+            metadata, ensure_ascii=False, allow_nan=False
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Les métadonnées doivent être sérialisables en JSON.") from exc
     observation_id = uuid.uuid4().hex
     created_at = utc_now()
     db.execute(
@@ -81,7 +97,7 @@ def record_observation(
            (observation_id, user_id, modality, content, source,
             confidence, metadata_json, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (observation_id, user_id, modality, content, str(source)[:80],
+        (observation_id, user_id, modality, content, source,
          confidence, metadata_json, created_at),
     )
     return {
@@ -89,9 +105,9 @@ def record_observation(
         "user_id": user_id,
         "modality": modality,
         "content": content,
-        "source": str(source)[:80],
+        "source": source,
         "confidence": confidence,
-        "metadata": metadata or {},
+        "metadata": metadata,
         "created_at": created_at,
     }
 
@@ -99,7 +115,9 @@ def record_observation(
 def list_observations(
     db: sqlite3.Connection, user_id: str, limit: int = 30
 ) -> list[dict[str, Any]]:
-    limit = max(1, min(int(limit), 100))
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("La limite doit être un entier positif.")
+    limit = min(limit, 100)
     rows = db.execute(
         """SELECT observation_id, modality, content, source, confidence,
                   metadata_json, created_at
@@ -110,7 +128,12 @@ def list_observations(
     result = []
     for row in rows:
         item = dict(row)
-        item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+        raw_metadata = item.pop("metadata_json") or "{}"
+        try:
+            parsed_metadata = json.loads(raw_metadata)
+        except (TypeError, ValueError):
+            parsed_metadata = {}
+        item["metadata"] = parsed_metadata if isinstance(parsed_metadata, dict) else {}
         result.append(item)
     return result
 
@@ -122,7 +145,13 @@ def associate_word_with_observation(
     observation_id: str,
     evidence: str,
 ) -> dict[str, Any]:
-    word = str(word or "").strip().casefold()
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    if not isinstance(word, str):
+        raise ValueError("Indique un seul mot valide.")
+    if not isinstance(observation_id, str) or not observation_id.strip():
+        raise ValueError("Identifiant d’observation invalide.")
+    word = word.strip().casefold()
     if not word or len(word) > 80 or len(word.split()) != 1:
         raise ValueError("Indique un seul mot valide.")
     if not isinstance(evidence, str):
@@ -163,7 +192,7 @@ def associate_word_with_observation(
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(user_id, word, observation_id) DO UPDATE SET
              evidence=excluded.evidence""",
-        (user_id, word, observation_id, str(evidence)[:500], now),
+        (user_id, word, observation_id, evidence, now),
     )
     return {
         "word": word,

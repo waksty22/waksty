@@ -88,6 +88,27 @@ def test_audio_vision_cooccurrence_is_only_a_candidate_until_validated(tmp_path)
         reopened.close()
 
 
+@pytest.mark.parametrize(
+    "confidence",
+    [None, "not-a-number", float("inf"), float("nan")],
+)
+def test_sensory_observation_rejects_invalid_confidence_without_writing(
+    tmp_path, confidence
+):
+    db = open_db(tmp_path / "invalid-confidence.sqlite3")
+    try:
+        with pytest.raises(ValueError, match="Confiance|confiance"):
+            record_observation(
+                db, "creator", "vision", "forme rouge", "camera",
+                confidence=confidence,
+            )
+        assert db.execute(
+            "SELECT COUNT(*) FROM sensory_observations"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
 def test_visual_association_requires_nonempty_validation_evidence(tmp_path):
     db = open_db(tmp_path / "validation-evidence.sqlite3")
     try:

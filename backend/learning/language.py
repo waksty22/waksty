@@ -20,6 +20,12 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _require_user_id(user_id: str) -> str:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    return user_id.strip()
+
+
 def normalize_word(value: str) -> str:
     if not isinstance(value, str):
         raise ValueError("Le mot doit être une chaîne de caractères.")
@@ -54,6 +60,7 @@ def init_language_tables(db: sqlite3.Connection) -> None:
 def record_heard_word(
     db: sqlite3.Connection, user_id: str, word: str, evidence: str = "Mot entendu"
 ) -> dict[str, Any]:
+    user_id = _require_user_id(user_id)
     clean = normalize_word(word)
     if not isinstance(evidence, str):
         raise ValueError("La preuve d'exposition doit être du texte.")
@@ -83,6 +90,7 @@ def record_heard_text(
     max_tokens: int = 30,
 ) -> list[dict[str, Any]]:
     """Record only lexical exposure, never comprehension or mastery."""
+    user_id = _require_user_id(user_id)
     if not isinstance(text, str):
         raise ValueError("Le texte entendu doit être une chaîne de caractères.")
     if not isinstance(evidence, str):
@@ -110,6 +118,7 @@ def record_explicit_word_teaching(
     evidence: str = "Enseignement explicite de l'utilisateur",
 ) -> list[dict[str, Any]]:
     """Store explicit word definitions as heard, never as understood."""
+    user_id = _require_user_id(user_id)
     if not isinstance(text, str):
         raise ValueError("Le texte enseigné doit être une chaîne de caractères.")
     if not isinstance(evidence, str):
@@ -157,6 +166,7 @@ def advance_word(
     meaning: str = "",
     evidence: str = "",
 ) -> dict[str, Any]:
+    user_id = _require_user_id(user_id)
     clean = normalize_word(word)
     if not isinstance(target_state, str) or target_state not in STATE_RANK:
         raise ValueError("État d'apprentissage invalide.")
@@ -193,6 +203,7 @@ def advance_word(
 
 
 def list_vocabulary(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
+    user_id = _require_user_id(user_id)
     rows = db.execute(
         """SELECT word, meaning, state, exposure_count, evidence, created_at, updated_at
            FROM personal_vocabulary WHERE user_id=?
@@ -203,6 +214,7 @@ def list_vocabulary(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]
 
 
 def get_usable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
+    user_id = _require_user_id(user_id)
     rows = db.execute(
         "SELECT word FROM personal_vocabulary WHERE user_id=? AND state='usable'",
         (user_id,),
@@ -212,6 +224,7 @@ def get_usable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
 
 def get_repeatable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
     """Words Chappie has explicitly learned to imitate or beyond."""
+    user_id = _require_user_id(user_id)
     rows = db.execute(
         """SELECT word FROM personal_vocabulary
            WHERE user_id=? AND state IN ('heard', 'imitated', 'recognized', 'understood', 'usable')""",

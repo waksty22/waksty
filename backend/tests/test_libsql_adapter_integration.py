@@ -105,3 +105,42 @@ def test_real_libsql_file_database_persists_after_connection_reopen(tmp_path):
         )
     finally:
         second.close()
+
+def test_real_libsql_cursor_reports_dml_rowcount(tmp_path):
+    """Verify sqlite3-compatible rowcount against the real libsql driver."""
+    libsql = pytest.importorskip("libsql")
+    database_path = tmp_path / "rowcount-integration.db"
+    connection = adapt_libsql_connection(
+        libsql.connect(database=str(database_path))
+    )
+    try:
+        connection.execute(
+            "CREATE TABLE rowcount_probe "
+            "(id INTEGER PRIMARY KEY, status TEXT NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO rowcount_probe(status) VALUES (?)",
+            [("pending",), ("pending",), ("done",)],
+        )
+        connection.commit()
+
+        updated = connection.execute(
+            "UPDATE rowcount_probe SET status=? WHERE status=?",
+            ("done", "pending"),
+        )
+        assert updated.rowcount == 2
+
+        deleted = connection.execute(
+            "DELETE FROM rowcount_probe WHERE status=?",
+            ("done",),
+        )
+        assert deleted.rowcount == 3
+
+        unchanged = connection.execute(
+            "UPDATE rowcount_probe SET status=? WHERE id < 0",
+            ("missing",),
+        )
+        assert unchanged.rowcount == 0
+        connection.commit()
+    finally:
+        connection.close()

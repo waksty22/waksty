@@ -264,7 +264,7 @@ def record_object_experience(
     action = _clean(action, "Action", 300)
     outcome = _clean(outcome, "Résultat", 1000)
     evidence = _clean_optional_evidence(evidence)
-    if source_type not in {"taught", "observed", "confirmed"}:
+    if not isinstance(source_type, str) or source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
     if isinstance(confidence, bool):
         raise ValueError("Confiance invalide.")

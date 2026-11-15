@@ -131,3 +131,28 @@ def test_validated_multimodal_object_can_be_recalled_after_restart(tmp_path):
         ).fetchone()[0] == 0
     finally:
         reopened.close()
+
+
+
+def test_production_routes_wire_validation_world_model_and_recall():
+    server_source = (Path(__file__).resolve().parents[1] / "server.py").read_text(
+        encoding="utf-8"
+    )
+    associate_start = server_source.index("@app.post(\"/api/vision/associate\")")
+    associate_end = server_source.index("@app.get(\"/api/learning/objects\")", associate_start)
+    associate_route = server_source[associate_start:associate_end]
+    assert "associate_word_with_observation(" in associate_route
+    assert "upsert_world_entity(" in associate_route
+    assert "add_world_relation(" in associate_route
+    assert "db.commit()" in associate_route
+
+    recall_start = server_source.index("@app.get(\"/api/learning/objects\")")
+    recall_end = server_source.index("@app.post(\"/api/learning/object-property\")", recall_start)
+    recall_route = server_source[recall_start:recall_end]
+    assert "list_known_objects(db, user_id)" in recall_route
+
+    vision_start = server_source.index("@app.post(\"/api/vision/analyze\")")
+    vision_end = server_source.index("@app.get(\"/api/senses/observations\")", vision_start)
+    vision_route = server_source[vision_start:vision_end]
+    assert '"is_learned_fact": False' in vision_route
+    assert "link_temporally_cooccurring_observation(" in vision_route

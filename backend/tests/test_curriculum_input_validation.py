@@ -11,6 +11,7 @@ from learning.curriculum import (
     init_learning_tables,
     evaluate_competency_test,
     get_competency_test_history,
+    update_cognitive_milestones,
 )
 
 
@@ -62,4 +63,26 @@ def test_competency_history_uses_strict_integer_limit():
         except ValueError:
             pass
     assert len(get_competency_test_history(db, "creator")) == 1
+    db.close()
+
+
+
+def test_failed_assessments_never_unlock_higher_cognitive_stages():
+    db = make_db()
+    evaluate_competency_test(db, "creator", "test_echec", False, 95)
+    milestones = update_cognitive_milestones(db, "creator", 8.0)
+    assert milestones[0]["status"] == "achieved"
+    assert all(item["status"] != "achieved" for item in milestones[1:])
+    db.close()
+
+
+def test_previously_achieved_milestone_is_never_revoked():
+    db = make_db()
+    evaluate_competency_test(db, "creator", "test_reussi", True, 90)
+    first = update_cognitive_milestones(db, "creator", 3.0)
+    assert first[1]["status"] == "achieved"
+    evaluate_competency_test(db, "creator", "test_echec", False, 20)
+    later = update_cognitive_milestones(db, "creator", 0.0)
+    assert later[1]["status"] == "achieved"
+    assert later[1]["achieved_at"] == first[1]["achieved_at"]
     db.close()

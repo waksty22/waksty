@@ -147,3 +147,55 @@ def test_supervised_assessment_route_rejects_coerced_payload_values():
     assert "goal_step_id = int(goal_step_id)" not in route
     assert "isinstance(goal_id, bool)" in route
     assert "isinstance(goal_step_id, bool)" in route
+
+
+def test_skill_profile_rejects_coerced_scores_pass_flags_and_evidence():
+    valid_details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Résolution vérifiée sur plusieurs situations distinctes.",
+    }
+    base = {
+        "test_name": "tete:raisonnement_causal",
+        "passed": 1,
+        "score": 90,
+        "tested_at": "2026-11-15T12:00:00Z",
+        "details": valid_details,
+    }
+    invalid_rows = []
+    for field, values in {
+        "test_name": [7, True, None, "tete", "tete:raisonnement_causal:extra"],
+        "score": ["90", True, None, {}, [], float("nan"), float("inf")],
+        "passed": [True, "1", 0, None],
+        "tested_at": [7, None, {}],
+    }.items():
+        for value in values:
+            invalid_rows.append({**base, field: value})
+    for value in (None, 7, True, {}, [], "trop court"):
+        invalid_rows.append({
+            **base,
+            "details": {**valid_details, "evidence": value},
+        })
+
+    for row in invalid_rows:
+        profile, count = build_validated_skill_data([row])
+        assert count == 0, f"Une preuve invalide a été acceptée: {row!r}"
+        assert profile == {}
+
+
+def test_skill_profile_accepts_valid_json_details_but_deduplicates_evidence():
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Résolution vérifiée sur plusieurs situations distinctes.",
+    }
+    row = {
+        "test_name": "tete:raisonnement_causal",
+        "passed": 1,
+        "score": 90,
+        "tested_at": "2026-11-15T12:00:00Z",
+        "details": json.dumps(details),
+    }
+    profile, count = build_validated_skill_data([row, row])
+    assert count == 1
+    assert profile["tete"]["raisonnement_causal"]["confidence"] == 1 / 3

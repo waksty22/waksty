@@ -76,6 +76,9 @@ def build_validated_skill_data(
         evidence = evidence_value.strip()
         if not MIN_EVIDENCE_LENGTH <= len(evidence) <= MAX_EVIDENCE_LENGTH:
             continue
+        # Ignore superficial case/whitespace differences when identifying
+        # a repeated proof; retain the original text only for validation.
+        evidence_key = " ".join(evidence.split()).casefold()
         if (
             details.get("supervisor_approved") is not True
             or details.get("source") != "supervised_assessment"
@@ -91,10 +94,10 @@ def build_validated_skill_data(
         # Re-submitting identical evidence with a higher score must not
         # silently upgrade the skill; independent evidence is required.
         evidence_map = grouped.setdefault((system_key, branch_key), {})
-        existing = evidence_map.get(evidence)
+        existing = evidence_map.get(evidence_key)
         candidate = {"score": score, "tested_at": tested_at}
         if existing is None:
-            evidence_map[evidence] = candidate
+            evidence_map[evidence_key] = candidate
         else:
             existing_date = existing["tested_at"]
             if tested_at and (not existing_date or tested_at < existing_date):

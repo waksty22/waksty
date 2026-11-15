@@ -4677,7 +4677,7 @@ async def api_associate_visual_word(
                 db, user_id,
                 str(data.get("word", "")),
                 str(data.get("observation_id", "")),
-                str(data.get("evidence", "Association validée par le créateur")),
+                str(data.get("evidence", "")),
             )
             word = result["word"]
             observation_id = result["observation_id"]

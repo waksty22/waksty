@@ -142,7 +142,8 @@ def test_production_routes_wire_validation_world_model_and_recall():
     associate_end = server_source.index("@app.get(\"/api/learning/objects\")", associate_start)
     associate_route = server_source[associate_start:associate_end]
     assert "associate_word_with_observation(" in associate_route
-    assert 'str(data.get("evidence", ""))' in associate_route
+    assert 'data.get("evidence", "")' in associate_route
+    assert 'str(data.get("evidence", ""))' not in associate_route
     assert "Association validée par le créateur" not in associate_route
     assert "upsert_world_entity(" in associate_route
     assert "add_world_relation(" in associate_route

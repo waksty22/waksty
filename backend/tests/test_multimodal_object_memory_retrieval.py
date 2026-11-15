@@ -156,3 +156,45 @@ def test_production_routes_wire_validation_world_model_and_recall():
     vision_route = server_source[vision_start:vision_end]
     assert '"is_learned_fact": False' in vision_route
     assert "link_temporally_cooccurring_observation(" in vision_route
+
+
+def test_object_properties_are_blocked_before_visual_validation(tmp_path):
+    db = open_db(tmp_path / "gated-object.sqlite3")
+    try:
+        record_heard_word(db, "creator", "vélo", "Transcription confirmée")
+        advance_word(db, "creator", "vélo", "imitated")
+        # Even an imitated word is not yet an object Chappie may describe.
+        with pytest.raises(ValueError, match="valide son association visuelle"):
+            teach_object_property(
+                db, "creator", "vélo", "couleur", "bleu",
+                evidence="Observation non validée",
+            )
+        assert list_known_objects(db, "creator") == []
+    finally:
+        db.close()
+
+
+def test_object_properties_cannot_cross_user_boundaries(tmp_path):
+    db = open_db(tmp_path / "isolated-object.sqlite3")
+    try:
+        record_heard_word(db, "creator", "vélo", "Transcription confirmée")
+        advance_word(db, "creator", "vélo", "imitated")
+        vision = record_observation(
+            db, "creator", "vision", "deux roues", "camera_frame", 0.6
+        )
+        associate_word_with_observation(
+            db, "creator", "vélo", vision["observation_id"],
+            "Validation explicite",
+        )
+        upsert_world_entity(
+            db, "creator", "object:vélo", "object",
+            {"label": "vélo"}, source_type="confirmed", confidence=0.95,
+        )
+        with pytest.raises(ValueError):
+            teach_object_property(
+                db, "another-user", "vélo", "couleur", "bleu",
+                evidence="Tentative d'accès croisé",
+            )
+        assert list_known_objects(db, "another-user") == []
+    finally:
+        db.close()

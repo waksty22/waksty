@@ -16,6 +16,7 @@ from learning.sensory import (
 from learning.perception_fusion import (
     init_perception_fusion_tables,
     link_temporally_cooccurring_observation,
+    list_perception_fusions,
 )
 
 
@@ -166,5 +167,34 @@ def test_sensory_observation_rejects_non_text_content_without_writing(
         assert db.execute(
             "SELECT COUNT(*) FROM sensory_observations"
         ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("invalid_window", [None, "120", 1.5, True, False, {}])
+def test_perception_fusion_rejects_non_integer_window(tmp_path, invalid_window):
+    db = open_db(tmp_path / "invalid-window.sqlite3")
+    try:
+        audio = record_observation(
+            db, "creator", "audio", "bonjour", "confirmed_transcription"
+        )
+        with pytest.raises(ValueError, match="fenêtre|entier"):
+            link_temporally_cooccurring_observation(
+                db, "creator", audio["observation_id"],
+                window_seconds=invalid_window,
+            )
+        assert db.execute(
+            "SELECT COUNT(*) FROM perception_fusion_candidates"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("invalid_limit", [None, "10", 1.5, True, False, {}])
+def test_perception_fusion_list_rejects_non_integer_limit(tmp_path, invalid_limit):
+    db = open_db(tmp_path / "invalid-limit.sqlite3")
+    try:
+        with pytest.raises(ValueError, match="limite|entier"):
+            list_perception_fusions(db, "creator", limit=invalid_limit)
     finally:
         db.close()

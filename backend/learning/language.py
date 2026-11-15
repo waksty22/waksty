@@ -55,6 +55,8 @@ def record_heard_word(
     db: sqlite3.Connection, user_id: str, word: str, evidence: str = "Mot entendu"
 ) -> dict[str, Any]:
     clean = normalize_word(word)
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'exposition doit être du texte.")
     now = utc_now()
     db.execute(
         """INSERT INTO personal_vocabulary
@@ -102,6 +104,10 @@ def record_explicit_word_teaching(
     evidence: str = "Enseignement explicite de l'utilisateur",
 ) -> list[dict[str, Any]]:
     """Store explicit word definitions as heard, never as understood."""
+    if not isinstance(text, str):
+        raise ValueError("Le texte enseigné doit être une chaîne de caractères.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'enseignement doit être du texte.")
     pattern = re.compile(
         r"(?:(?:le\s+)?mot\s+)?"
         r"(?P<word>[A-Za-zÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ'-]{0,79})"
@@ -111,7 +117,7 @@ def record_explicit_word_teaching(
     )
     recorded: list[dict[str, Any]] = []
     now = utc_now()
-    for match in pattern.finditer(str(text or "")):
+    for match in pattern.finditer(text):
         try:
             word = normalize_word(match.group("word"))
         except ValueError:

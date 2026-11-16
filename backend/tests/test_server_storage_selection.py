@@ -759,3 +759,42 @@ def test_live_provider_error_message_truncates_long_text():
     import server
 
     assert server._normalize_live_error_message({"message": "x" * 1000}) == "x" * 500
+
+
+@pytest.mark.parametrize(
+    "data,current,chunk_count,expected",
+    [
+        ("abc", 0, 0, 3),
+        ("", 0, 0, 0),
+        (None, 0, 0, 0),
+        ("x" * 1_000_001, 0, 0, 0),
+        ("x" * 10, 8_000_000 - 5, 0, 8_000_000 - 5),
+        ("x", 0, 256, 0),
+    ],
+)
+def test_live_audio_buffer_rejects_oversized_or_invalid_chunks(
+    data, current, chunk_count, expected
+):
+    import server
+
+    chunks = [{"audio": "a", "sample_rate": 24000}] * chunk_count
+    result = server._append_live_audio_chunk(chunks, data, 24000, current)
+    assert result == expected
+    assert len(chunks) == chunk_count + (1 if expected != current else 0)
+
+
+def test_live_audio_buffer_enforces_total_turn_limit_and_sample_rate():
+    import server
+
+    chunks = []
+    current = 0
+    for _ in range(8):
+        current = server._append_live_audio_chunk(
+            chunks, "x" * 1_000_000, 96000, current
+        )
+    assert current == server.MAX_LIVE_AUDIO_TURN_CHARS
+    assert len(chunks) == 8
+    assert all(item["sample_rate"] == 24000 for item in chunks)
+    current = server._append_live_audio_chunk(chunks, "x", 24000, current)
+    assert current == server.MAX_LIVE_AUDIO_TURN_CHARS
+    assert len(chunks) == 8

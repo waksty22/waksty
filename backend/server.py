@@ -279,6 +279,34 @@ STORAGE_MIGRATION_PENDING_CUTOVER = False
 LIVE_WS_TICKET_TTL_SECONDS = 45
 live_ws_tickets = OneTimeTicketStore(LIVE_WS_TICKET_TTL_SECONDS)
 
+MAX_LIVE_AUDIO_CHUNK_CHARS = 1_000_000
+MAX_LIVE_AUDIO_TURN_CHARS = 8_000_000
+MAX_LIVE_AUDIO_TURN_CHUNKS = 256
+
+
+def _append_live_audio_chunk(
+    chunks: list[dict], data: Any, sample_rate: int, current_chars: int
+) -> int:
+    """Bound buffered Gemini audio for one turn; return updated size or unchanged."""
+    if (
+        not isinstance(data, str)
+        or not data
+        or len(data) > MAX_LIVE_AUDIO_CHUNK_CHARS
+        or not isinstance(current_chars, int)
+        or isinstance(current_chars, bool)
+        or current_chars < 0
+        or current_chars + len(data) > MAX_LIVE_AUDIO_TURN_CHARS
+        or len(chunks) >= MAX_LIVE_AUDIO_TURN_CHUNKS
+    ):
+        return current_chars
+    if not isinstance(sample_rate, int) or isinstance(sample_rate, bool):
+        sample_rate = 24000
+    if not 8000 <= sample_rate <= 48000:
+        sample_rate = 24000
+    chunks.append({"audio": data, "sample_rate": sample_rate})
+    return current_chars + len(data)
+
+
 def _normalize_live_error_message(error: Any) -> str:
     """Expose only bounded provider text; never stringify arbitrary payloads."""
     if not isinstance(error, dict):
@@ -5540,7 +5568,7 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
-    live_turn_state = {"user": "", "assistant": "", "audio": []}
+    live_turn_state = {"user": "", "assistant": "", "audio": [], "audio_chars": 0}
 
     try:
         log.info("[GEMINI LIVE] Ouverture session modèle=%s", GEMINI_LIVE_MODEL)
@@ -5759,6 +5787,7 @@ async def websocket_endpoint(
                         server_content = {}
                     if server_content.get("interrupted"):
                         live_turn_state["audio"] = []
+                        live_turn_state["audio_chars"] = 0
                         live_turn_state["assistant"] = ""
                         await websocket.send_json({"type": "interrupt"})
                     input_transcription = server_content.get("inputTranscription") or {}
@@ -5828,9 +5857,10 @@ async def websocket_endpoint(
                                 if 8000 <= candidate_rate <= 48000
                                 else 24000
                             )
-                            live_turn_state["audio"].append({
-                                "audio": inline["data"], "sample_rate": sample_rate,
-                            })
+                            live_turn_state["audio_chars"] = _append_live_audio_chunk(
+                                live_turn_state["audio"], inline["data"], sample_rate,
+                                live_turn_state["audio_chars"],
+                            )
                         elif isinstance(part.get("text"), str) and part["text"].strip():
                             part_text = part["text"].strip()
                             if not output_transcription.get("text"):
@@ -5897,6 +5927,7 @@ async def websocket_endpoint(
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []
+                        live_turn_state["audio_chars"] = 0
                         await websocket.send_json({"type": "turn_complete"})
 
             client_task = asyncio.create_task(client_to_gemini())

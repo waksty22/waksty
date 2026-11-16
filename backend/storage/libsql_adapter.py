@@ -211,14 +211,16 @@ class LibSQLConnectionAdapter:
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
         # Preserve sqlite3 transaction semantics. Request-scoped adapters
         # additionally release their remote session after the transaction.
+        primary_exception = exc if exc_type is not None else None
         try:
             if exc_type is None:
                 try:
                     self.commit()
-                except Exception:
+                except Exception as commit_error:
                     # A failed commit must not leave a request-scoped
                     # transaction pending on the remote session. Preserve
                     # the original commit error if rollback also fails.
+                    primary_exception = commit_error
                     try:
                         self.rollback()
                     except Exception:
@@ -233,7 +235,13 @@ class LibSQLConnectionAdapter:
                     pass
         finally:
             if self._close_on_context_exit:
-                self.close()
+                try:
+                    self.close()
+                except Exception:
+                    # Cleanup failures are useful when they are the only
+                    # failure, but must not mask a transaction/body error.
+                    if primary_exception is None:
+                        raise
         return False
 
 

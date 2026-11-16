@@ -4,8 +4,9 @@ Builds a read-only, user-scoped view across existing memories, autobiographical
 experiences, and supervised skill assessments. It does not create memories,
 promote observations, or infer that an experience proves understanding.
 """
-import math
 from __future__ import annotations
+
+import math
 
 import json
 import re

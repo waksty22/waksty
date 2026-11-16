@@ -5706,8 +5706,13 @@ async def websocket_endpoint(
                         for function_call in function_calls[:8]:
                             if not isinstance(function_call, dict):
                                 continue
-                            function_name = str(function_call.get("name") or "")
-                            function_args = function_call.get("args") or {}
+                            raw_function_name = function_call.get("name")
+                            if not isinstance(raw_function_name, str):
+                                continue
+                            function_name = raw_function_name.strip()
+                            if not function_name:
+                                continue
+                            function_args = function_call.get("args")
                             if not isinstance(function_args, dict):
                                 function_args = {}
                             function_result = execute_tool(
@@ -5768,10 +5773,10 @@ async def websocket_endpoint(
                                 log.exception("[GEMINI LIVE] Échec mémorisation transcription")
                             await websocket.send_json({"type": "user_text", "text": heard_text})
 
-                    output_transcription = server_content.get("outputTranscription") or {}
-                    if isinstance(output_transcription, dict) and isinstance(
-                        output_transcription.get("text"), str
-                    ):
+                    output_transcription = server_content.get("outputTranscription")
+                    if not isinstance(output_transcription, dict):
+                        output_transcription = {}
+                    if isinstance(output_transcription.get("text"), str):
                         spoken_text = output_transcription["text"].strip()
                         if spoken_text:
                             live_turn_state["assistant"] = merge_live_transcript(

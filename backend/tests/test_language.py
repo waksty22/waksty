@@ -294,6 +294,26 @@ def test_ordinary_live_conversation_does_not_become_explicit_word_teaching(langu
     assert list_vocabulary(language_db, "creator") == []
 
 
+def test_explicit_definition_does_not_double_count_same_message_exposure(language_db):
+    from learning.language import record_explicit_word_teaching
+
+    message = "Le mot coq signifie un oiseau domestique qui chante."
+    record_heard_text(language_db, "creator", message, evidence="Message écrit")
+    taught = record_explicit_word_teaching(
+        language_db, "creator", message, evidence="Enseignement explicite"
+    )
+
+    assert [item["word"] for item in taught] == ["coq"]
+    row = language_db.execute(
+        "SELECT exposure_count, meaning, state FROM personal_vocabulary "
+        "WHERE user_id=? AND word=?",
+        ("creator", "coq"),
+    ).fetchone()
+    assert row["exposure_count"] == 1
+    assert row["meaning"] == "un oiseau domestique qui chante"
+    assert row["state"] == "heard"
+
+
 def test_explicit_live_definition_is_stored_as_heard_not_understood(language_db):
     from learning.language import record_explicit_word_teaching, list_vocabulary
 

@@ -227,7 +227,8 @@ def test_memory_server_entrypoints_reject_coercion_before_storage():
     assert "not isinstance(confidence, (int, float))" in remember_source
     assert "any(not isinstance(tag, str) for tag in tags)" in remember_source
     assert "int(importance)" not in remember_source
-    assert "float(confidence)" not in remember_source or "math.isfinite(float(confidence))" in remember_source
+    assert "numeric_confidence = float(confidence)" in remember_source
+    assert "math.isfinite(numeric_confidence)" in remember_source
     assert "not isinstance(query, str)" in retrieve_source
     assert "isinstance(limit, bool) or not isinstance(limit, int)" in retrieve_source
     assert "int(limit)" not in retrieve_source

@@ -798,3 +798,50 @@ def test_live_audio_buffer_enforces_total_turn_limit_and_sample_rate():
     current = server._append_live_audio_chunk(chunks, "x", 24000, current)
     assert current == server.MAX_LIVE_AUDIO_TURN_CHARS
     assert len(chunks) == 8
+
+
+
+def test_interrupted_live_turn_persists_only_text_and_resets_audio_state(monkeypatch):
+    import server
+
+    saved = []
+    monkeypatch.setattr(
+        server, "save_conversation_turn",
+        lambda *args, **kwargs: saved.append((args, kwargs)),
+    )
+    state = {
+        "user": "  Bonjour  ",
+        "assistant": {"malformed": "not text"},
+        "audio": [{"audio": "YWJj", "sample_rate": 24000}],
+        "audio_chars": 4,
+    }
+
+    assert server.persist_interrupted_live_turn("creator", state) is True
+
+    assert saved == [
+        (("creator", "Bonjour", "",), {"source": "gemini_live_interrupted"})
+    ]
+    assert state == {
+        "user": "", "assistant": "", "audio": [], "audio_chars": 0
+    }
+
+
+def test_interrupted_live_turn_with_no_valid_text_discards_audio(monkeypatch):
+    import server
+
+    saved = []
+    monkeypatch.setattr(
+        server, "save_conversation_turn",
+        lambda *args, **kwargs: saved.append((args, kwargs)),
+    )
+    state = {
+        "user": {"not": "text"},
+        "assistant": 123,
+        "audio": [{"audio": "YWJj", "sample_rate": 24000}],
+        "audio_chars": 4,
+    }
+
+    assert server.persist_interrupted_live_turn("creator", state) is False
+    assert saved == []
+    assert state["audio"] == []
+    assert state["audio_chars"] == 0

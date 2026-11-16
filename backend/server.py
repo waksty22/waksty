@@ -2275,10 +2275,18 @@ def save_conversation_turn(
         )
 
 def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> bool:
-    """Persist partial confirmed Live transcripts when a session ends unexpectedly."""
-    user_text = str(turn_state.get("user") or "").strip()
-    assistant_text = str(turn_state.get("assistant") or "").strip()
+    """Persist only confirmed text transcripts when a Live session ends unexpectedly."""
+    raw_user_text = turn_state.get("user")
+    raw_assistant_text = turn_state.get("assistant")
+    user_text = raw_user_text.strip() if isinstance(raw_user_text, str) else ""
+    assistant_text = (
+        raw_assistant_text.strip()
+        if isinstance(raw_assistant_text, str)
+        else ""
+    )
     if not user_text and not assistant_text:
+        turn_state["audio"] = []
+        turn_state["audio_chars"] = 0
         return False
     save_conversation_turn(
         user_id, user_text, assistant_text, source="gemini_live_interrupted"
@@ -2286,6 +2294,7 @@ def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> b
     turn_state["user"] = ""
     turn_state["assistant"] = ""
     turn_state["audio"] = []
+    turn_state["audio_chars"] = 0
     return True
 
 

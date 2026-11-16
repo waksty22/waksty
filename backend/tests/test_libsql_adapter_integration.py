@@ -339,3 +339,81 @@ def test_context_manager_preserves_body_error_when_rollback_fails():
     assert native.close_calls == 1
     with pytest.raises(Exception, match="closed database"):
         connection.execute("SELECT 1")
+
+
+def test_context_manager_preserves_body_error_when_close_fails():
+    class FailingCloseConnection:
+        def __init__(self):
+            self.rollback_calls = 0
+            self.close_calls = 0
+
+        def commit(self):
+            raise AssertionError("commit must not run after body failure")
+
+        def rollback(self):
+            self.rollback_calls += 1
+
+        def close(self):
+            self.close_calls += 1
+            raise RuntimeError("close failed")
+
+    native = FailingCloseConnection()
+    connection = adapt_libsql_connection(native, close_on_context_exit=True)
+
+    with pytest.raises(ValueError, match="original body failure"):
+        with connection:
+            raise ValueError("original body failure")
+
+    assert native.rollback_calls == 1
+    assert native.close_calls == 1
+
+
+def test_context_manager_preserves_commit_error_when_close_fails():
+    class FailingCommitAndCloseConnection:
+        def __init__(self):
+            self.rollback_calls = 0
+            self.close_calls = 0
+
+        def commit(self):
+            raise RuntimeError("commit failed")
+
+        def rollback(self):
+            self.rollback_calls += 1
+
+        def close(self):
+            self.close_calls += 1
+            raise RuntimeError("close failed")
+
+    native = FailingCommitAndCloseConnection()
+    connection = adapt_libsql_connection(native, close_on_context_exit=True)
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        with connection:
+            pass
+
+    assert native.rollback_calls == 1
+    assert native.close_calls == 1
+
+
+def test_context_manager_surfaces_close_error_after_successful_commit():
+    class FailingCloseConnection:
+        def __init__(self):
+            self.commit_calls = 0
+            self.close_calls = 0
+
+        def commit(self):
+            self.commit_calls += 1
+
+        def close(self):
+            self.close_calls += 1
+            raise RuntimeError("close failed")
+
+    native = FailingCloseConnection()
+    connection = adapt_libsql_connection(native, close_on_context_exit=True)
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        with connection:
+            pass
+
+    assert native.commit_calls == 1
+    assert native.close_calls == 1

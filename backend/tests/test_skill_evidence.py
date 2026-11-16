@@ -314,3 +314,27 @@ def test_skill_assessment_route_rejects_overflowing_score_with_422(monkeypatch):
     with pytest.raises(HTTPException) as error:
         asyncio.run(server.api_record_skill_assessment(FakeRequest(), auth="creator"))
     assert error.value.status_code == 422
+
+
+def test_malformed_branch_definition_is_ignored_safely():
+    row = {
+        "test_name": "mots:vocabulaire",
+        "passed": 1,
+        "score": 90,
+        "tested_at": "2026-11-03T10:00:00Z",
+        "details": {
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": "Chappie a répété correctement le mot observé.",
+        },
+    }
+    catalog = {
+        "mots": {
+            "sub_branches": {
+                "vocabulaire": [],
+            },
+        },
+    }
+    profile, count = build_validated_skill_data([row], catalog=catalog)
+    assert profile == {}
+    assert count == 0

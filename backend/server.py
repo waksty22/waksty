@@ -3861,9 +3861,14 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
     evidence = evidence_value.strip()
     if system_key not in COGNITIVE_CATALOG:
         raise HTTPException(status_code=422, detail="Système cognitif inconnu.")
-    branches = COGNITIVE_CATALOG[system_key].get("sub_branches", {})
-    if branch_key not in branches:
+    system_info = COGNITIVE_CATALOG[system_key]
+    if not isinstance(system_info, dict):
+        raise HTTPException(status_code=422, detail="Définition du système cognitif invalide.")
+    branches = system_info.get("sub_branches", {})
+    if not isinstance(branches, dict) or branch_key not in branches:
         raise HTTPException(status_code=422, detail="Sous-compétence inconnue.")
+    if not isinstance(branches[branch_key], dict):
+        raise HTTPException(status_code=422, detail="Définition de la sous-compétence invalide.")
     if data.get("supervisor_approved") is not True:
         raise HTTPException(status_code=403, detail="Une validation explicite du superviseur est obligatoire.")
     if len(evidence) < 20 or len(evidence) > 2000:

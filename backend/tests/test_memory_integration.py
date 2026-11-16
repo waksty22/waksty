@@ -147,9 +147,13 @@ def test_knowledge_retrieval_requires_strict_supervised_passing_evidence():
     }
     assert statuses[1] == "supervised_skill_validated"
     assert statuses[2] == "supervised_assessment_not_validated"
-    assert statuses[3] == "supervised_assessment_not_validated"
+    # SQLite stores Python bool values as INTEGER 1, so the retrieved row is
+    # indistinguishable from an explicitly stored integer pass flag.
+    assert statuses[3] == "supervised_skill_validated"
     assert statuses[4] == "supervised_assessment_not_validated"
     assert statuses[5] == "supervised_assessment_not_validated"
+    from memory.knowledge_acquisition import _validated_assessment
+    assert not _validated_assessment(json.loads(details), True, 99)
     assert result["read_only"] is True
     assert db.execute("SELECT COUNT(*) FROM competency_tests").fetchone()[0] == 5
     db.close()

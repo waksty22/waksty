@@ -187,7 +187,7 @@ def retrieve_acquired_knowledge(
             "skill_assessment", row["id"], content, status,
             "competency_tests", row.get("tested_at"),
             {"skill": skill, "score": score,
-             "passed": bool(row.get("passed")),
+             "passed": passed,
              "supervisor_approved": approved,
              "goal_id": details.get("goal_id"),
              "goal_step_id": details.get("goal_step_id")},

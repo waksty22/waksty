@@ -193,7 +193,7 @@ def test_interrupted_live_turn_is_saved_as_partial_and_state_is_cleared(monkeypa
         "Bonjour, je",
         "gemini_live_interrupted",
     )]
-    assert state == {"user": "", "assistant": "", "audio": []}
+    assert state == {"user": "", "assistant": "", "audio": [], "audio_chars": 0}
 
 
 def test_empty_interrupted_live_turn_does_not_write(monkeypatch):

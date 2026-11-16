@@ -159,7 +159,7 @@ def test_interrupted_live_turn_persists_confirmed_transcripts_only(
         "Réponse déjà transcrite.",
         "gemini_live_interrupted",
     )]
-    assert state == {"user": "", "assistant": "", "audio": []}
+    assert state == {"user": "", "assistant": "", "audio": [], "audio_chars": 0}
 
     # Empty or audio-only partial turns are not persisted as conversations.
     empty_state = {"user": "", "assistant": "", "audio": [b"unconfirmed"]}

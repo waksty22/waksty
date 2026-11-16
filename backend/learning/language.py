@@ -155,7 +155,7 @@ def record_explicit_word_teaching(
             if (position := text.find(mark, match.end())) != -1
         ]
         sentence_end = min(sentence_end_candidates) if sentence_end_candidates else len(text)
-        sentence = text[sentence_start:sentence_end]
+        sentence = text[sentence_start:sentence_end + 1]
         prefix = text[sentence_start:match.start()]
         if "?" in sentence or uncertainty_prefix.search(prefix):
             continue

@@ -207,6 +207,9 @@ def test_full_chappie_schema_initializes_and_persists_on_libsql(
         turso_database_url="libsql://isolated.invalid",
         turso_auth_token="isolated-test-token",
     )
+    monkeypatch.setenv("CHAPPIE_TURSO_CUTOVER_READY", "1")
+    monkeypatch.delenv("CHAPPIE_TURSO_FRESH_START", raising=False)
+    monkeypatch.delenv("CHAPPIE_TURSO_ADOPT_EXISTING_SCHEMA", raising=False)
     monkeypatch.setattr(
         chappie_server.StorageSettings,
         "from_env",

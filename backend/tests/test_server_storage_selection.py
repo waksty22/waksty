@@ -893,3 +893,20 @@ def test_live_transcript_learning_delta_ignores_provider_retransmissions():
 
     assert transcript == "Bonjour tout le monde encore"
     assert learned_segments == ["Bonjour tout le monde", "encore"]
+
+
+def test_live_transcript_merge_enforces_chunk_and_turn_limits():
+    import server
+
+    assert server._merge_bounded_live_transcript("", "Bonjour") == "Bonjour"
+    assert server._merge_bounded_live_transcript(
+        "Bonjour tout le monde", "Bonjour tout"
+    ) == "Bonjour tout le monde"
+    assert server._merge_bounded_live_transcript(
+        "", "x" * (server.MAX_LIVE_TEXT_CHUNK_CHARS + 1)
+    ) is None
+    assert server._merge_bounded_live_transcript(
+        "x" * server.MAX_LIVE_TRANSCRIPT_CHARS, "y"
+    ) is None
+    assert server._merge_bounded_live_transcript(None, "Bonjour") is None
+    assert server._merge_bounded_live_transcript("Bonjour", 123) is None

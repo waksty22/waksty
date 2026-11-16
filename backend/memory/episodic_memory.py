@@ -623,6 +623,12 @@ def apply_memory_decay(
           AND importance BETWEEN 2 AND 5
           AND typeof(access_count) = 'integer'
           AND access_count BETWEEN 0 AND 1
+          AND typeof(content) = 'text' AND length(trim(content)) > 0
+          AND typeof(category) = 'text'
+          AND typeof(source_type) = 'text'
+          AND source_type IN ('observed', 'taught', 'inferred', 'confirmed')
+          AND typeof(confidence) IN ('integer', 'real')
+          AND confidence BETWEEN 0.0 AND 1.0
           AND typeof(updated_at) = 'text'
           AND julianday(updated_at) IS NOT NULL
           AND julianday(updated_at) < julianday(?)

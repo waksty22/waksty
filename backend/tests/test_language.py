@@ -279,3 +279,36 @@ def test_vocabulary_read_and_progression_paths_reject_invalid_user_identity(
     ):
         with pytest.raises(ValueError, match="Identifiant utilisateur"):
             operation()
+
+def test_ordinary_live_conversation_does_not_become_explicit_word_teaching(language_db):
+    from learning.language import record_explicit_word_teaching, list_vocabulary
+
+    taught = record_explicit_word_teaching(
+        language_db,
+        "creator",
+        "Bonjour Chappie. Regarde la montre et le coq dans le jardin.",
+        evidence="Enseignement explicite via Gemini Live",
+    )
+
+    assert taught == []
+    assert list_vocabulary(language_db, "creator") == []
+
+
+def test_explicit_live_definition_is_stored_as_heard_not_understood(language_db):
+    from learning.language import record_explicit_word_teaching, list_vocabulary
+
+    taught = record_explicit_word_teaching(
+        language_db,
+        "creator",
+        "Le mot coq signifie un oiseau domestique qui chante.",
+        evidence="Enseignement explicite via Gemini Live",
+    )
+
+    assert len(taught) == 1
+    assert taught[0]["word"] == "coq"
+    assert taught[0]["meaning"] == "un oiseau domestique qui chante"
+    assert taught[0]["state"] == "heard"
+    stored = list_vocabulary(language_db, "creator")
+    assert len(stored) == 1
+    assert stored[0]["state"] == "heard"
+    assert get_usable_words(language_db, "creator") == set()

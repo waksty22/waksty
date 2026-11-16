@@ -5592,6 +5592,8 @@ async def websocket_endpoint(
                         setup_recv_task, websocket
                     )
                     setup_response = json.loads(raw_setup)
+                    if not isinstance(setup_response, dict):
+                        continue
                     if "setupComplete" in setup_response:
                         break
                     if "error" in setup_response:
@@ -5625,6 +5627,8 @@ async def websocket_endpoint(
             async def client_to_gemini():
                 while True:
                     payload = await websocket.receive_json()
+                    if not isinstance(payload, dict):
+                        continue
                     action = payload.get("action")
                     if action == "audio_chunk":
                         pcm = payload.get("pcm_data")
@@ -5674,6 +5678,8 @@ async def websocket_endpoint(
             async def gemini_to_client():
                 async for raw_message in gemini_ws:
                     response = json.loads(raw_message)
+                    if not isinstance(response, dict):
+                        continue
                     if "error" in response:
                         error = response["error"]
                         await websocket.send_json({
@@ -5684,8 +5690,12 @@ async def websocket_endpoint(
 
                     # V28 : Gemini Live utilise exactement les mêmes outils serveur
                     # que le chat classique. Les outils sont exécutés côté backend.
-                    tool_call = response.get("toolCall") or {}
-                    function_calls = tool_call.get("functionCalls") or []
+                    tool_call = response.get("toolCall")
+                    if not isinstance(tool_call, dict):
+                        tool_call = {}
+                    function_calls = tool_call.get("functionCalls")
+                    if not isinstance(function_calls, list):
+                        function_calls = []
                     if isinstance(function_calls, list) and function_calls:
                         function_responses = []
                         for function_call in function_calls[:8]:
@@ -5712,12 +5722,13 @@ async def websocket_endpoint(
                                 }
                             }, ensure_ascii=False))
 
-                    if response.get("serverContent", {}).get("interrupted"):
+                    server_content = response.get("serverContent")
+                    if not isinstance(server_content, dict):
+                        server_content = {}
+                    if server_content.get("interrupted"):
                         live_turn_state["audio"] = []
                         live_turn_state["assistant"] = ""
                         await websocket.send_json({"type": "interrupt"})
-
-                    server_content = response.get("serverContent") or {}
                     input_transcription = server_content.get("inputTranscription") or {}
                     if isinstance(input_transcription, dict) and isinstance(
                         input_transcription.get("text"), str
@@ -5762,11 +5773,19 @@ async def websocket_endpoint(
                                 live_turn_state["assistant"], spoken_text
                             )
 
-                    model_turn = server_content.get("modelTurn") or {}
-                    for part in model_turn.get("parts", []):
+                    model_turn = server_content.get("modelTurn")
+                    if not isinstance(model_turn, dict):
+                        model_turn = {}
+                    model_parts = model_turn.get("parts")
+                    if not isinstance(model_parts, list):
+                        model_parts = []
+                    for part in model_parts:
+                        if not isinstance(part, dict):
+                            continue
                         inline = part.get("inlineData") or part.get("inline_data")
-                        if isinstance(inline, dict) and inline.get("data"):
-                            mime_type = str(inline.get("mimeType") or inline.get("mime_type") or "")
+                        if isinstance(inline, dict) and isinstance(inline.get("data"), str) and inline.get("data"):
+                            raw_mime_type = inline.get("mimeType") or inline.get("mime_type") or ""
+                            mime_type = raw_mime_type if isinstance(raw_mime_type, str) else ""
                             match = re.search(r"rate=(\d+)", mime_type)
                             sample_rate = int(match.group(1)) if match else 24000
                             live_turn_state["audio"].append({

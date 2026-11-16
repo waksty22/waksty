@@ -54,8 +54,16 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
             check_same_thread=False,
         )
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=20000")
+        try:
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=20000")
+        except Exception:
+            # Do not leak a local handle if connection setup is incomplete.
+            try:
+                connection.close()
+            except Exception:
+                pass
+            raise
         return connection
 
     if selected.backend == "turso":

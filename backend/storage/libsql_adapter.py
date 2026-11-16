@@ -213,7 +213,17 @@ class LibSQLConnectionAdapter:
         # additionally release their remote session after the transaction.
         try:
             if exc_type is None:
-                self.commit()
+                try:
+                    self.commit()
+                except Exception:
+                    # A failed commit must not leave a request-scoped
+                    # transaction pending on the remote session. Preserve
+                    # the original commit error if rollback also fails.
+                    try:
+                        self.rollback()
+                    except Exception:
+                        pass
+                    raise
             else:
                 self.rollback()
         finally:

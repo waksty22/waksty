@@ -141,7 +141,7 @@ from cognition.development import (
 )
 from cognition.engine import cognitive_engine
 from cognition.catalog import COGNITIVE_CATALOG
-from cognition.skill_evidence import build_validated_skill_data
+from cognition.skill_evidence import build_validated_skill_data, normalize_evidence_text
 from memory.knowledge_acquisition import (
     retrieve_acquired_knowledge, format_acquired_knowledge_context,
 )
@@ -3919,7 +3919,11 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
                     continue
                 if not isinstance(old_details, dict):
                     continue
-                if old_details.get("evidence") == evidence:
+                old_evidence = old_details.get("evidence")
+                if (
+                    isinstance(old_evidence, str)
+                    and normalize_evidence_text(old_evidence) == normalize_evidence_text(evidence)
+                ):
                     raise HTTPException(status_code=409, detail="Cette preuve a déjà été utilisée pour cette sous-compétence.")
             result = evaluate_competency_test(
                 db, user_id, test_name, score >= 70, score, details

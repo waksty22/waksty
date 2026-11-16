@@ -93,10 +93,12 @@ def _rows(
                 continue
             if not isinstance(item.get("category"), str):
                 continue
-            if "source_type" in item and item.get("source_type") not in {
-                "observed", "taught", "inferred", "confirmed"
-            }:
-                continue
+            if "source_type" in item:
+                source_type = item.get("source_type")
+                if not isinstance(source_type, str) or source_type not in {
+                    "observed", "taught", "inferred", "confirmed"
+                }:
+                    continue
             importance = item.get("importance")
             if isinstance(importance, bool) or not isinstance(importance, int):
                 continue

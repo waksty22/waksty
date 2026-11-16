@@ -193,6 +193,10 @@ def test_shared_brain_rejects_unknown_memory_provenance():
     # Add the newer provenance column to simulate the V19 schema.
     db.execute("ALTER TABLE memories ADD COLUMN source_type TEXT")
     db.execute("UPDATE memories SET source_type='fabricated'")
+    db.execute(
+        "INSERT INTO memories VALUES (2,'creator','general','Provenance binaire',3,?,0,'t0','t1',?)",
+        (json.dumps([]), b"taught"),
+    )
     snapshot = get_shared_brain_snapshot(db, "creator")
     assert snapshot["memories"] == []
     db.close()

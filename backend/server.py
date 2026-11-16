@@ -5727,6 +5727,8 @@ async def websocket_endpoint(
                     if not isinstance(payload, dict):
                         continue
                     action = payload.get("action")
+                    pending_live_text_segment = ""
+                    pending_merged_user_text = None
                     if action == "audio_chunk":
                         pcm = payload.get("pcm_data")
                         # Audio is base64 PCM. Bound each frame before forwarding
@@ -5783,14 +5785,8 @@ async def websocket_endpoint(
                         new_text_segment = _new_live_transcript_segment(
                             previous_user_text, merged_user_text
                         )
-                        live_turn_state["user"] = merged_user_text
-                        if new_text_segment:
-                            try:
-                                _record_live_text_exposure(user_id, new_text_segment)
-                            except Exception:
-                                log.exception(
-                                    "[GEMINI LIVE] Échec mémorisation exposition texte"
-                                )
+                        pending_live_text_segment = new_text_segment
+                        pending_merged_user_text = merged_user_text
                         message = {
                             "clientContent": {
                                 "turns": [{"role": "user", "parts": [{"text": text_value}]}],
@@ -5801,6 +5797,17 @@ async def websocket_endpoint(
                         # Never relay arbitrary client JSON into the provider protocol.
                         continue
                     await gemini_ws.send(json.dumps(message, ensure_ascii=False))
+                    if pending_merged_user_text is not None:
+                        live_turn_state["user"] = pending_merged_user_text
+                    if pending_live_text_segment:
+                        try:
+                            _record_live_text_exposure(
+                                user_id, pending_live_text_segment
+                            )
+                        except Exception:
+                            log.exception(
+                                "[GEMINI LIVE] Échec mémorisation exposition texte"
+                            )
 
             async def gemini_to_client():
                 async for raw_message in gemini_ws:

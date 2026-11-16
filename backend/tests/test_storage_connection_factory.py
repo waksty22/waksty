@@ -90,3 +90,34 @@ def test_turso_factory_closes_native_session_when_foreign_keys_setup_fails(
         )
 
     assert native.close_calls == 1
+
+
+def test_sqlite_factory_closes_connection_when_pragma_setup_fails(
+    monkeypatch, tmp_path
+):
+    class FailedInitializationConnection:
+        def __init__(self):
+            self.close_calls = 0
+            self.row_factory = None
+
+        def execute(self, sql, parameters=()):
+            raise RuntimeError("sqlite pragma initialization failed")
+
+        def close(self):
+            self.close_calls += 1
+
+    native = FailedInitializationConnection()
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: native)
+
+    with pytest.raises(
+        RuntimeError, match="sqlite pragma initialization failed"
+    ):
+        open_storage_connection(
+            StorageSettings(
+                backend="sqlite",
+                sqlite_path=str(tmp_path / "isolated.sqlite3"),
+            )
+        )
+
+    assert native.close_calls == 1
+    assert native.row_factory is sqlite3.Row

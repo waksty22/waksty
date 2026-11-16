@@ -70,7 +70,12 @@ def record_heard_word(
            (user_id, word, state, exposure_count, evidence, created_at, updated_at)
            VALUES (?, ?, 'heard', 1, ?, ?, ?)
            ON CONFLICT(user_id, word) DO UPDATE SET
-             exposure_count=personal_vocabulary.exposure_count+1,
+             exposure_count=CASE
+                 WHEN typeof(personal_vocabulary.exposure_count)='integer'
+                  AND personal_vocabulary.exposure_count < 9223372036854775807
+                 THEN personal_vocabulary.exposure_count+1
+                 ELSE personal_vocabulary.exposure_count
+             END,
              evidence=excluded.evidence,
              updated_at=excluded.updated_at""",
         (user_id, clean, evidence[:500], now, now),

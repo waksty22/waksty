@@ -5682,9 +5682,14 @@ async def websocket_endpoint(
                         continue
                     if "error" in response:
                         error = response["error"]
+                        error_message = (
+                            error.get("message", "Erreur Gemini Live.")
+                            if isinstance(error, dict)
+                            else error
+                        )
                         await websocket.send_json({
                             "type": "error",
-                            "message": str(error.get("message", "Erreur Gemini Live.")),
+                            "message": str(error_message),
                         })
                         continue
 
@@ -5787,7 +5792,15 @@ async def websocket_endpoint(
                             raw_mime_type = inline.get("mimeType") or inline.get("mime_type") or ""
                             mime_type = raw_mime_type if isinstance(raw_mime_type, str) else ""
                             match = re.search(r"rate=(\d+)", mime_type)
-                            sample_rate = int(match.group(1)) if match else 24000
+                            try:
+                                candidate_rate = int(match.group(1)) if match else 24000
+                            except (ValueError, OverflowError):
+                                candidate_rate = 24000
+                            sample_rate = (
+                                candidate_rate
+                                if 8000 <= candidate_rate <= 48000
+                                else 24000
+                            )
                             live_turn_state["audio"].append({
                                 "audio": inline["data"], "sample_rate": sample_rate,
                             })

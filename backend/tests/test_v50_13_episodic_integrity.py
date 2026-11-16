@@ -9,6 +9,7 @@ from memory.episodic_memory import (
     get_memory_statistics,
     init_memory_tables,
     save_episodic_memory,
+    search_episodic_memories,
 )
 
 

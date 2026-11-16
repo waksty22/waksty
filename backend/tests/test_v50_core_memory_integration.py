@@ -211,3 +211,23 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
     assert "Transcription confirmée par Gemini Live" in live_source
     assert "record_explicit_word_teaching(" in chat_brain_source
     assert "record_explicit_word_teaching(" in live_source
+
+
+
+def test_memory_server_entrypoints_reject_coercion_before_storage():
+    import inspect
+    import server
+
+    remember_source = inspect.getsource(server.remember)
+    retrieve_source = inspect.getsource(server.retrieve_memories)
+
+    assert "not isinstance(content, str)" in remember_source
+    assert "not isinstance(source_type, str)" in remember_source
+    assert "isinstance(importance, bool) or not isinstance(importance, int)" in remember_source
+    assert "not isinstance(confidence, (int, float))" in remember_source
+    assert "any(not isinstance(tag, str) for tag in tags)" in remember_source
+    assert "int(importance)" not in remember_source
+    assert "float(confidence)" not in remember_source or "math.isfinite(float(confidence))" in remember_source
+    assert "not isinstance(query, str)" in retrieve_source
+    assert "isinstance(limit, bool) or not isinstance(limit, int)" in retrieve_source
+    assert "int(limit)" not in retrieve_source

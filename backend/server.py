@@ -1841,23 +1841,35 @@ def remember(
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
 
-    user_id = valid_user(user_id)  
-    content = content.strip()  
+    user_id = valid_user(user_id)
 
-    if not content:  
-        raise HTTPException(  
-            422,  
-            "Un souvenir ne peut pas être vide.",  
-        )  
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(422, "Le contenu du souvenir doit être du texte non vide.")
 
-    importance = max(1, min(5, int(importance)))  
-    confidence = max(0.0, min(1.0, float(confidence)))  
+    if not isinstance(category, str):
+        raise HTTPException(422, "La catégorie doit être du texte.")
 
-    safe_tags = [  
-        str(tag).strip()[:40]  
-        for tag in (tags or [])  
-        if str(tag).strip()  
-    ][:20]  
+    if not isinstance(source_type, str) or source_type.strip().lower() not in {
+        "observed", "taught", "inferred", "confirmed"
+    }:
+        raise HTTPException(422, "La provenance du souvenir est invalide.")
+
+    if isinstance(importance, bool) or not isinstance(importance, int):
+        raise HTTPException(422, "L'importance doit être un entier.")
+
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise HTTPException(422, "La confiance doit être numérique.")
+
+    if not math.isfinite(float(confidence)) or not 0.0 <= float(confidence) <= 1.0:
+        raise HTTPException(422, "La confiance doit être comprise entre 0 et 1.")
+
+    if tags is not None and (
+        not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)
+    ):
+        raise HTTPException(422, "Les tags doivent être une liste de textes.")
+
+    content = content.strip()
+    safe_tags = tags
 
     with db_connection() as db:  
         result = save_episodic_memory(  
@@ -1896,10 +1908,14 @@ def retrieve_memories(
     limit: int = 10,
 ) -> list[dict[str, Any]]:
 
-    user_id = valid_user(user_id)  
-    limit = max(1, min(30, int(limit)))  
+    user_id = valid_user(user_id)
+    if not isinstance(query, str):
+        raise HTTPException(422, "La recherche doit être du texte.")
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise HTTPException(422, "La limite doit être un entier.")
+    limit = max(1, min(30, limit))
 
-    with db_connection() as db:  
+    with db_connection() as db:
         results = search_episodic_memories(  
             db,  
             user_id,  

@@ -274,3 +274,35 @@ def test_full_chappie_schema_initializes_and_persists_on_libsql(
         assert row is not None
         assert row["content"] == "premier souvenir de test"
 
+
+
+
+def test_context_manager_rolls_back_and_closes_when_commit_fails():
+    class FailingCommitConnection:
+        def __init__(self):
+            self.rollback_calls = 0
+            self.close_calls = 0
+
+        def commit(self):
+            raise RuntimeError("commit failed")
+
+        def rollback(self):
+            self.rollback_calls += 1
+
+        def close(self):
+            self.close_calls += 1
+
+    native = FailingCommitConnection()
+    connection = adapt_libsql_connection(
+        native,
+        close_on_context_exit=True,
+    )
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        with connection:
+            pass
+
+    assert native.rollback_calls == 1
+    assert native.close_calls == 1
+    with pytest.raises(Exception, match="closed database"):
+        connection.execute("SELECT 1")

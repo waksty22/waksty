@@ -294,6 +294,22 @@ def test_ordinary_live_conversation_does_not_become_explicit_word_teaching(langu
     assert list_vocabulary(language_db, "creator") == []
 
 
+def test_heard_word_exposure_counter_does_not_overflow_sqlite_integer(language_db):
+    from learning.language import record_heard_word
+
+    language_db.execute(
+        "INSERT INTO personal_vocabulary "
+        "(user_id, word, state, exposure_count, evidence, created_at, updated_at) "
+        "VALUES (?, ?, 'heard', ?, ?, ?, ?)",
+        ("creator", "coq", 9223372036854775807, "test", "now", "now"),
+    )
+
+    recorded = record_heard_word(language_db, "creator", "coq")
+
+    assert recorded["exposure_count"] == 9223372036854775807
+    assert type(recorded["exposure_count"]) is int
+
+
 def test_explicit_definition_does_not_double_count_same_message_exposure(language_db):
     from learning.language import record_explicit_word_teaching
 

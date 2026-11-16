@@ -245,3 +245,28 @@ def test_episodic_memory_rejects_coerced_provenance_tags_and_numbers():
             raise AssertionError(f"save should reject invalid arguments: {kwargs!r}")
     assert db.execute("SELECT COUNT(*) FROM memories_v19").fetchone()[0] == 0
     db.close()
+
+
+
+def test_legacy_memory_migration_ignores_malformed_non_text_tags():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("""
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, category TEXT NOT NULL,
+            content TEXT NOT NULL, importance INTEGER NOT NULL, tags TEXT NOT NULL,
+            access_count INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(user_id, content)
+        )
+    """)
+    db.execute(
+        "INSERT INTO memories VALUES (1,'creator','general','Souvenir tags corrompus',3,?,0,'t0','t1')",
+        (json.dumps(["valide", 42, None, {"tag": "objet"}]),),
+    )
+    init_memory_tables(db)
+    row = db.execute(
+        "SELECT source_type, tags FROM memories_v19 WHERE user_id='creator'"
+    ).fetchone()
+    assert row["source_type"] == "inferred"
+    assert json.loads(row["tags"]) == ["legacy_source_unverified", "valide"]
+    db.close()

@@ -1860,8 +1860,14 @@ def remember(
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise HTTPException(422, "La confiance doit être numérique.")
 
-    if not math.isfinite(float(confidence)) or not 0.0 <= float(confidence) <= 1.0:
+    try:
+        numeric_confidence = float(confidence)
+    except (OverflowError, TypeError, ValueError):
+        raise HTTPException(422, "La confiance doit être un nombre fini.")
+
+    if not math.isfinite(numeric_confidence) or not 0.0 <= numeric_confidence <= 1.0:
         raise HTTPException(422, "La confiance doit être comprise entre 0 et 1.")
+    confidence = numeric_confidence
 
     if tags is not None and (
         not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)

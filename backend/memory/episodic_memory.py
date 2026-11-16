@@ -306,8 +306,12 @@ def migrate_legacy_memories(db: sqlite3.Connection) -> int:
             tags = json.loads(row.get("tags") or "[]")
         except (ValueError, TypeError):
             tags = []
+        legacy_tags = (
+            [tag for tag in tags if isinstance(tag, str)]
+            if isinstance(tags, list) else []
+        )
         safe_tags = _normalize_tags(
-            ["legacy_source_unverified"] + (tags if isinstance(tags, list) else [])
+            ["legacy_source_unverified"] + legacy_tags
         )
         now = utc_now()
         created_at = str(row.get("created_at") or now)

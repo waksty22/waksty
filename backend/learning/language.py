@@ -132,7 +132,33 @@ def record_explicit_word_teaching(
     )
     recorded: list[dict[str, Any]] = []
     now = utc_now()
+    uncertainty_prefix = re.compile(
+        r"\\b(?:je\\s+(?:ne\\s+)?sais\\s+pas|"
+        r"je\\s+me\\s+demande|"
+        r"je\\s+ne\\s+suis\\s+pas\\s+(?:s[uû]r(?:e)?|certain(?:e)?)|"
+        r"je\\s+doute|"
+        r"peut[- ]être|"
+        r"je\\s+(?:crois|pense)\\s+que|"
+        r"il\\s+para[iî]t\\s+que|"
+        r"on\\s+m['’]a\\s+dit\\s+que)\\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
     for match in pattern.finditer(text):
+        # A question or an explicitly uncertain statement is not a lesson.
+        # Evaluate only the sentence containing this candidate, so an
+        # unrelated question earlier in the same message does not suppress it.
+        sentence_start = max(
+            text.rfind(mark, 0, match.start()) for mark in ".!?;\\n"
+        ) + 1
+        sentence_end_candidates = [
+            position for mark in ".!?;\\n"
+            if (position := text.find(mark, match.end())) != -1
+        ]
+        sentence_end = min(sentence_end_candidates) if sentence_end_candidates else len(text)
+        sentence = text[sentence_start:sentence_end]
+        prefix = text[sentence_start:match.start()]
+        if "?" in sentence or uncertainty_prefix.search(prefix):
+            continue
         try:
             word = normalize_word(match.group("word"))
         except ValueError:

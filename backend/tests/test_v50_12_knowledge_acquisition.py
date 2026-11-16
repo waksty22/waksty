@@ -197,7 +197,12 @@ def test_corrupt_memory_rows_are_skipped_without_inventing_provenance():
     assert "Provenance absente" not in contents
     assert "Provenance inconnue" not in contents
     assert "Contenu binaire" not in contents
-    assert "Confiance invalide" not in contents
+    assert "Confiance invalide" in contents
+    invalid_confidence = next(
+        item for item in result["items"]
+        if item["content"] == "Confiance invalide"
+    )
+    assert invalid_confidence["confidence"] == 0.0
     assert "Categorie absente" not in contents
     assert "Une montre possède un cadran rond" in contents
     db.close()

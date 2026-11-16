@@ -161,10 +161,9 @@ def retrieve_acquired_knowledge(
         if isinstance(row.get("id"), bool) or not isinstance(row.get("id"), int) or row["id"] < 1:
             continue
         raw_confidence = row.get("confidence")
-        if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
-            continue
-        if not math.isfinite(float(raw_confidence)) or not 0.0 <= float(raw_confidence) <= 1.0:
-            continue
+        # Confidence is auxiliary metadata: malformed legacy values become
+        # zero confidence, while valid provenance and content remain usable.
+        confidence = _safe_confidence(raw_confidence)
         timestamp = row.get("updated_at") or row.get("created_at")
         if not isinstance(timestamp, str):
             continue
@@ -178,7 +177,7 @@ def retrieve_acquired_knowledge(
             "memory", row["id"], row.get("content", ""), status,
             "memories_v19:" + source_type, timestamp,
             {"category": row["category"],
-             "confidence": float(raw_confidence)},
+             "confidence": confidence},
         )
 
     for row in experiences:

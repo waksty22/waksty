@@ -208,4 +208,6 @@ def test_assessment_duplicate_guard_ignores_non_object_historical_details():
     route = SERVER.split('@app.post("/api/cognition/skills/assessments")', 1)[1].split('@app.post("/api/skills/update")', 1)[0]
     assert 'old_details = json.loads(row["details"] or "{}")' in route
     assert "if not isinstance(old_details, dict):" in route
-    assert 'old_details.get("evidence") == evidence' in route
+    assert 'old_evidence = old_details.get("evidence")' in route
+    assert 'isinstance(old_evidence, str)' in route
+    assert 'normalize_evidence_text(old_evidence) == normalize_evidence_text(evidence)' in route

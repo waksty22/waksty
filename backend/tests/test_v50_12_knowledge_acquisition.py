@@ -180,3 +180,24 @@ def test_server_exposes_retrieval_to_shared_chat_and_live_tools():
     assert 'if name == "retrieve_acquired_knowledge"' in server
     assert "{acquired_knowledge_context}" in server
     assert "get_identity_prompt(user_id)" in server
+
+
+
+def test_corrupt_memory_rows_are_skipped_without_inventing_provenance():
+    db = make_db()
+    seed(db)
+    db.execute("INSERT INTO memories_v19 VALUES (10,'creator','objets','Provenance absente',NULL,0.8,3,'t0','t1')")
+    db.execute("INSERT INTO memories_v19 VALUES (11,'creator','objets','Provenance inconnue','fabricated',0.8,3,'t0','t1')")
+    db.execute("INSERT INTO memories_v19 VALUES (12,'creator','objets','Contenu binaire', 'confirmed',0.8,3,'t0','t1')")
+    db.execute("UPDATE memories_v19 SET content=? WHERE id=12", (b"contenu binaire",))
+    db.execute("INSERT INTO memories_v19 VALUES (13,'creator','objets','Confiance invalide','confirmed','0.9',3,'t0','t1')")
+    db.execute("INSERT INTO memories_v19 VALUES (14,'creator',NULL,'Categorie absente','confirmed',0.9,3,'t0','t1')")
+    result = retrieve_acquired_knowledge(db, "creator")
+    contents = [item["content"] for item in result["items"]]
+    assert "Provenance absente" not in contents
+    assert "Provenance inconnue" not in contents
+    assert "Contenu binaire" not in contents
+    assert "Confiance invalide" not in contents
+    assert "Categorie absente" not in contents
+    assert "Une montre possède un cadran rond" in contents
+    db.close()

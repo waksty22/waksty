@@ -123,7 +123,11 @@ def retrieve_acquired_knowledge(
         kind: str, source_id: int, content: str, status: str,
         source: str, timestamp: str, metadata: dict[str, Any] | None = None,
     ) -> None:
-        text = str(content or "").strip()
+        if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id < 1:
+            return
+        if not isinstance(content, str) or not isinstance(timestamp, str):
+            return
+        text = content.strip()
         if not text:
             return
         terms = set(_terms(text))
@@ -145,9 +149,25 @@ def retrieve_acquired_knowledge(
         candidates.append(item)
 
     for row in memories:
-        source_type = str(row.get("source_type") or "inferred").lower()
-        if source_type not in VALID_MEMORY_STATES:
-            source_type = "inferred"
+        # Corrupt or untyped legacy rows are omitted, never relabelled as
+        # inferred knowledge. Retrieval must not manufacture provenance.
+        source_type = row.get("source_type")
+        if not isinstance(source_type, str) or source_type not in VALID_MEMORY_STATES:
+            continue
+        if not isinstance(row.get("content"), str) or not row["content"].strip():
+            continue
+        if not isinstance(row.get("category"), str):
+            continue
+        if isinstance(row.get("id"), bool) or not isinstance(row.get("id"), int) or row["id"] < 1:
+            continue
+        raw_confidence = row.get("confidence")
+        if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+            continue
+        if not math.isfinite(float(raw_confidence)) or not 0.0 <= float(raw_confidence) <= 1.0:
+            continue
+        timestamp = row.get("updated_at") or row.get("created_at")
+        if not isinstance(timestamp, str):
+            continue
         status = {
             "observed": "observed_not_understood",
             "taught": "taught_not_independently_verified",
@@ -156,9 +176,9 @@ def retrieve_acquired_knowledge(
         }[source_type]
         add_candidate(
             "memory", row["id"], row.get("content", ""), status,
-            "memories_v19:" + source_type, row.get("updated_at") or row.get("created_at"),
-            {"category": str(row.get("category") or "general"),
-             "confidence": _safe_confidence(row.get("confidence"))},
+            "memories_v19:" + source_type, timestamp,
+            {"category": row["category"],
+             "confidence": float(raw_confidence)},
         )
 
     for row in experiences:

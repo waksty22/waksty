@@ -272,8 +272,8 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
 
 def merge_live_transcript(existing: str, incoming: str) -> str:
     """Merge repeated or incremental transcription chunks without obvious duplication."""
-    old = str(existing or "").strip()
-    new = str(incoming or "").strip()
+    old = existing.strip() if isinstance(existing, str) else ""
+    new = incoming.strip() if isinstance(incoming, str) else ""
     if not new:
         return old
     if not old:

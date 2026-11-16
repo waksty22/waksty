@@ -5651,7 +5651,10 @@ async def websocket_endpoint(
                             }
                         }
                     elif action == "text":
-                        text_value = str(payload.get("text", "")).strip()
+                        raw_text_value = payload.get("text", "")
+                        if not isinstance(raw_text_value, str):
+                            continue
+                        text_value = raw_text_value.strip()
                         if not text_value:
                             continue
                         live_turn_state["user"] = merge_live_transcript(
@@ -5716,8 +5719,10 @@ async def websocket_endpoint(
 
                     server_content = response.get("serverContent") or {}
                     input_transcription = server_content.get("inputTranscription") or {}
-                    if isinstance(input_transcription, dict) and input_transcription.get("text"):
-                        heard_text = str(input_transcription["text"]).strip()
+                    if isinstance(input_transcription, dict) and isinstance(
+                        input_transcription.get("text"), str
+                    ):
+                        heard_text = input_transcription["text"].strip()
                         if heard_text:
                             live_turn_state["user"] = merge_live_transcript(
                                 live_turn_state["user"], heard_text
@@ -5748,8 +5753,10 @@ async def websocket_endpoint(
                             await websocket.send_json({"type": "user_text", "text": heard_text})
 
                     output_transcription = server_content.get("outputTranscription") or {}
-                    if isinstance(output_transcription, dict) and output_transcription.get("text"):
-                        spoken_text = str(output_transcription["text"]).strip()
+                    if isinstance(output_transcription, dict) and isinstance(
+                        output_transcription.get("text"), str
+                    ):
+                        spoken_text = output_transcription["text"].strip()
                         if spoken_text:
                             live_turn_state["assistant"] = merge_live_transcript(
                                 live_turn_state["assistant"], spoken_text

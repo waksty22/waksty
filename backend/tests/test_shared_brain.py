@@ -210,3 +210,8 @@ def test_live_transcript_ignores_repeated_shorter_prefix_chunks():
     assert merge_live_transcript(
         "Bonjour tout le monde", "bonjour TOUT"
     ) == "Bonjour tout le monde"
+
+def test_live_transcript_rejects_non_text_chunks_without_stringifying_them():
+    for invalid in (None, 123, 1.5, True, b"Bonjour", {"text": "Bonjour"}, ["Bonjour"]):
+        assert merge_live_transcript("Bonjour", invalid) == "Bonjour"
+        assert merge_live_transcript(invalid, "salut") == "salut"

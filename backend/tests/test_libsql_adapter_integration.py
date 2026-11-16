@@ -417,3 +417,21 @@ def test_context_manager_surfaces_close_error_after_successful_commit():
 
     assert native.commit_calls == 1
     assert native.close_calls == 1
+
+
+def test_adapter_rejects_reuse_after_native_close_raises():
+    class FailingCloseConnection:
+        def close(self):
+            raise RuntimeError("close failed")
+
+    connection = adapt_libsql_connection(
+        FailingCloseConnection(),
+        close_on_context_exit=True,
+    )
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        with connection:
+            pass
+
+    with pytest.raises(Exception, match="closed database"):
+        connection.execute("SELECT 1")

@@ -321,6 +321,9 @@ def test_explicit_live_definition_is_stored_as_heard_not_understood(language_db)
         "Je me demande si coq signifie un oiseau domestique.",
         "Je ne suis pas sûr que coq signifie un oiseau domestique.",
         "Peut-être que coq signifie un oiseau domestique.",
+        "Si le mot coq signifie un oiseau domestique, alors ...",
+        "Supposons que coq signifie un oiseau domestique.",
+        "Imaginons que le mot coq signifie un oiseau domestique.",
     ],
 )
 def test_questions_and_uncertain_statements_do_not_teach_vocabulary(

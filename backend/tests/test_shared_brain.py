@@ -160,3 +160,23 @@ def test_snapshot_rejects_coerced_limits_and_invalid_user_ids():
     snapshot = get_shared_brain_snapshot(db, " creator ", limit=2)
     assert snapshot["statistics"]["totals"]["vocabulary"] == 0
     db.close()
+
+
+
+def test_shared_brain_excludes_corrupt_legacy_memory_records():
+    db = make_db()
+    db.execute(
+        "INSERT INTO memories VALUES (1,'creator','general','Souvenir valide',3,'[\\"ok\\"]',0,'t0','t1')"
+    )
+    db.execute(
+        "INSERT INTO memories VALUES (2,'creator','general',?,3,'[]',0,'t0','t1')",
+        (b"contenu binaire",),
+    )
+    db.execute(
+        "INSERT INTO memories VALUES (3,'creator','general','Tags binaires',3,?,0,'t0','t1')",
+        (b"tags binaires",),
+    )
+    snapshot = get_shared_brain_snapshot(db, "creator")
+    assert [row["content"] for row in snapshot["memories"]] == ["Souvenir valide"]
+    assert snapshot["memories"][0]["tags"] == ["ok"]
+    db.close()

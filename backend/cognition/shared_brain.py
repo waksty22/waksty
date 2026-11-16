@@ -80,7 +80,39 @@ def _rows(
                 return []
         else:
             return []
-    return [_decode_json_fields(dict(row)) for row in rows]
+    decoded_rows: list[dict[str, Any]] = []
+    for raw_row in rows:
+        item = _decode_json_fields(dict(raw_row))
+        if table == "memories_v19":
+            # Legacy fallback schemas may omit newer provenance columns, but
+            # present fields must still have trustworthy primitive types.
+            if not isinstance(item.get("user_id"), str):
+                continue
+            if not isinstance(item.get("content"), str) or not item["content"].strip():
+                continue
+            if not isinstance(item.get("category"), str):
+                continue
+            importance = item.get("importance")
+            if isinstance(importance, bool) or not isinstance(importance, int):
+                continue
+            if "confidence" in item:
+                confidence = item.get("confidence")
+                if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                    continue
+                try:
+                    confidence = float(confidence)
+                except (OverflowError, TypeError, ValueError):
+                    continue
+                if not 0.0 <= confidence <= 1.0 or not __import__("math").isfinite(confidence):
+                    continue
+            tags = item.get("tags", [])
+            if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                continue
+            for timestamp_key in ("created_at", "updated_at"):
+                if timestamp_key in item and not isinstance(item[timestamp_key], str):
+                    continue
+        decoded_rows.append(item)
+    return decoded_rows
 
 
 def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:

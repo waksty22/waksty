@@ -225,7 +225,12 @@ class LibSQLConnectionAdapter:
                         pass
                     raise
             else:
-                self.rollback()
+                try:
+                    self.rollback()
+                except Exception:
+                    # Do not replace the exception raised by the caller's
+                    # transaction body with a secondary rollback failure.
+                    pass
         finally:
             if self._close_on_context_exit:
                 self.close()

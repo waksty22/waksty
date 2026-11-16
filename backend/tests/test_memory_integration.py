@@ -186,3 +186,62 @@ def test_knowledge_retrieval_rejects_coerced_limits_and_handles_bad_confidence()
     result = retrieve_acquired_knowledge(db, " creator ", query="souvenir")
     assert result["items"][0]["confidence"] == 0.0
     db.close()
+
+
+
+def test_episodic_memory_rejects_coerced_provenance_tags_and_numbers():
+    from memory.episodic_memory import (
+        _normalize_confidence, _normalize_importance, _normalize_limit,
+        _normalize_source_type, _normalize_tags, init_memory_tables,
+        save_episodic_memory,
+    )
+
+    invalid_sources = (1, True, [], {}, "unknown")
+    for value in invalid_sources:
+        try:
+            _normalize_source_type(value)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"source type should be rejected: {value!r}")
+
+    for value in (("tag",), ["tag", 3], ["tag", None], {"tag": "value"}):
+        try:
+            _normalize_tags(value)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"tags should be rejected: {value!r}")
+
+    for value in (True, False, 1.5, "4", None):
+        for normalizer in (_normalize_importance, _normalize_limit):
+            try:
+                normalizer(value) if normalizer is _normalize_importance else normalizer(value, 1, 30)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"numeric input should be rejected: {value!r}")
+
+    for value in (True, "0.8", [], None):
+        try:
+            _normalize_confidence(value)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"confidence should be rejected: {value!r}")
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    for kwargs in (
+        {"source_type": 1}, {"tags": ["ok", 2]}, {"importance": 3.5},
+        {"confidence": "0.9"},
+    ):
+        try:
+            save_episodic_memory(db, "creator", "souvenir invalide", **kwargs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"save should reject invalid arguments: {kwargs!r}")
+    assert db.execute("SELECT COUNT(*) FROM memories_v19").fetchone()[0] == 0
+    db.close()

@@ -67,7 +67,11 @@ def _normalize_user_id(user_id: str) -> str:
 
 def _normalize_source_type(source_type: str) -> str:
     """Valide la provenance d'un souvenir."""
-    source = str(source_type or "taught").strip().lower()
+    if source_type is None:
+        return "taught"
+    if not isinstance(source_type, str):
+        raise ValueError("La provenance doit être du texte.")
+    source = source_type.strip().lower()
 
     if source not in VALID_SOURCE_TYPES:
         raise ValueError(
@@ -111,17 +115,17 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
     if tags is None:
         return []
 
-    if not isinstance(tags, (list, tuple)):
+    if not isinstance(tags, list):
         raise ValueError("Les tags doivent être fournis sous forme de liste.")
+
+    if any(not isinstance(tag, str) for tag in tags):
+        raise ValueError("Chaque tag doit être du texte.")
 
     safe_tags: list[str] = []
     seen: set[str] = set()
 
     for tag in tags:
-        if tag is None:
-            continue
-
-        clean = str(tag).strip()[:MAX_TAG_LENGTH]
+        clean = tag.strip()[:MAX_TAG_LENGTH]
 
         if not clean:
             continue
@@ -142,20 +146,14 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
 
 def _normalize_importance(importance: int) -> int:
     """Valide et borne l'importance entre 1 et 5."""
-    if isinstance(importance, bool):
-        raise ValueError("L'importance doit être un nombre entier.")
-
-    try:
-        value = int(importance)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Importance invalide.") from exc
-
-    return max(1, min(5, value))
+    if isinstance(importance, bool) or not isinstance(importance, int):
+        raise ValueError("L'importance doit être un entier.")
+    return max(1, min(5, importance))
 
 
 def _normalize_confidence(confidence: float) -> float:
     """Valide la confiance entre 0 et 1."""
-    if isinstance(confidence, bool):
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise ValueError("La confiance doit être un nombre.")
 
     try:
@@ -176,15 +174,9 @@ def _normalize_confidence(confidence: float) -> float:
 
 def _normalize_limit(limit: int, minimum: int, maximum: int) -> int:
     """Valide une limite numérique."""
-    if isinstance(limit, bool):
-        raise ValueError("La limite doit être un nombre entier.")
-
-    try:
-        value = int(limit)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("La limite doit être un nombre.") from exc
-
-    return max(minimum, min(maximum, value))
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
+    return max(minimum, min(maximum, limit))
 
 
 def _escape_like(value: str) -> str:

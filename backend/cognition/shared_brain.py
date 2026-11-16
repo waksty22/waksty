@@ -105,9 +105,14 @@ def get_shared_brain_snapshot(
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     """Return one compact snapshot of all persisted cognitive systems."""
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("Un identifiant utilisateur est obligatoire.")
-    limit = max(1, min(int(limit), MAX_LIMIT))
+    if not isinstance(user_id, str):
+        raise ValueError("L'identifiant utilisateur doit être du texte.")
+    user_id = user_id.strip()
+    if not user_id or len(user_id) > 80:
+        raise ValueError("Identifiant utilisateur invalide.")
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
+    limit = max(1, min(limit, MAX_LIMIT))
 
     data: dict[str, Any] = {}
     totals: dict[str, int] = {}

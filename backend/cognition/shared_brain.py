@@ -291,9 +291,17 @@ def merge_live_transcript(existing: str, incoming: str) -> str:
 
     # Provider chunks may repeat the tail of the previous chunk.
     max_overlap = min(len(old), len(new), 500)
-    # A one-character overlap is too ambiguous: it can silently eat the
-    # first letter of a genuinely new word (for example "Chappie" + "encore").
-    for size in range(max_overlap, 1, -1):
-        if old[-size:].casefold() == new[:size].casefold():
+    # Only remove overlaps that cover whole word boundaries on both sides.
+    # Partial-word matches can silently eat the start of a genuinely new word.
+    for size in range(max_overlap, 0, -1):
+        if old[-size:].casefold() != new[:size].casefold():
+            continue
+        left_boundary = (
+            size == len(old) or not old[-size - 1].isalnum()
+        )
+        right_boundary = (
+            size == len(new) or not new[size].isalnum()
+        )
+        if left_boundary and right_boundary:
             return " ".join((old + " " + new[size:]).split())
     return (old + " " + new).strip()

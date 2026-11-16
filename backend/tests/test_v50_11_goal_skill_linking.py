@@ -138,6 +138,11 @@ def test_supervised_assessment_route_rejects_coerced_payload_values():
     route = SERVER.split('@app.post("/api/cognition/skills/assessments")', 1)[1].split('@app.post("/api/skills/update")', 1)[0]
     assert 'system_value = data.get("system", "")' in route
     assert 'branch_value = data.get("branch", "")' in route
+    assert 'system_info = COGNITIVE_CATALOG[system_key]' in route
+    assert "if not isinstance(system_info, dict):" in route
+    assert 'branches = system_info.get("sub_branches", {})' in route
+    assert "if not isinstance(branches, dict) or branch_key not in branches:" in route
+    assert "if not isinstance(branches[branch_key], dict):" in route
     assert 'evidence_value = data.get("evidence", "")' in route
     assert "all(isinstance(value, str)" in route
     assert 'raw_score = data.get("score")' in route

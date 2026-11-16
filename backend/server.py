@@ -5632,7 +5632,14 @@ async def websocket_endpoint(
                     action = payload.get("action")
                     if action == "audio_chunk":
                         pcm = payload.get("pcm_data")
-                        if not isinstance(pcm, str) or not pcm:
+                        # Audio is base64 PCM. Bound each frame before forwarding
+                        # it to Gemini so oversized client messages cannot balloon
+                        # memory use inside the long-lived websocket task.
+                        if (
+                            not isinstance(pcm, str)
+                            or not pcm
+                            or len(pcm) > 1_000_000
+                        ):
                             continue
                         message = {
                             "realtimeInput": {
@@ -5644,13 +5651,20 @@ async def websocket_endpoint(
                         }
                     elif action == "video_frame":
                         image_data = payload.get("data")
-                        if not isinstance(image_data, str) or not image_data:
+                        mime_type = payload.get("mime_type", "image/jpeg")
+                        max_encoded_image_chars = ((MAX_CAMERA_IMAGE_BYTES + 2) // 3) * 4
+                        if (
+                            not isinstance(image_data, str)
+                            or not image_data
+                            or len(image_data) > max_encoded_image_chars
+                            or mime_type not in {"image/jpeg", "image/png"}
+                        ):
                             continue
                         message = {
                             "realtimeInput": {
                                 "video": {
                                     "data": image_data,
-                                    "mimeType": payload.get("mime_type", "image/jpeg"),
+                                    "mimeType": mime_type,
                                 }
                             }
                         }

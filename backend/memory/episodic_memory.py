@@ -516,7 +516,11 @@ def search_episodic_memories(
         raw_confidence = item.get("confidence")
         if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
             continue
-        if not math.isfinite(float(raw_confidence)) or not 0.0 <= float(raw_confidence) <= 1.0:
+        try:
+            confidence_value = float(raw_confidence)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
             continue
         if not isinstance(item.get("access_count"), int) or isinstance(item.get("access_count"), bool):
             continue

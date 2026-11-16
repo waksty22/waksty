@@ -910,3 +910,44 @@ def test_live_transcript_merge_enforces_chunk_and_turn_limits():
     ) is None
     assert server._merge_bounded_live_transcript(None, "Bonjour") is None
     assert server._merge_bounded_live_transcript("Bonjour", 123) is None
+
+
+def test_gemini_live_text_input_records_only_new_lexical_exposure(monkeypatch):
+    import sqlite3
+    import server
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute(
+        """CREATE TABLE personal_vocabulary (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            word TEXT NOT NULL,
+            meaning TEXT,
+            state TEXT NOT NULL,
+            exposure_count INTEGER NOT NULL,
+            evidence TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, word)
+        )"""
+    )
+    monkeypatch.setattr(server, "db_connection", lambda: db)
+
+    transcript = ""
+    for incoming in ("Bonjour Chappie", "Bonjour", "Bonjour Chappie", "encore"):
+        merged = server._merge_bounded_live_transcript(transcript, incoming)
+        assert merged is not None
+        delta = server._new_live_transcript_segment(transcript, merged)
+        transcript = merged
+        if delta:
+            server._record_live_text_exposure("creator", delta)
+
+    rows = {
+        row["word"]: row["exposure_count"]
+        for row in db.execute(
+            "SELECT word, exposure_count FROM personal_vocabulary"
+        ).fetchall()
+    }
+    assert rows == {"bonjour": 1, "chappie": 1, "encore": 1}
+    db.close()

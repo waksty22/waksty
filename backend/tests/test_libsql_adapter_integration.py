@@ -192,3 +192,82 @@ def test_real_libsql_dml_rowcount_matches_sqlite_dbapi(tmp_path):
         connection.commit()
     finally:
         connection.close()
+
+
+def test_full_chappie_schema_initializes_and_persists_on_libsql(
+    monkeypatch, tmp_path
+):
+    """Exercise every Chappie schema initializer through the production adapter."""
+    libsql = pytest.importorskip("libsql")
+    import server as chappie_server
+
+    database_path = tmp_path / "chappie-full-schema.db"
+    settings = chappie_server.StorageSettings(
+        backend="turso",
+        turso_database_url="libsql://isolated.invalid",
+        turso_auth_token="isolated-test-token",
+    )
+    monkeypatch.setattr(
+        chappie_server.StorageSettings,
+        "from_env",
+        classmethod(lambda cls: settings),
+    )
+    # The startup gate is satisfied locally; all actual SQL stays in a
+    # temporary file-backed libsql database, never in the configured Turso DB.
+    monkeypatch.setattr(
+        chappie_server,
+        "_remote_turso_migration_completed",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        chappie_server,
+        "db_connection",
+        lambda: adapt_libsql_connection(
+            libsql.connect(database=str(database_path)),
+            close_on_context_exit=True,
+        ),
+    )
+
+    chappie_server.init_db()
+
+    writer = adapt_libsql_connection(
+        libsql.connect(database=str(database_path)),
+        close_on_context_exit=True,
+    )
+    with writer as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        required = {
+            "conversations",
+            "memories",
+            "personal_vocabulary",
+            "sensory_observations",
+            "autobiographical_events",
+            "emotional_state",
+            "skills",
+            "goals",
+            "voice_profiles",
+        }
+        assert required.issubset(tables)
+        db.execute(
+            "INSERT INTO conversations(user_id, role, content, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("creator", "user", "premier souvenir de test", "2026-11-16T00:00:00+00:00"),
+        )
+
+    reader = adapt_libsql_connection(
+        libsql.connect(database=str(database_path)),
+        close_on_context_exit=True,
+    )
+    with reader as db:
+        row = db.execute(
+            "SELECT content FROM conversations WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            ("creator",),
+        ).fetchone()
+        assert row is not None
+        assert row["content"] == "premier souvenir de test"
+

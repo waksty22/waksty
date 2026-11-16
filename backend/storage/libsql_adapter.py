@@ -201,8 +201,10 @@ class LibSQLConnectionAdapter:
 
     def close(self) -> None:
         if not self._closed:
-            self._connection.close()
+            # Never permit reuse after a close attempt: native drivers may
+            # partially release a session before reporting a cleanup error.
             self._closed = True
+            self._connection.close()
 
     def __enter__(self) -> "LibSQLConnectionAdapter":
         self._ensure_open()

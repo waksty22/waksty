@@ -181,3 +181,18 @@ def test_shared_brain_excludes_corrupt_legacy_memory_records():
     assert [row["content"] for row in snapshot["memories"]] == ["Souvenir valide"]
     assert snapshot["memories"][0]["tags"] == ["ok"]
     db.close()
+
+
+
+def test_shared_brain_rejects_unknown_memory_provenance():
+    db = make_db()
+    db.execute(
+        "INSERT INTO memories VALUES (1,'creator','general','Souvenir sans provenance fiable',3,?,0,'t0','t1')",
+        (json.dumps([]),),
+    )
+    # Add the newer provenance column to simulate the V19 schema.
+    db.execute("ALTER TABLE memories ADD COLUMN source_type TEXT")
+    db.execute("UPDATE memories SET source_type='fabricated'")
+    snapshot = get_shared_brain_snapshot(db, "creator")
+    assert snapshot["memories"] == []
+    db.close()

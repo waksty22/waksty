@@ -157,3 +157,32 @@ def test_knowledge_retrieval_requires_strict_supervised_passing_evidence():
     assert result["read_only"] is True
     assert db.execute("SELECT COUNT(*) FROM competency_tests").fetchone()[0] == 5
     db.close()
+
+
+
+def test_knowledge_retrieval_rejects_coerced_limits_and_handles_bad_confidence():
+    from memory.knowledge_acquisition import retrieve_acquired_knowledge
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("""
+        CREATE TABLE memories_v19 (
+            id INTEGER PRIMARY KEY, user_id TEXT, category TEXT, content TEXT,
+            source_type TEXT, confidence, importance INTEGER,
+            created_at TEXT, updated_at TEXT
+        )
+    """)
+    db.execute(
+        "INSERT INTO memories_v19 VALUES (1,'creator','general','souvenir','confirmed','bad',3,'t0','t1')"
+    )
+    for invalid_limit in (True, False, 1.5, "3", None):
+        try:
+            retrieve_acquired_knowledge(db, "creator", limit=invalid_limit)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"limit should be rejected: {invalid_limit!r}")
+
+    result = retrieve_acquired_knowledge(db, " creator ", query="souvenir")
+    assert result["items"][0]["confidence"] == 0.0
+    db.close()

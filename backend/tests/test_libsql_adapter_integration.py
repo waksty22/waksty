@@ -421,6 +421,9 @@ def test_context_manager_surfaces_close_error_after_successful_commit():
 
 def test_adapter_rejects_reuse_after_native_close_raises():
     class FailingCloseConnection:
+        def commit(self):
+            pass
+
         def close(self):
             raise RuntimeError("close failed")
 

@@ -856,7 +856,6 @@ def test_interrupted_live_turn_with_no_valid_text_discards_audio(monkeypatch):
         ("Bonjour Chappie", "Bonjour Chappie", ""),
         ("Bonjour Chappie", "Bonjour", ""),
         ("Bonjour monde", "Bonjour monde encore", "encore"),
-        ("Bonjour monde", "Bonjour monde encore", "encore"),
     ],
 )
 def test_live_transcript_delta_excludes_repeated_prefixes(

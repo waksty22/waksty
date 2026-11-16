@@ -317,6 +317,10 @@ def _new_live_transcript_segment(previous: Any, merged: Any) -> str:
         merged[:len(previous)].casefold() == previous.casefold()
     ):
         return merged[len(previous):].strip()
+    # A shorter provider retransmission may be an earlier partial prefix,
+    # not a new utterance. Do not count it as fresh exposure.
+    if previous.casefold().startswith(merged.casefold()):
+        return ""
     return merged.strip()
 
 

@@ -312,3 +312,35 @@ def test_explicit_live_definition_is_stored_as_heard_not_understood(language_db)
     assert len(stored) == 1
     assert stored[0]["state"] == "heard"
     assert get_usable_words(language_db, "creator") == set()
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "Est-ce que le mot coq signifie un oiseau domestique ?",
+        "Je ne sais pas ce que le mot coq signifie.",
+        "Je me demande si coq signifie un oiseau domestique.",
+        "Je ne suis pas sûr que coq signifie un oiseau domestique.",
+        "Peut-être que coq signifie un oiseau domestique.",
+    ],
+)
+def test_questions_and_uncertain_statements_do_not_teach_vocabulary(
+    language_db, statement
+):
+    from learning.language import record_explicit_word_teaching, list_vocabulary
+
+    assert record_explicit_word_teaching(
+        language_db, "creator", statement
+    ) == []
+    assert list_vocabulary(language_db, "creator") == []
+
+
+def test_explicit_definition_after_unrelated_question_is_still_taught(language_db):
+    from learning.language import record_explicit_word_teaching
+
+    taught = record_explicit_word_teaching(
+        language_db,
+        "creator",
+        "Comment vas-tu ? Le mot coq signifie un oiseau domestique.",
+    )
+
+    assert [item["word"] for item in taught] == ["coq"]

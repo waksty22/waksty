@@ -351,3 +351,21 @@ def test_legacy_memory_migration_skips_non_text_timestamps():
     assert rows[0]["created_at"] == "2026-11-15T10:00:00+00:00"
     assert db.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 3
     db.close()
+
+
+
+def test_episodic_search_skips_corrupt_numeric_metadata():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    db.execute("PRAGMA ignore_check_constraints = ON")
+    db.execute(
+        """INSERT INTO memories_v19
+           (id, user_id, category, content, importance, source_type, confidence,
+            tags, access_count, created_at, updated_at)
+           VALUES (1, 'creator', 'general', 'Souvenir endommage', 3,
+                   'inferred', 'confiance invalide', '[]', 'acces invalide', 't0', 't1')"""
+    )
+    results = search_episodic_memories(db, "creator", "souvenir")
+    assert results == []
+    db.close()

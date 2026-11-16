@@ -505,6 +505,21 @@ def search_episodic_memories(
     terms = _memory_search_terms(query) if query else []
     for row in rows:
         item = _row_to_dict(row, cursor)
+        # Defensive read boundary: damaged rows must not crash ranking or
+        # leak coerced values into the shared cognitive context.
+        if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool):
+            continue
+        if not isinstance(item.get("content"), str) or not isinstance(item.get("category"), str):
+            continue
+        if not isinstance(item.get("importance"), int) or isinstance(item.get("importance"), bool):
+            continue
+        raw_confidence = item.get("confidence")
+        if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+            continue
+        if not math.isfinite(float(raw_confidence)) or not 0.0 <= float(raw_confidence) <= 1.0:
+            continue
+        if not isinstance(item.get("access_count"), int) or isinstance(item.get("access_count"), bool):
+            continue
         try:
             parsed_tags = json.loads(item.get("tags") or "[]")
             item["tags"] = (

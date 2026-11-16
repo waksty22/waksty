@@ -845,3 +845,30 @@ def test_interrupted_live_turn_with_no_valid_text_discards_audio(monkeypatch):
     assert saved == []
     assert state["audio"] == []
     assert state["audio_chars"] == 0
+
+
+@pytest.mark.parametrize(
+    ("previous", "merged", "expected"),
+    [
+        ("", "Bonjour Chappie", "Bonjour Chappie"),
+        ("Bonjour", "Bonjour Chappie", "Chappie"),
+        ("Bonjour", "bonjour Chappie", "Chappie"),
+        ("Bonjour Chappie", "Bonjour Chappie", ""),
+        ("Bonjour Chappie", "Bonjour", ""),
+        ("Bonjour monde", "Bonjour monde encore", "encore"),
+        ("Bonjour monde", "Bonjour monde encore", "encore"),
+    ],
+)
+def test_live_transcript_delta_excludes_repeated_prefixes(
+    previous, merged, expected
+):
+    import server
+
+    assert server._new_live_transcript_segment(previous, merged) == expected
+
+
+def test_live_transcript_delta_rejects_non_text_values():
+    import server
+
+    assert server._new_live_transcript_segment("Bonjour", None) == ""
+    assert server._new_live_transcript_segment(123, "Bonjour") == "Bonjour"

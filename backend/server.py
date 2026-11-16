@@ -307,6 +307,19 @@ def _append_live_audio_chunk(
     return current_chars + len(data)
 
 
+def _new_live_transcript_segment(previous: Any, merged: Any) -> str:
+    """Return only text newly appended to a merged Live transcript."""
+    if not isinstance(merged, str):
+        return ""
+    if not isinstance(previous, str) or not previous:
+        return merged.strip()
+    if len(merged) >= len(previous) and (
+        merged[:len(previous)].casefold() == previous.casefold()
+    ):
+        return merged[len(previous):].strip()
+    return merged.strip()
+
+
 def _normalize_live_error_message(error: Any) -> str:
     """Expose only bounded provider text; never stringify arbitrary payloads."""
     if not isinstance(error, dict):
@@ -5805,33 +5818,47 @@ async def websocket_endpoint(
                     ):
                         heard_text = input_transcription["text"].strip()
                         if heard_text:
-                            live_turn_state["user"] = merge_live_transcript(
-                                live_turn_state["user"], heard_text
+                            previous_user_text = live_turn_state["user"]
+                            merged_user_text = merge_live_transcript(
+                                previous_user_text, heard_text
                             )
-                            try:
-                                with db_connection() as sensory_db:
-                                    live_emotions = update_emotions_once(user_id, heard_text)
-                                    record_affective_snapshot(
-                                        sensory_db, user_id, live_emotions,
-                                        source="gemini_live", event_label="transcription utilisateur",
+                            new_heard_text = _new_live_transcript_segment(
+                                previous_user_text, merged_user_text
+                            )
+                            live_turn_state["user"] = merged_user_text
+                            if new_heard_text:
+                                try:
+                                    with db_connection() as sensory_db:
+                                        live_emotions = update_emotions_once(
+                                            user_id, new_heard_text
+                                        )
+                                        record_affective_snapshot(
+                                            sensory_db, user_id, live_emotions,
+                                            source="gemini_live",
+                                            event_label="transcription utilisateur",
+                                        )
+                                        record_heard_text(
+                                            sensory_db, user_id, new_heard_text,
+                                            evidence="Transcription confirmée par Gemini Live",
+                                        )
+                                        audio_observation = record_observation(
+                                            sensory_db, user_id, "audio", new_heard_text,
+                                            "gemini_live_transcription",
+                                            confidence=0.8,
+                                            metadata={"language": "fr"},
+                                        )
+                                        link_temporally_cooccurring_observation(
+                                            sensory_db, user_id,
+                                            audio_observation["observation_id"],
+                                        )
+                                        sensory_db.commit()
+                                except Exception:
+                                    log.exception(
+                                        "[GEMINI LIVE] Échec mémorisation transcription"
                                     )
-                                    record_heard_text(
-                                        sensory_db, user_id, heard_text,
-                                        evidence="Transcription confirmée par Gemini Live",
-                                    )
-                                    audio_observation = record_observation(
-                                        sensory_db, user_id, "audio", heard_text,
-                                        "gemini_live_transcription",
-                                        confidence=0.8,
-                                        metadata={"language": "fr"},
-                                    )
-                                    link_temporally_cooccurring_observation(
-                                        sensory_db, user_id, audio_observation["observation_id"]
-                                    )
-                                    sensory_db.commit()
-                            except Exception:
-                                log.exception("[GEMINI LIVE] Échec mémorisation transcription")
-                            await websocket.send_json({"type": "user_text", "text": heard_text})
+                                await websocket.send_json({
+                                    "type": "user_text", "text": new_heard_text
+                                })
 
                     output_transcription = server_content.get("outputTranscription")
                     if not isinstance(output_transcription, dict):

@@ -136,3 +136,27 @@ def test_context_keeps_statistics_and_all_records_when_under_budget():
     assert json.loads(match.group(1)) == snapshot["vocabulary"]
     assert "STATISTIQUES DES DONNÉES PERSISTÉES" in context
     assert "CONTEXTE PARTIEL" not in context
+
+
+
+def test_snapshot_rejects_coerced_limits_and_invalid_user_ids():
+    db = make_db()
+    for invalid_limit in (True, False, 1.5, "5", None):
+        try:
+            get_shared_brain_snapshot(db, "creator", limit=invalid_limit)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"limit should be rejected: {invalid_limit!r}")
+
+    for invalid_user in ("", "   ", "x" * 81, 123, None):
+        try:
+            get_shared_brain_snapshot(db, invalid_user)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"user_id should be rejected: {invalid_user!r}")
+
+    snapshot = get_shared_brain_snapshot(db, " creator ", limit=2)
+    assert snapshot["statistics"]["totals"]["vocabulary"] == 0
+    db.close()

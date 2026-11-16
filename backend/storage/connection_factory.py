@@ -75,7 +75,15 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
             auth_token=selected.turso_auth_token,
         )
         connection = adapt_libsql_connection(native, close_on_context_exit=True)
-        connection.execute("PRAGMA foreign_keys=ON")
+        try:
+            connection.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            # A failed session initialization must not leak a remote handle.
+            try:
+                connection.close()
+            except Exception:
+                pass
+            raise
         return connection
 
     raise ValueError("Backend de stockage non pris en charge.")

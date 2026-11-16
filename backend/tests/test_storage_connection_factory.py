@@ -55,3 +55,38 @@ def test_storage_backend_rejects_unknown_values(monkeypatch):
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "postgres")
     with pytest.raises(ValueError, match="sqlite ou turso"):
         StorageSettings.from_env()
+
+
+
+def test_turso_factory_closes_native_session_when_foreign_keys_setup_fails(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    class FailedInitializationConnection:
+        def __init__(self):
+            self.close_calls = 0
+
+        def execute(self, sql, parameters=()):
+            raise RuntimeError("pragma initialization failed")
+
+        def close(self):
+            self.close_calls += 1
+
+    native = FailedInitializationConnection()
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        SimpleNamespace(connect=lambda **kwargs: native),
+    )
+
+    with pytest.raises(RuntimeError, match="pragma initialization failed"):
+        open_storage_connection(
+            StorageSettings(
+                backend="turso",
+                turso_database_url="libsql://isolated.invalid",
+                turso_auth_token="isolated-test-token",
+            )
+        )
+
+    assert native.close_calls == 1

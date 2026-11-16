@@ -74,6 +74,9 @@ def build_validated_skill_data(
         branches = system_info.get("sub_branches", {})
         if not isinstance(branches, dict) or branch_key not in branches:
             continue
+        branch_info = branches[branch_key]
+        if not isinstance(branch_info, dict):
+            continue
 
         evidence_value = details.get("evidence")
         if not isinstance(evidence_value, str):

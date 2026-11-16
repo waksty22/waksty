@@ -4,7 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cognition.skill_evidence import build_validated_skill_data
+from cognition.skill_evidence import build_validated_skill_data, normalize_evidence_text
+
+
+def test_evidence_normalization_collapses_case_and_whitespace():
+    assert normalize_evidence_text("  Chappie   connaît le mot. ") == normalize_evidence_text("CHAPPIE connaît LE MOT.")
 
 
 def test_only_supervised_passing_branch_evidence_changes_profile():

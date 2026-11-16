@@ -619,12 +619,13 @@ def apply_memory_decay(
             importance = importance - 1,
             updated_at = ?
         WHERE user_id = ?
-          AND importance > 1
-          AND access_count < 2
-          AND (
-                julianday(updated_at) < julianday(?)
-                OR julianday(updated_at) IS NULL
-          )
+          AND typeof(importance) = 'integer'
+          AND importance BETWEEN 2 AND 5
+          AND typeof(access_count) = 'integer'
+          AND access_count BETWEEN 0 AND 1
+          AND typeof(updated_at) = 'text'
+          AND julianday(updated_at) IS NOT NULL
+          AND julianday(updated_at) < julianday(?)
         """,
         (now, user_id, cutoff),
     )
@@ -671,6 +672,19 @@ def get_memory_statistics(
 
         FROM memories_v19
         WHERE user_id = ?
+          AND typeof(id) = 'integer'
+          AND typeof(user_id) = 'text'
+          AND typeof(content) = 'text' AND length(trim(content)) > 0
+          AND typeof(category) = 'text'
+          AND typeof(importance) = 'integer'
+          AND importance BETWEEN 1 AND 5
+          AND typeof(source_type) = 'text'
+          AND source_type IN ('observed', 'taught', 'inferred', 'confirmed')
+          AND typeof(confidence) IN ('integer', 'real')
+          AND confidence BETWEEN 0.0 AND 1.0
+          AND typeof(access_count) = 'integer' AND access_count >= 0
+          AND typeof(created_at) = 'text'
+          AND typeof(updated_at) = 'text'
         """,
         (user_id,),
     )

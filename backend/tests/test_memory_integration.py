@@ -289,7 +289,7 @@ def test_legacy_memory_migration_skips_non_text_identity_fields():
             (1, "creator", "general", "Souvenir valide"),
             (2, 42, "general", "Identité numérique"),
             (3, "creator", "general", b"contenu binaire"),
-            (4, "creator", b"catégorie binaire", "Catégorie mal formée"),
+            (4, "creator", b"categorie binaire", "Catégorie mal formée"),
         ],
     )
     init_memory_tables(db)

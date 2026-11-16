@@ -278,9 +278,15 @@ def merge_live_transcript(existing: str, incoming: str) -> str:
         return old
     if not old:
         return new
-    if new == old or old.endswith(new):
+    old_folded = old.casefold()
+    new_folded = new.casefold()
+    if new_folded == old_folded or old_folded.endswith(new_folded):
         return old
-    if new.startswith(old):
+    # Some speech providers resend a shorter prefix of the accumulated
+    # transcript. Treat it as a duplicate instead of appending it again.
+    if old_folded.startswith(new_folded):
+        return old
+    if new_folded.startswith(old_folded):
         return new
 
     # Provider chunks may repeat the tail of the previous chunk.

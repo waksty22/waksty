@@ -200,3 +200,13 @@ def test_shared_brain_rejects_unknown_memory_provenance():
     snapshot = get_shared_brain_snapshot(db, "creator")
     assert snapshot["memories"] == []
     db.close()
+
+
+
+def test_live_transcript_ignores_repeated_shorter_prefix_chunks():
+    assert merge_live_transcript(
+        "Bonjour tout le monde", "Bonjour tout"
+    ) == "Bonjour tout le monde"
+    assert merge_live_transcript(
+        "Bonjour tout le monde", "bonjour TOUT"
+    ) == "Bonjour tout le monde"

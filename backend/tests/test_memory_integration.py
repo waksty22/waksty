@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from memory.episodic_memory import init_memory_tables, migrate_legacy_memories
+from memory.episodic_memory import init_memory_tables, migrate_legacy_memories, search_episodic_memories
 from cognition.shared_brain import get_shared_brain_snapshot
 
 
@@ -301,4 +301,23 @@ def test_legacy_memory_migration_skips_non_text_identity_fields():
     ]
     # Legacy source remains untouched; only the valid row is copied.
     assert db.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 4
+    db.close()
+
+
+
+def test_episodic_search_does_not_expose_non_text_legacy_tags():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    db.execute(
+        """INSERT INTO memories_v19
+           (user_id, category, content, importance, source_type, confidence,
+            tags, access_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 't0', 't1')""",
+        ("creator", "general", "Souvenir valide", 3, "inferred", 0.5,
+         json.dumps(["valide", 42, None, {"tag": "objet"}])),
+    )
+    results = search_episodic_memories(db, "creator")
+    assert len(results) == 1
+    assert results[0]["tags"] == ["valide"]
     db.close()

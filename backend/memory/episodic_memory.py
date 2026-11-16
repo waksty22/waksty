@@ -499,7 +499,10 @@ def search_episodic_memories(
         item = _row_to_dict(row, cursor)
         try:
             parsed_tags = json.loads(item.get("tags") or "[]")
-            item["tags"] = parsed_tags if isinstance(parsed_tags, list) else []
+            item["tags"] = (
+                [tag for tag in parsed_tags if isinstance(tag, str)]
+                if isinstance(parsed_tags, list) else []
+            )
         except (ValueError, TypeError):
             item["tags"] = []
 

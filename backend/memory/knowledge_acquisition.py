@@ -225,8 +225,14 @@ def retrieve_acquired_knowledge(
         status = "supervised_skill_validated" if validated else (
             "supervised_assessment_not_validated" if approved else "assessment_provenance_unconfirmed"
         )
-        skill = str(row.get("test_name") or "")
-        proof = str(details.get("evidence") or "")
+        raw_skill = row.get("test_name")
+        if not isinstance(raw_skill, str) or not raw_skill.strip():
+            continue
+        skill = raw_skill.strip()
+        # Evidence is explanatory text, not a place to stringify arbitrary
+        # JSON values into apparent proof.
+        raw_proof = details.get("evidence")
+        proof = raw_proof.strip() if isinstance(raw_proof, str) else ""
         content = "Compétence évaluée : " + skill
         if proof:
             content += ". Preuve : " + proof

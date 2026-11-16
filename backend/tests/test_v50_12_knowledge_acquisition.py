@@ -225,3 +225,40 @@ def test_corrupt_experience_reference_does_not_abort_knowledge_retrieval():
     assert experience["status"] == "experience_only_not_proof_of_learning"
     assert experience["source_conversation_id"] is None
     db.close()
+
+
+
+def test_malformed_assessment_labels_and_evidence_are_not_stringified():
+    db = make_db()
+    seed(db)
+    db.execute(
+        """INSERT INTO competency_tests VALUES
+           (2, 'creator', ?, 1, 99, ?, '2026-11-05')""",
+        (b"binary-skill-name", json.dumps({
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": 123456,
+        })),
+    )
+    db.execute(
+        """INSERT INTO competency_tests VALUES
+           (3, 'creator', 'tete:vision', 1, 99, ?, '2026-11-06')""",
+        (json.dumps({
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": {"raw": "not human proof"},
+        }),),
+    )
+    db.commit()
+
+    items = [
+        item for item in retrieve_acquired_knowledge(db, "creator")["items"]
+        if item["kind"] == "skill_assessment"
+    ]
+    assert all(item.get("skill") != "b'binary-skill-name'" for item in items)
+    vision = next(item for item in items if item.get("skill") == "tete:vision")
+    assert vision["status"] == "supervised_skill_validated"
+    assert "123456" not in vision["content"]
+    assert "not human proof" not in vision["content"]
+    assert vision["content"] == "Compétence évaluée : tete:vision"
+    db.close()

@@ -206,3 +206,22 @@ def test_corrupt_memory_rows_are_skipped_without_inventing_provenance():
     assert "Categorie absente" not in contents
     assert "Une montre possède un cadran rond" in contents
     db.close()
+
+
+
+def test_corrupt_experience_reference_does_not_abort_knowledge_retrieval():
+    db = make_db()
+    seed(db)
+    db.execute(
+        "UPDATE autobiographical_events SET source_conversation_id=? WHERE id=1",
+        ("not-an-integer",),
+    )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "montre")
+    experience = next(
+        item for item in result["items"] if item["kind"] == "experience"
+    )
+    assert experience["status"] == "experience_only_not_proof_of_learning"
+    assert experience["source_conversation_id"] is None
+    db.close()

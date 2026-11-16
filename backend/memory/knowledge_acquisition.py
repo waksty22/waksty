@@ -181,13 +181,29 @@ def retrieve_acquired_knowledge(
         )
 
     for row in experiences:
+        actor = row.get("actor")
+        event_type = row.get("event_type")
+        conversation_id = row.get("source_conversation_id")
+        if actor is not None and not isinstance(actor, str):
+            continue
+        if event_type is not None and not isinstance(event_type, str):
+            continue
+        # A malformed optional reference must not abort retrieval of every
+        # other memory. Preserve only a genuine non-negative integer ID.
+        safe_conversation_id = (
+            conversation_id
+            if isinstance(conversation_id, int)
+            and not isinstance(conversation_id, bool)
+            and conversation_id >= 0
+            else None
+        )
         add_candidate(
-            "experience", row["id"], row.get("content", ""),
+            "experience", row.get("id"), row.get("content", ""),
             "experience_only_not_proof_of_learning",
-            "autobiographical_events:" + str(row.get("actor") or "unknown"),
+            "autobiographical_events:" + (actor or "unknown"),
             row.get("happened_at"),
-            {"event_type": str(row.get("event_type") or ""),
-             "source_conversation_id": int(row.get("source_conversation_id") or 0)},
+            {"event_type": event_type or "",
+             "source_conversation_id": safe_conversation_id},
         )
 
     for row in assessments:

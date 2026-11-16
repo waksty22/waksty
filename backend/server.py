@@ -5846,7 +5846,7 @@ async def websocket_endpoint(
                                 previous_user_text, heard_text
                             )
                             if merged_user_text is None:
-                                continue
+                                merged_user_text = previous_user_text
                             new_heard_text = _new_live_transcript_segment(
                                 previous_user_text, merged_user_text
                             )

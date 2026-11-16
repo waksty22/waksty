@@ -871,3 +871,25 @@ def test_live_transcript_delta_rejects_non_text_values():
 
     assert server._new_live_transcript_segment("Bonjour", None) == ""
     assert server._new_live_transcript_segment(123, "Bonjour") == "Bonjour"
+
+
+def test_live_transcript_learning_delta_ignores_provider_retransmissions():
+    import server
+    from cognition.shared_brain import merge_live_transcript
+
+    transcript = ""
+    learned_segments = []
+    for incoming in (
+        "Bonjour tout le monde",
+        "Bonjour tout",
+        "Bonjour tout le monde",
+        "Bonjour tout le monde encore",
+    ):
+        merged = merge_live_transcript(transcript, incoming)
+        new_segment = server._new_live_transcript_segment(transcript, merged)
+        transcript = merged
+        if new_segment:
+            learned_segments.append(new_segment)
+
+    assert transcript == "Bonjour tout le monde encore"
+    assert learned_segments == ["Bonjour tout le monde", "encore"]

@@ -140,7 +140,10 @@ def record_explicit_word_teaching(
         r"peut[- ]être|"
         r"je\s+(?:crois|pense)\s+que|"
         r"il\s+para[iî]t\s+que|"
-        r"on\s+m['’]a\s+dit\s+que)\b",
+        r"on\s+m['’]a\s+dit\s+que|"
+        r"si\s+(?:(?:le|la|un|une)\s+)?(?:mot\s+)?|"
+        r"supposons\s+que|imaginons\s+que|admettons\s+que|"
+        r"dans\s+l['’]hypothèse\s+où|au\s+cas\s+où)\b",
         flags=re.IGNORECASE | re.UNICODE,
     )
     for match in pattern.finditer(text):

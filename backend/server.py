@@ -282,6 +282,8 @@ live_ws_tickets = OneTimeTicketStore(LIVE_WS_TICKET_TTL_SECONDS)
 MAX_LIVE_AUDIO_CHUNK_CHARS = 1_000_000
 MAX_LIVE_AUDIO_TURN_CHARS = 8_000_000
 MAX_LIVE_AUDIO_TURN_CHUNKS = 256
+MAX_LIVE_TEXT_CHUNK_CHARS = 20_000
+MAX_LIVE_TRANSCRIPT_CHARS = 100_000
 
 
 def _append_live_audio_chunk(
@@ -305,6 +307,20 @@ def _append_live_audio_chunk(
         sample_rate = 24000
     chunks.append({"audio": data, "sample_rate": sample_rate})
     return current_chars + len(data)
+
+
+def _merge_bounded_live_transcript(previous: Any, incoming: Any) -> str | None:
+    """Merge text only when both the chunk and accumulated turn stay bounded."""
+    if not isinstance(previous, str) or not isinstance(incoming, str):
+        return None
+    old = previous.strip()
+    new = incoming.strip()
+    if len(new) > MAX_LIVE_TEXT_CHUNK_CHARS:
+        return None
+    merged = merge_live_transcript(old, new)
+    if len(merged) > MAX_LIVE_TRANSCRIPT_CHARS:
+        return None
+    return merged
 
 
 def _new_live_transcript_segment(previous: Any, merged: Any) -> str:
@@ -5740,9 +5756,12 @@ async def websocket_endpoint(
                         text_value = raw_text_value.strip()
                         if not text_value:
                             continue
-                        live_turn_state["user"] = merge_live_transcript(
+                        merged_user_text = _merge_bounded_live_transcript(
                             live_turn_state["user"], text_value
                         )
+                        if merged_user_text is None:
+                            continue
+                        live_turn_state["user"] = merged_user_text
                         message = {
                             "clientContent": {
                                 "turns": [{"role": "user", "parts": [{"text": text_value}]}],
@@ -5823,9 +5842,11 @@ async def websocket_endpoint(
                         heard_text = input_transcription["text"].strip()
                         if heard_text:
                             previous_user_text = live_turn_state["user"]
-                            merged_user_text = merge_live_transcript(
+                            merged_user_text = _merge_bounded_live_transcript(
                                 previous_user_text, heard_text
                             )
+                            if merged_user_text is None:
+                                continue
                             new_heard_text = _new_live_transcript_segment(
                                 previous_user_text, merged_user_text
                             )
@@ -5870,9 +5891,11 @@ async def websocket_endpoint(
                     if isinstance(output_transcription.get("text"), str):
                         spoken_text = output_transcription["text"].strip()
                         if spoken_text:
-                            live_turn_state["assistant"] = merge_live_transcript(
+                            merged_assistant_text = _merge_bounded_live_transcript(
                                 live_turn_state["assistant"], spoken_text
                             )
+                            if merged_assistant_text is not None:
+                                live_turn_state["assistant"] = merged_assistant_text
 
                     model_turn = server_content.get("modelTurn")
                     if not isinstance(model_turn, dict):
@@ -5904,9 +5927,11 @@ async def websocket_endpoint(
                         elif isinstance(part.get("text"), str) and part["text"].strip():
                             part_text = part["text"].strip()
                             if not output_transcription.get("text"):
-                                live_turn_state["assistant"] = merge_live_transcript(
+                                merged_assistant_text = _merge_bounded_live_transcript(
                                     live_turn_state["assistant"], part_text
                                 )
+                                if merged_assistant_text is not None:
+                                    live_turn_state["assistant"] = merged_assistant_text
 
                     if server_content.get("turnComplete"):
                         assistant_text = live_turn_state["assistant"].strip()

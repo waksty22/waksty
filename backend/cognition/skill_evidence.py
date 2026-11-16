@@ -11,6 +11,11 @@ MIN_EVIDENCE_LENGTH = 20
 MAX_EVIDENCE_LENGTH = 2000
 
 
+def normalize_evidence_text(value: str) -> str:
+    """Normalize evidence for duplicate detection without changing its stored text."""
+    return " ".join(value.split()).casefold()
+
+
 def _assessment_details(value: Any) -> dict[str, Any] | None:
     if isinstance(value, str):
         try:
@@ -78,7 +83,7 @@ def build_validated_skill_data(
             continue
         # Ignore superficial case/whitespace differences when identifying
         # a repeated proof; retain the original text only for validation.
-        evidence_key = " ".join(evidence.split()).casefold()
+        evidence_key = normalize_evidence_text(evidence)
         if (
             details.get("supervisor_approved") is not True
             or details.get("source") != "supervised_assessment"

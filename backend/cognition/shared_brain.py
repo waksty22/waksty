@@ -7,6 +7,7 @@ into learned knowledge. Both interfaces consume the same snapshot.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from typing import Any
 
@@ -103,14 +104,17 @@ def _rows(
                     confidence = float(confidence)
                 except (OverflowError, TypeError, ValueError):
                     continue
-                if not 0.0 <= confidence <= 1.0 or not __import__("math").isfinite(confidence):
+                if not 0.0 <= confidence <= 1.0 or not math.isfinite(confidence):
                     continue
             tags = item.get("tags", [])
             if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
                 continue
-            for timestamp_key in ("created_at", "updated_at"):
-                if timestamp_key in item and not isinstance(item[timestamp_key], str):
-                    continue
+            timestamps_valid = all(
+                timestamp_key not in item or isinstance(item[timestamp_key], str)
+                for timestamp_key in ("created_at", "updated_at")
+            )
+            if not timestamps_valid:
+                continue
         decoded_rows.append(item)
     return decoded_rows
 

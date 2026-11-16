@@ -166,7 +166,8 @@ def test_snapshot_rejects_coerced_limits_and_invalid_user_ids():
 def test_shared_brain_excludes_corrupt_legacy_memory_records():
     db = make_db()
     db.execute(
-        "INSERT INTO memories VALUES (1,'creator','general','Souvenir valide',3,'[\\"ok\\"]',0,'t0','t1')"
+        "INSERT INTO memories VALUES (1,'creator','general','Souvenir valide',3,?,0,'t0','t1')",
+        (json.dumps(["ok"]),),
     )
     db.execute(
         "INSERT INTO memories VALUES (2,'creator','general',?,3,'[]',0,'t0','t1')",

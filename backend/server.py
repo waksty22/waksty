@@ -313,10 +313,10 @@ def _merge_bounded_live_transcript(previous: Any, incoming: Any) -> str | None:
     """Merge text only when both the chunk and accumulated turn stay bounded."""
     if not isinstance(previous, str) or not isinstance(incoming, str):
         return None
+    if len(incoming) > MAX_LIVE_TEXT_CHUNK_CHARS:
+        return None
     old = previous.strip()
     new = incoming.strip()
-    if len(new) > MAX_LIVE_TEXT_CHUNK_CHARS:
-        return None
     merged = merge_live_transcript(old, new)
     if len(merged) > MAX_LIVE_TRANSCRIPT_CHARS:
         return None
@@ -5753,6 +5753,8 @@ async def websocket_endpoint(
                         raw_text_value = payload.get("text", "")
                         if not isinstance(raw_text_value, str):
                             continue
+                        if len(raw_text_value) > MAX_LIVE_TEXT_CHUNK_CHARS:
+                            continue
                         text_value = raw_text_value.strip()
                         if not text_value:
                             continue
@@ -5839,7 +5841,12 @@ async def websocket_endpoint(
                     if isinstance(input_transcription, dict) and isinstance(
                         input_transcription.get("text"), str
                     ):
-                        heard_text = input_transcription["text"].strip()
+                        raw_heard_text = input_transcription["text"]
+                        heard_text = (
+                            raw_heard_text.strip()
+                            if len(raw_heard_text) <= MAX_LIVE_TEXT_CHUNK_CHARS
+                            else ""
+                        )
                         if heard_text:
                             previous_user_text = live_turn_state["user"]
                             merged_user_text = _merge_bounded_live_transcript(
@@ -5889,7 +5896,12 @@ async def websocket_endpoint(
                     if not isinstance(output_transcription, dict):
                         output_transcription = {}
                     if isinstance(output_transcription.get("text"), str):
-                        spoken_text = output_transcription["text"].strip()
+                        raw_spoken_text = output_transcription["text"]
+                        spoken_text = (
+                            raw_spoken_text.strip()
+                            if len(raw_spoken_text) <= MAX_LIVE_TEXT_CHUNK_CHARS
+                            else ""
+                        )
                         if spoken_text:
                             merged_assistant_text = _merge_bounded_live_transcript(
                                 live_turn_state["assistant"], spoken_text
@@ -5924,7 +5936,11 @@ async def websocket_endpoint(
                                 live_turn_state["audio"], inline["data"], sample_rate,
                                 live_turn_state["audio_chars"],
                             )
-                        elif isinstance(part.get("text"), str) and part["text"].strip():
+                        elif (
+                            isinstance(part.get("text"), str)
+                            and len(part["text"]) <= MAX_LIVE_TEXT_CHUNK_CHARS
+                            and part["text"].strip()
+                        ):
                             part_text = part["text"].strip()
                             if not output_transcription.get("text"):
                                 merged_assistant_text = _merge_bounded_live_transcript(

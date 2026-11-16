@@ -295,9 +295,20 @@ def migrate_legacy_memories(db: sqlite3.Connection) -> int:
     for raw in cursor.fetchall():
         row = _row_to_dict(raw, cursor)
         try:
-            user_id = _normalize_user_id(str(row["user_id"] or ""))
-            content = _normalize_content(str(row["content"] or ""))
-            category = _normalize_category(str(row["category"] or "general"))
+            # Legacy rows are untrusted: never turn malformed values into
+            # plausible user memories through str() coercion.
+            raw_user_id = row["user_id"]
+            raw_content = row["content"]
+            raw_category = row["category"]
+            if not isinstance(raw_user_id, str):
+                continue
+            if not isinstance(raw_content, str):
+                continue
+            if raw_category is not None and not isinstance(raw_category, str):
+                continue
+            user_id = _normalize_user_id(raw_user_id)
+            content = _normalize_content(raw_content)
+            category = _normalize_category(raw_category or "general")
             importance = _normalize_importance(row["importance"])
             access_count = _normalize_limit(row["access_count"], 0, 2_000_000_000)
         except (ValueError, TypeError):

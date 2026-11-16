@@ -321,3 +321,33 @@ def test_episodic_search_does_not_expose_non_text_legacy_tags():
     assert len(results) == 1
     assert results[0]["tags"] == ["valide"]
     db.close()
+
+
+
+def test_legacy_memory_migration_skips_non_text_timestamps():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("""
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY, user_id, category, content, importance INTEGER,
+            tags TEXT, access_count INTEGER, created_at, updated_at,
+            UNIQUE(user_id, content)
+        )
+    """)
+    db.executemany(
+        "INSERT INTO memories VALUES (?, 'creator', 'general', ?, 3, '[]', 0, ?, 't1')",
+        [
+            (1, "Date valide", "2026-11-15T10:00:00+00:00"),
+            (2, "Date binaire", b"2026-11-15"),
+            (3, "Date numerique", 1763200800),
+        ],
+    )
+    init_memory_tables(db)
+    rows = db.execute(
+        "SELECT content, created_at FROM memories_v19 ORDER BY id"
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["content"] == "Date valide"
+    assert rows[0]["created_at"] == "2026-11-15T10:00:00+00:00"
+    assert db.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 3
+    db.close()

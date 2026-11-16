@@ -324,9 +324,17 @@ def migrate_legacy_memories(db: sqlite3.Connection) -> int:
         safe_tags = _normalize_tags(
             ["legacy_source_unverified"] + legacy_tags
         )
+        raw_created_at = row.get("created_at")
+        raw_updated_at = row.get("updated_at")
+        # Do not turn BLOBs, numbers, or other malformed legacy timestamps
+        # into plausible-looking strings during migration.
+        if raw_created_at is not None and not isinstance(raw_created_at, str):
+            continue
+        if raw_updated_at is not None and not isinstance(raw_updated_at, str):
+            continue
         now = utc_now()
-        created_at = str(row.get("created_at") or now)
-        updated_at = str(row.get("updated_at") or created_at)
+        created_at = raw_created_at.strip() if raw_created_at and raw_created_at.strip() else now
+        updated_at = raw_updated_at.strip() if raw_updated_at and raw_updated_at.strip() else created_at
         result = db.execute(
             """INSERT OR IGNORE INTO memories_v19
                (user_id,category,content,importance,source_type,confidence,tags,

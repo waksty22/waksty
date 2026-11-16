@@ -378,6 +378,8 @@ def test_episodic_search_rejects_unknown_or_binary_provenance():
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     init_memory_tables(db)
+    # Simulate damaged legacy storage that bypassed the table CHECK constraint.
+    db.execute("PRAGMA ignore_check_constraints = ON")
     db.execute(
         """INSERT INTO memories_v19
            (user_id, category, content, importance, source_type, confidence,

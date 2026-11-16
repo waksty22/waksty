@@ -579,6 +579,9 @@ def search_episodic_memories(
             UPDATE memories_v19
             SET access_count = access_count + 1
             WHERE user_id = ? AND id = ?
+              AND typeof(access_count) = 'integer'
+              AND access_count >= 0
+              AND access_count < 9223372036854775807
             """,
             [(user_id, int(item["id"])) for item in results],
         )

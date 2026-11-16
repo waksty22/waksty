@@ -108,3 +108,30 @@ def test_decay_does_not_treat_malformed_timestamp_as_old():
         assert row["importance"] == 3
     finally:
         db.close()
+
+
+
+def test_search_does_not_overflow_maximum_sqlite_access_counter():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(db, "owner", "Souvenir compteur maximal")
+        db.execute(
+            "UPDATE memories_v19 SET access_count=? WHERE content=?",
+            (9223372036854775807, "Souvenir compteur maximal"),
+        )
+        db.commit()
+
+        results = search_episodic_memories(
+            db, "owner", "compteur maximal", limit=5
+        )
+        assert len(results) == 1
+        assert results[0]["access_count"] == 9223372036854775807
+        stored = db.execute(
+            "SELECT access_count FROM memories_v19 WHERE content=?",
+            ("Souvenir compteur maximal",),
+        ).fetchone()
+        assert stored["access_count"] == 9223372036854775807
+    finally:
+        db.close()

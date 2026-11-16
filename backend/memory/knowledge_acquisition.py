@@ -37,6 +37,35 @@ def _safe_rows(
         return []
 
 
+def _validated_assessment(details: Any, passed: Any, score: Any) -> bool:
+    """Only explicit, well-typed passing flags and supervisor provenance validate a skill."""
+    if not isinstance(details, dict):
+        return False
+    if details.get("source") != "supervised_assessment":
+        return False
+    if details.get("supervisor_approved") is not True:
+        return False
+    if isinstance(passed, bool) or not isinstance(passed, int) or passed != 1:
+        return False
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return False
+    try:
+        numeric_score = float(score)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return math.isfinite(numeric_score) and numeric_score >= 70
+
+
+def _safe_score(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
 def retrieve_acquired_knowledge(
     db: sqlite3.Connection,
     user_id: str,
@@ -137,9 +166,16 @@ def retrieve_acquired_knowledge(
                 details = {}
         except (TypeError, ValueError):
             details = {}
-        approved = details.get("source") == "supervised_assessment" and details.get("supervisor_approved") is True
-        passed = bool(row.get("passed")) and float(row.get("score") or 0) >= 70
-        status = "supervised_skill_validated" if approved and passed else (
+        approved = (
+            details.get("source") == "supervised_assessment"
+            and details.get("supervisor_approved") is True
+        )
+        validated = _validated_assessment(
+            details, row.get("passed"), row.get("score")
+        )
+        passed = row.get("passed") == 1 and not isinstance(row.get("passed"), bool)
+        score = _safe_score(row.get("score"))
+        status = "supervised_skill_validated" if validated else (
             "supervised_assessment_not_validated" if approved else "assessment_provenance_unconfirmed"
         )
         skill = str(row.get("test_name") or "")
@@ -150,7 +186,7 @@ def retrieve_acquired_knowledge(
         add_candidate(
             "skill_assessment", row["id"], content, status,
             "competency_tests", row.get("tested_at"),
-            {"skill": skill, "score": float(row.get("score") or 0),
+            {"skill": skill, "score": score,
              "passed": bool(row.get("passed")),
              "supervisor_approved": approved,
              "goal_id": details.get("goal_id"),

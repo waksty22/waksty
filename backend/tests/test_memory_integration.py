@@ -270,3 +270,35 @@ def test_legacy_memory_migration_ignores_malformed_non_text_tags():
     assert row["source_type"] == "inferred"
     assert json.loads(row["tags"]) == ["legacy_source_unverified", "valide"]
     db.close()
+
+
+
+def test_legacy_memory_migration_skips_non_text_identity_fields():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("""
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY, user_id, category, content, importance INTEGER,
+            tags TEXT, access_count INTEGER, created_at TEXT, updated_at TEXT,
+            UNIQUE(user_id, content)
+        )
+    """)
+    db.executemany(
+        "INSERT INTO memories VALUES (?, ?, ?, ?, 3, '[]', 0, 't0', 't1')",
+        [
+            (1, "creator", "general", "Souvenir valide"),
+            (2, 42, "general", "Identité numérique"),
+            (3, "creator", "general", {"contenu": "objet"}),
+            (4, "creator", ["catégorie"], "Catégorie mal formée"),
+        ],
+    )
+    init_memory_tables(db)
+    rows = db.execute(
+        "SELECT user_id, category, content FROM memories_v19"
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("creator", "general", "Souvenir valide")
+    ]
+    # Legacy source remains untouched; only the valid row is copied.
+    assert db.execute("SELECT COUNT(*) FROM memories").fetchone()[0] == 4
+    db.close()

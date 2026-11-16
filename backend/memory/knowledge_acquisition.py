@@ -68,6 +68,11 @@ def _safe_score(value: Any) -> float:
     return number if math.isfinite(number) else 0.0
 
 
+def _safe_confidence(value: Any) -> float:
+    number = _safe_score(value)
+    return max(0.0, min(1.0, number))
+
+
 def retrieve_acquired_knowledge(
     db: sqlite3.Connection,
     user_id: str,
@@ -75,12 +80,17 @@ def retrieve_acquired_knowledge(
     limit: int = MAX_ITEMS,
 ) -> dict[str, Any]:
     """Return source-grounded knowledge candidates without mutating storage."""
-    if not isinstance(user_id, str) or not user_id.strip() or len(user_id) > 80:
+    if not isinstance(user_id, str):
+        raise ValueError("Identifiant utilisateur invalide.")
+    user_id = user_id.strip()
+    if not user_id or len(user_id) > 80:
         raise ValueError("Identifiant utilisateur invalide.")
     if not isinstance(query, str):
         raise ValueError("La recherche doit être du texte.")
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
     query = query.strip()[:MAX_QUERY_CHARS]
-    limit = max(1, min(int(limit), MAX_ITEMS))
+    limit = max(1, min(limit, MAX_ITEMS))
     query_terms = set(_terms(query))
 
     memories = _safe_rows(
@@ -148,7 +158,7 @@ def retrieve_acquired_knowledge(
             "memory", row["id"], row.get("content", ""), status,
             "memories_v19:" + source_type, row.get("updated_at") or row.get("created_at"),
             {"category": str(row.get("category") or "general"),
-             "confidence": max(0.0, min(1.0, float(row.get("confidence") or 0.0)))},
+             "confidence": _safe_confidence(row.get("confidence"))},
         )
 
     for row in experiences:

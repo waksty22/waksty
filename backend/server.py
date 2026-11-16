@@ -309,6 +309,22 @@ def _append_live_audio_chunk(
     return current_chars + len(data)
 
 
+def _record_live_text_exposure(user_id: str, text: Any) -> int:
+    """Persist lexical exposure from text sent directly through Gemini Live."""
+    if not isinstance(text, str) or not text.strip():
+        return 0
+    with db_connection() as db:
+        recorded = record_heard_text(
+            db,
+            user_id,
+            text,
+            evidence="Message texte transmis via Gemini Live",
+        )
+        if recorded:
+            db.commit()
+    return len(recorded)
+
+
 def _merge_bounded_live_transcript(previous: Any, incoming: Any) -> str | None:
     """Merge text only when both the chunk and accumulated turn stay bounded."""
     if not isinstance(previous, str) or not isinstance(incoming, str):
@@ -5763,7 +5779,18 @@ async def websocket_endpoint(
                         )
                         if merged_user_text is None:
                             continue
+                        previous_user_text = live_turn_state["user"]
+                        new_text_segment = _new_live_transcript_segment(
+                            previous_user_text, merged_user_text
+                        )
                         live_turn_state["user"] = merged_user_text
+                        if new_text_segment:
+                            try:
+                                _record_live_text_exposure(user_id, new_text_segment)
+                            except Exception:
+                                log.exception(
+                                    "[GEMINI LIVE] Échec mémorisation exposition texte"
+                                )
                         message = {
                             "clientContent": {
                                 "turns": [{"role": "user", "parts": [{"text": text_value}]}],

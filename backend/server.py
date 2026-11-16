@@ -279,6 +279,17 @@ STORAGE_MIGRATION_PENDING_CUTOVER = False
 LIVE_WS_TICKET_TTL_SECONDS = 45
 live_ws_tickets = OneTimeTicketStore(LIVE_WS_TICKET_TTL_SECONDS)
 
+def _normalize_live_error_message(error: Any) -> str:
+    """Expose only bounded provider text; never stringify arbitrary payloads."""
+    if not isinstance(error, dict):
+        return "Erreur Gemini Live."
+    message = error.get("message")
+    if not isinstance(message, str):
+        return "Erreur Gemini Live."
+    message = message.strip()
+    return message[:500] if message else "Erreur Gemini Live."
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -5695,15 +5706,12 @@ async def websocket_endpoint(
                     if not isinstance(response, dict):
                         continue
                     if "error" in response:
-                        error = response["error"]
-                        error_message = (
-                            error.get("message", "Erreur Gemini Live.")
-                            if isinstance(error, dict)
-                            else error
+                        error_message = _normalize_live_error_message(
+                            response["error"]
                         )
                         await websocket.send_json({
                             "type": "error",
-                            "message": str(error_message),
+                            "message": error_message,
                         })
                         continue
 

@@ -736,3 +736,26 @@ def test_server_db_connection_routes_explicit_turso_selection_through_factory(
     assert captured["settings"].backend == "turso"
     assert captured["settings"].turso_database_url == "libsql://isolated-test.turso.io"
     assert captured["settings"].turso_auth_token == "test-only-token"
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        ({"message": "Erreur réseau"}, "Erreur réseau"),
+        ({"message": {"secret": "value"}}, "Erreur Gemini Live."),
+        ({"message": ["unexpected"]}, "Erreur Gemini Live."),
+        ({"message": 503}, "Erreur Gemini Live."),
+        ("not-an-object", "Erreur Gemini Live."),
+        ({"message": "  "}, "Erreur Gemini Live."),
+    ],
+)
+def test_live_provider_error_message_accepts_only_bounded_text(error, expected):
+    import server
+
+    assert server._normalize_live_error_message(error) == expected
+
+
+def test_live_provider_error_message_truncates_long_text():
+    import server
+
+    assert server._normalize_live_error_message({"message": "x" * 1000}) == "x" * 500

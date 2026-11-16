@@ -90,6 +90,7 @@ def test_live_transcript_merges_incremental_chunks():
     assert merge_live_transcript("Bonjour tout", "tout va bien") == "Bonjour tout va bien"
     assert merge_live_transcript("Bonjour", "Bonjour tout le monde") == "Bonjour tout le monde"
     assert merge_live_transcript("Bonjour Chappie", "encore") == "Bonjour Chappie encore"
+    assert merge_live_transcript("hello", "lo world") == "hello lo world"
 
 
 def test_context_budget_never_cuts_json_records_and_reports_omissions():

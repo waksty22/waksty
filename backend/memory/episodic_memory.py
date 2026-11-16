@@ -511,6 +511,9 @@ def search_episodic_memories(
             continue
         if not isinstance(item.get("content"), str) or not isinstance(item.get("category"), str):
             continue
+        source_type = item.get("source_type")
+        if not isinstance(source_type, str) or source_type not in VALID_SOURCE_TYPES:
+            continue
         if not isinstance(item.get("importance"), int) or isinstance(item.get("importance"), bool):
             continue
         raw_confidence = item.get("confidence")

@@ -369,3 +369,29 @@ def test_episodic_search_skips_corrupt_numeric_metadata():
     results = search_episodic_memories(db, "creator", "souvenir")
     assert results == []
     db.close()
+
+
+
+def test_episodic_search_rejects_unknown_or_binary_provenance():
+    from memory.episodic_memory import init_memory_tables, search_episodic_memories
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    db.execute(
+        """INSERT INTO memories_v19
+           (user_id, category, content, importance, source_type, confidence,
+            tags, access_count, created_at, updated_at)
+           VALUES ('creator', 'general', 'Souvenir provenance inconnue', 3,
+                   'fabricated', 0.5, '[]', 0, 't0', 't1')"""
+    )
+    db.execute(
+        """INSERT INTO memories_v19
+           (user_id, category, content, importance, source_type, confidence,
+            tags, access_count, created_at, updated_at)
+           VALUES ('creator', 'general', 'Souvenir provenance binaire', 3,
+                   ?, 0.5, '[]', 0, 't0', 't1')""",
+        (b"taught",),
+    )
+    assert search_episodic_memories(db, "creator") == []
+    db.close()

@@ -276,6 +276,8 @@ security = HTTPBearer(auto_error=False)
 
 _rate_buckets: dict[str, list[float]] = {}
 STORAGE_MIGRATION_PENDING_CUTOVER = False
+STORAGE_MIGRATION_KEY = "sqlite-to-turso-v50.65"
+STORAGE_MIGRATION_PENDING_STATUSES = frozenset({"migration_in_progress", "pending_cutover"})
 LIVE_WS_TICKET_TTL_SECONDS = 45
 live_ws_tickets = OneTimeTicketStore(LIVE_WS_TICKET_TTL_SECONDS)
 
@@ -394,7 +396,7 @@ def db_connection() -> Any:
     return open_storage_connection(settings)
 
 def _local_migration_pending_cutover() -> bool:
-    """Read the local migration gate without creating or changing the database."""
+    """Read the durable local migration gate without creating or changing the database."""
     if not DB_PATH.is_file():
         return False
     connection = None
@@ -412,11 +414,22 @@ def _local_migration_pending_cutover() -> bool:
         row = connection.execute(
             "SELECT status FROM chappie_storage_migration_state "
             "WHERE migration_key=?",
-            ("sqlite-to-turso-v50.65",),
+            (STORAGE_MIGRATION_KEY,),
         ).fetchone()
-        return bool(row and row[0] == "pending_cutover")
-    except sqlite3.Error:
-        return False
+        if not row:
+            return False
+        if row[0] in STORAGE_MIGRATION_PENDING_STATUSES:
+            return True
+        if row[0] == "cancelled":
+            return False
+        raise RuntimeError(
+            "État local de migration inconnu ; démarrage bloqué pour protéger la mémoire."
+        )
+    except sqlite3.Error as exc:
+        raise RuntimeError(
+            "Impossible de vérifier le marqueur local de migration SQLite ; "
+            "démarrage bloqué pour protéger la mémoire."
+        ) from exc
     finally:
         if connection is not None:
             connection.close()
@@ -467,7 +480,7 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
                 WHEN EXISTS (
                     SELECT 1 FROM chappie_storage_migration_state
                     WHERE migration_key='sqlite-to-turso-v50.65'
-                      AND status='pending_cutover'
+                      AND status IN ('migration_in_progress', 'pending_cutover')
                 )
                 BEGIN
                     SELECT RAISE(ABORT, 'Chappie storage migration pending Turso cutover');
@@ -476,6 +489,88 @@ def _install_sqlite_cutover_write_guards(connection: sqlite3.Connection) -> int:
             )
             installed += 1
     return installed
+
+
+
+
+def _persist_local_migration_gate(
+    connection: sqlite3.Connection,
+    updated_at: str,
+) -> int:
+    """Durably block SQLite before the first remote migration write."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chappie_storage_migration_state (
+            migration_key TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT OR REPLACE INTO chappie_storage_migration_state (
+            migration_key, status, updated_at
+        ) VALUES (?, 'migration_in_progress', ?)
+        """,
+        (STORAGE_MIGRATION_KEY, updated_at),
+    )
+    trigger_count = _install_sqlite_cutover_write_guards(connection)
+    connection.commit()
+    return trigger_count
+
+
+def _mark_local_migration_pending_cutover(
+    connection: sqlite3.Connection,
+    updated_at: str,
+) -> None:
+    """Advance the durable gate only after the remote commit is confirmed."""
+    cursor = connection.execute(
+        """
+        UPDATE chappie_storage_migration_state
+        SET status='pending_cutover', updated_at=?
+        WHERE migration_key=? AND status='migration_in_progress'
+        """,
+        (updated_at, STORAGE_MIGRATION_KEY),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError(
+            "Le marqueur local migration_in_progress est absent ou a changé."
+        )
+    connection.commit()
+
+
+def _release_local_migration_gate(
+    connection: sqlite3.Connection,
+    updated_at: str,
+) -> None:
+    """Release a gate only after the migration function proved it did not apply."""
+    connection.execute("PRAGMA query_only=OFF")
+    marker = connection.execute(
+        "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
+        (STORAGE_MIGRATION_KEY,),
+    ).fetchone()
+    if not marker or marker[0] != "migration_in_progress":
+        raise RuntimeError(
+            "Le marqueur local n'est plus dans l'état migration_in_progress."
+        )
+    guards = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='trigger' "
+        "AND name LIKE 'chappie_migration_guard_%'"
+    ).fetchall()
+    for row in guards:
+        connection.execute(
+            "DROP TRIGGER IF EXISTS " + _quote_sql_identifier(str(row[0]))
+        )
+    connection.execute(
+        """
+        UPDATE chappie_storage_migration_state
+        SET status='cancelled', updated_at=?
+        WHERE migration_key=?
+        """,
+        (updated_at, STORAGE_MIGRATION_KEY),
+    )
+    connection.commit()
 
 
 def _remote_turso_migration_completed(
@@ -6516,9 +6611,23 @@ async def api_storage_migration_apply(
     payload: TursoMigrationApplyRequest,
     auth=Depends(require_auth),
 ):
-    """Apply the reviewed SQLite -> Turso migration after explicit safeguards."""
+    """Apply SQLite -> Turso only after a durable local write gate is installed."""
     global STORAGE_MIGRATION_PENDING_CUTOVER
     _authenticated_user(auth)
+    if STORAGE_MIGRATION_PENDING_CUTOVER:
+        raise HTTPException(
+            status_code=409,
+            detail="Une migration Turso est déjà en cours ou en attente de bascule.",
+        )
+    try:
+        if _local_migration_pending_cutover():
+            STORAGE_MIGRATION_PENDING_CUTOVER = True
+            raise HTTPException(
+                status_code=409,
+                detail="Un marqueur local de migration est déjà actif. Ne relancez pas le transfert.",
+            )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() != "1":
         raise HTTPException(
             status_code=403,
@@ -6544,69 +6653,89 @@ async def api_storage_migration_apply(
 
     source = None
     target = None
+    remote_migration_outcome_unknown = False
+    remote_migration_returned_not_applied = False
     remote_migration_committed = False
     try:
         import libsql
         from storage.data_migration import migrate_sqlite_rows_to_turso
 
-        # Acquire SQLite's writer reservation before reading, then make this
-        # connection query-only. This pins one consistent source snapshot and
-        # pauses concurrent app writes until the transfer finishes.
         source = sqlite3.connect(str(DB_PATH), timeout=30)
         source.row_factory = sqlite3.Row
         source.execute("BEGIN IMMEDIATE")
         source.execute("PRAGMA query_only=ON")
+
+        # Recheck while holding SQLite's writer reservation to prevent two
+        # concurrent apply requests from both passing the initial preflight.
+        marker_table = source.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='chappie_storage_migration_state'"
+        ).fetchone()
+        if marker_table:
+            marker = source.execute(
+                "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
+                (STORAGE_MIGRATION_KEY,),
+            ).fetchone()
+            if marker and marker[0] in STORAGE_MIGRATION_PENDING_STATUSES:
+                STORAGE_MIGRATION_PENDING_CUTOVER = True
+                raise HTTPException(
+                    status_code=409,
+                    detail="Une autre requête a déjà verrouillé la migration Turso.",
+                )
+
         target = libsql.connect(database=remote_url, auth_token=remote_token)
         target.execute("PRAGMA foreign_keys=ON")
-
-        report = migrate_sqlite_rows_to_turso(source, target, apply=True)
-        if not report.get("applied"):
+        preview = migrate_sqlite_rows_to_turso(source, target, apply=False)
+        if not preview.get("ready"):
             raise HTTPException(
                 status_code=409,
                 detail={
                     "message": "Migration bloquée par le contrôle de compatibilité.",
+                    "blockers": preview.get("blockers", []),
+                },
+            )
+
+        # Commit a local intent marker and write guards BEFORE any remote
+        # transaction. A crash after Turso COMMIT therefore leaves SQLite
+        # durably read-only, even if credentials are later removed.
+        source.execute("PRAGMA query_only=OFF")
+        STORAGE_MIGRATION_PENDING_CUTOVER = True
+        trigger_count = _persist_local_migration_gate(source, utc_now())
+
+        # Reacquire one stable source snapshot. The committed triggers protect
+        # the gap between the two local transactions.
+        source.execute("BEGIN IMMEDIATE")
+        source.execute("PRAGMA query_only=ON")
+
+        try:
+            report = migrate_sqlite_rows_to_turso(source, target, apply=True)
+        except Exception:
+            # A transport error from COMMIT can mean the server committed but
+            # the acknowledgement was lost. Never infer rollback from it.
+            remote_migration_outcome_unknown = True
+            raise
+
+        if not report.get("applied"):
+            remote_migration_returned_not_applied = True
+            source.execute("PRAGMA query_only=OFF")
+            _release_local_migration_gate(source, utc_now())
+            STORAGE_MIGRATION_PENDING_CUTOVER = False
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "La vérification finale a bloqué la migration avant commit Turso.",
                     "blockers": report.get("blockers", []),
                 },
             )
 
-        # migrate_sqlite_rows_to_turso returns only after its remote COMMIT.
-        # From this point onward, failures must never be described as a target
-        # rollback: the remote data and completion marker are already durable.
         remote_migration_committed = True
-
-        # The remote transaction is now committed. Block all new app activity
-        # immediately, before attempting any further local bookkeeping.
-        STORAGE_MIGRATION_PENDING_CUTOVER = True
-
-        # Persist a local cutover gate in the same locked SQLite snapshot.
-        # If Render restarts before the environment switch, startup detects it
-        # and keeps the old backend read-only instead of accepting new memories.
         source.execute("PRAGMA query_only=OFF")
-        source.execute(
-            """
-            CREATE TABLE IF NOT EXISTS chappie_storage_migration_state (
-                migration_key TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        source.execute(
-            """
-            INSERT OR REPLACE INTO chappie_storage_migration_state (
-                migration_key, status, updated_at
-            ) VALUES (?, 'pending_cutover', ?)
-            """,
-            ("sqlite-to-turso-v50.65", utc_now()),
-        )
-        trigger_count = _install_sqlite_cutover_write_guards(source)
-        STORAGE_MIGRATION_PENDING_CUTOVER = True
-        source.commit()
+        _mark_local_migration_pending_cutover(source, utc_now())
+
         log.info(
             "[MIGRATION] SQLite write guards installed: %s triggers.",
             trigger_count,
         )
-
         log.info(
             "[MIGRATION] SQLite -> Turso completed: %s inserted, %s already present, %s tables.",
             report["inserted_rows"],
@@ -6628,19 +6757,44 @@ async def api_storage_migration_apply(
                 "[MIGRATION] Turso commit is durable, but local cutover bookkeeping failed."
             )
             detail = (
-                "La migration Turso est déjà validée, mais la finalisation locale a échoué ("
+                "Commit Turso confirmé, mais le marqueur local n'a pas pu passer à "
+                "pending_cutover. Le marqueur durable migration_in_progress et les "
+                "déclencheurs locaux restent actifs. Ne relancez pas la migration ; "
+                "vérifiez le marqueur distant et terminez la bascule de manière contrôlée. "
+                "SQLite reste bloquée en écriture."
+            )
+        elif remote_migration_outcome_unknown:
+            log.exception(
+                "[MIGRATION] Turso commit outcome is unknown; durable local gate retained."
+            )
+            detail = (
+                "Résultat du commit Turso indéterminé : une erreur de transport peut "
+                "survenir après acceptation du commit. Ne supposez pas que rollback a "
+                "annulé la transaction. Le marqueur local migration_in_progress et ses "
+                "déclencheurs restent actifs. Ne relancez pas et ne déverrouillez pas "
+                "SQLite avant vérification en lecture seule du marqueur distant."
+            )
+        elif remote_migration_returned_not_applied:
+            log.exception(
+                "[MIGRATION] Turso migration was not applied, but local gate release failed."
+            )
+            detail = (
+                "La migration n'a pas été appliquée côté Turso, mais le verrou local "
+                "n'a pas pu être levé. SQLite reste bloquée jusqu'à une annulation "
+                "pré-bascule contrôlée ("
                 + type(exc).__name__
-                + "). Ne relancez pas la migration : vérifiez le marqueur distant et "
-                "terminez la bascule de manière contrôlée. SQLite reste bloquée en écriture."
+                + ")."
             )
         else:
             log.exception(
-                "[MIGRATION] SQLite -> Turso aborted before remote commit; "
-                "target transaction rolled back."
+                "[MIGRATION] Turso migration was not confirmed; local gate retained if committed."
             )
             detail = (
-                "Migration interrompue avant validation Turso ; transaction cible annulée : "
+                "La migration distante n'a pas été confirmée ("
                 + type(exc).__name__
+                + "). Si le marqueur local a été validé, SQLite reste bloquée. "
+                "Vérifiez son état avant toute reprise ; aucune annulation distante "
+                "n'est supposée."
             )
         raise HTTPException(status_code=503, detail=detail)
     finally:
@@ -6650,6 +6804,7 @@ async def api_storage_migration_apply(
                     connection.close()
                 except Exception:
                     pass
+
 
 
 @app.post("/api/storage/migration/cancel")
@@ -6697,8 +6852,10 @@ async def api_storage_migration_cancel(
                 "SELECT status FROM chappie_storage_migration_state WHERE migration_key=?",
                 ("sqlite-to-turso-v50.65",),
             ).fetchone()
-        local_pending = bool(marker and marker[0] == "pending_cutover")
-        if marker is not None and marker[0] != "pending_cutover":
+        local_pending = bool(
+            marker and marker[0] in STORAGE_MIGRATION_PENDING_STATUSES
+        )
+        if marker is not None and marker[0] not in STORAGE_MIGRATION_PENDING_STATUSES:
             local.rollback()
             raise HTTPException(
                 status_code=409,
@@ -6710,11 +6867,16 @@ async def api_storage_migration_cancel(
         # If the process stops after the remote commit but before the local
         # commit, startup still sees the local pending gate and stays read-only.
         remote = libsql.connect(database=remote_url, auth_token=remote_token)
-        remote.execute(
-            "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
-            ("sqlite-to-turso-v50.65",),
-        )
-        remote.commit()
+        remote_marker_table = remote.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='chappie_storage_migrations'"
+        ).fetchone()
+        if remote_marker_table:
+            remote.execute(
+                "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
+                (STORAGE_MIGRATION_KEY,),
+            )
+            remote.commit()
 
         # Only after the remote marker is durably removed may SQLite be unlocked.
         guards = local.execute(

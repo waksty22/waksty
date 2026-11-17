@@ -38,7 +38,8 @@ def test_server_refuses_turso_startup_without_cutover_marker(monkeypatch):
         server.init_db()
 
 
-def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete():
+@pytest.mark.parametrize("pending_status", ["migration_in_progress", "pending_cutover"])
+def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete(pending_status):
     import sqlite3
     import server
 
@@ -51,8 +52,8 @@ def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete():
             "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
         )
         connection.execute(
-            "INSERT INTO chappie_storage_migration_state VALUES "
-            "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
+            "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+            ("sqlite-to-turso-v50.65", pending_status, "t1"),
         )
         count = server._install_sqlite_cutover_write_guards(connection)
         assert count == 3
@@ -67,8 +68,9 @@ def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete():
         connection.close()
 
 
+@pytest.mark.parametrize("pending_status", ["migration_in_progress", "pending_cutover"])
 def test_local_pending_cutover_marker_is_detected_after_database_reopen(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, pending_status
 ):
     import sqlite3
     import server
@@ -80,8 +82,8 @@ def test_local_pending_cutover_marker_is_detected_after_database_reopen(
         "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
     )
     connection.execute(
-        "INSERT INTO chappie_storage_migration_state VALUES "
-        "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", pending_status, "t1"),
     )
     connection.commit()
     connection.close()
@@ -90,8 +92,9 @@ def test_local_pending_cutover_marker_is_detected_after_database_reopen(
     assert server._local_migration_pending_cutover() is True
 
 
+@pytest.mark.parametrize("pending_status", ["migration_in_progress", "pending_cutover"])
 def test_init_db_stays_read_only_when_local_cutover_marker_exists(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, pending_status
 ):
     import sqlite3
     import server
@@ -103,14 +106,16 @@ def test_init_db_stays_read_only_when_local_cutover_marker_exists(
         "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
     )
     connection.execute(
-        "INSERT INTO chappie_storage_migration_state VALUES "
-        "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", pending_status, "t1"),
     )
     connection.commit()
     connection.close()
 
     monkeypatch.setattr(server, "DB_PATH", database_path)
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
     monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
 
     server.init_db()
@@ -118,7 +123,6 @@ def test_init_db_stays_read_only_when_local_cutover_marker_exists(
     assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
     check = sqlite3.connect(database_path)
     try:
-        # init_db returned before executing its ordinary schema initialization.
         assert check.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'"
         ).fetchone()[0] == 0
@@ -168,6 +172,170 @@ def test_init_db_detects_remote_commit_without_local_marker_or_flag(
 
 
 
+def test_local_migration_marker_read_error_fails_closed(monkeypatch, tmp_path):
+    import server
+
+    database_path = tmp_path / "corrupt.sqlite3"
+    database_path.write_bytes(b"not a sqlite database")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    with pytest.raises(RuntimeError, match="Impossible de vérifier le marqueur local"):
+        server._local_migration_pending_cutover()
+
+
+def test_unknown_local_migration_state_fails_closed(monkeypatch, tmp_path):
+    import sqlite3
+    import server
+
+    database_path = tmp_path / "unknown.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", "unexpected", "t1"),
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    with pytest.raises(RuntimeError, match="État local de migration inconnu"):
+        server._local_migration_pending_cutover()
+
+
+@pytest.mark.parametrize("failure_mode", ["local_finalize", "commit_ack"])
+def test_apply_keeps_durable_local_gate_after_remote_commit_failure(
+    monkeypatch, tmp_path, failure_mode
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+    import storage.data_migration as data_migration
+    from fastapi import HTTPException
+
+    local_path = tmp_path / "source.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.commit()
+    local.close()
+
+    remote_path = tmp_path / "remote.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.commit()
+    remote.close()
+
+    class FakeLibsqlConnection:
+        def __init__(self):
+            self.connection = sqlite3.connect(remote_path)
+
+        def execute(self, *args, **kwargs):
+            return self.connection.execute(*args, **kwargs)
+
+        def commit(self):
+            return self.connection.commit()
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    def fake_migrate(source, target, *, apply=False):
+        if not apply:
+            return {"ready": True, "applied": False, "blockers": []}
+        target.execute(
+            "INSERT INTO chappie_storage_migrations VALUES (?, 'completed')",
+            ("sqlite-to-turso-v50.65",),
+        )
+        target.commit()
+        if failure_mode == "commit_ack":
+            raise RuntimeError("simulated lost COMMIT acknowledgement")
+        return {
+            "ready": True,
+            "applied": True,
+            "inserted_rows": 1,
+            "already_present_rows": 0,
+            "tables": [{"table": "probe"}],
+        }
+
+    monkeypatch.setattr(
+        data_migration, "migrate_sqlite_rows_to_turso", fake_migrate
+    )
+    if failure_mode == "local_finalize":
+        def fail_local_finalize(*args, **kwargs):
+            raise OSError("simulated local marker write failure")
+        monkeypatch.setattr(
+            server, "_mark_local_migration_pending_cutover", fail_local_finalize
+        )
+
+    payload = server.TursoMigrationApplyRequest(
+        confirmation="MIGRER VERS TURSO",
+        backup_downloaded=True,
+    )
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            server.api_storage_migration_apply(payload, auth="creator")
+        )
+
+    assert error.value.status_code == 503
+    if failure_mode == "local_finalize":
+        assert "Commit Turso confirmé" in error.value.detail
+    else:
+        assert "indéterminé" in error.value.detail
+
+    remote_check = sqlite3.connect(remote_path)
+    try:
+        assert remote_check.execute(
+            "SELECT status FROM chappie_storage_migrations "
+            "WHERE migration_key='sqlite-to-turso-v50.65'"
+        ).fetchone()[0] == "completed"
+    finally:
+        remote_check.close()
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state "
+            "WHERE migration_key='sqlite-to-turso-v50.65'"
+        ).fetchone()[0] == "migration_in_progress"
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            local_check.execute("INSERT INTO probe(label) VALUES ('blocked')")
+    finally:
+        local_check.close()
+
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    server.init_db()
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            local_check.execute("INSERT INTO probe(label) VALUES ('still blocked')")
+    finally:
+        local_check.close()
+
+
+
 @pytest.mark.parametrize(
     "configured_key",
     ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"],
@@ -199,8 +367,9 @@ def test_init_db_fails_closed_with_partial_turso_credentials(
     assert server.STORAGE_MIGRATION_PENDING_CUTOVER is False
 
 
+@pytest.mark.parametrize("local_status", ["pending_cutover", "migration_in_progress"])
 def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, local_status
 ):
     import asyncio
     import sqlite3
@@ -216,8 +385,8 @@ def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
         "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
     )
     local.execute(
-        "INSERT INTO chappie_storage_migration_state VALUES "
-        "('sqlite-to-turso-v50.65', 'pending_cutover', 't1')"
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", local_status, "t1"),
     )
     server._install_sqlite_cutover_write_guards(local)
     local.commit()
@@ -363,6 +532,80 @@ def test_pre_cutover_cancel_recovers_when_local_marker_was_not_written(
         ).fetchone()[0] == 0
     finally:
         remote_check.close()
+
+
+
+def test_pre_cutover_cancel_handles_missing_remote_marker_table(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    local_path = tmp_path / "chappie.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    local.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES "
+        "('sqlite-to-turso-v50.65', 'migration_in_progress', 't1')"
+    )
+    server._install_sqlite_cutover_write_guards(local)
+    local.commit()
+    local.close()
+
+    class FakeLibsqlConnection:
+        def __init__(self):
+            self.connection = sqlite3.connect(":memory:")
+
+        def execute(self, *args, **kwargs):
+            return self.connection.execute(*args, **kwargs)
+
+        def commit(self):
+            return self.connection.commit()
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    result = asyncio.run(
+        server.api_storage_migration_cancel(payload, auth="creator")
+    )
+
+    assert result["cancelled"] is True
+    assert result["turso_data_preserved"] is True
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state"
+        ).fetchone()[0] == "cancelled"
+        assert local_check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchone()[0] == 0
+        local_check.execute("INSERT INTO probe(label) VALUES ('resumed')")
+        local_check.commit()
+    finally:
+        local_check.close()
 
 
 def test_missing_local_sqlite_and_missing_turso_credentials_fail_closed(

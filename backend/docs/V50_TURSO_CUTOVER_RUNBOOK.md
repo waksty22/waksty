@@ -170,14 +170,17 @@ Le migrateur :
 
 ## Complément V50.55.1 — Verrou persistant entre transfert et bascule
 
-Après la validation de la copie vers Turso, le serveur écrit un marqueur local `chappie_storage_migration_state` avec l'état `pending_cutover`, puis installe des déclencheurs SQLite qui refusent INSERT / UPDATE / DELETE sur les tables applicatives.
+Avant toute écriture distante, le serveur effectue un aperçu en lecture seule, puis persiste dans SQLite un marqueur local `chappie_storage_migration_state` avec l'état `migration_in_progress` et installe des déclencheurs qui refusent INSERT / UPDATE / DELETE sur les tables applicatives. Ce verrou est validé avant l'ouverture de la transaction de copie Turso. Après confirmation du commit distant, le marqueur passe à `pending_cutover`.
 
 Pendant cette période :
+- les états `migration_in_progress` et `pending_cutover` sont relus au démarrage et gardent SQLite bloquée, même si les identifiants Turso ont été retirés après un incident ; une erreur de lecture du marqueur local bloque également le démarrage ;
 - les requêtes applicatives d'écriture sont bloquées par le middleware ;
 - les sessions WebSocket Gemini Live sont refusées ;
 - la maintenance autonome s'arrête ;
 - les contrôles de diagnostic, l'aperçu et les sauvegardes restent accessibles ;
 - le marqueur local est relu au redémarrage ; si le fichier SQLite éphémère a disparu mais que `CHAPPIE_ALLOW_TURSO_MIGRATION=1` est encore actif, le serveur vérifie aussi le marqueur durable Turso et refuse de recréer une mémoire SQLite vide.
+
+Si le processus s'arrête après le commit Turso mais avant le passage local à `pending_cutover`, le marqueur `migration_in_progress` et les déclencheurs déjà validés restent présents : le prochain démarrage bloque SQLite sans dépendre des identifiants distants. Si l'accusé de réception du commit est perdu, le résultat distant est considéré comme indéterminé ; aucun rollback client n'est pris comme preuve d'annulation. Il faut vérifier le marqueur distant en lecture seule avant toute reprise ou annulation explicite.
 
 Les tables de garde locales et leurs déclencheurs sont exclus du transfert vers Turso. Les tables virtuelles FTS ne sont pas copiées comme des tables ordinaires : si une table FTS3/4/5 est détectée dans la source ou la cible, l'aperçu bloque la migration. Il faut définir et tester une reconstruction FTS dédiée sur Turso avant de relancer l'aperçu ; aucune table d'ombre FTS n'est transférée.
 

@@ -157,10 +157,22 @@ class HranaHttpTransaction:
         self._baton: str | None = None
         self._active = False
         self._closed = False
-        self._execute_control("BEGIN")
-        if not self._baton:
-            raise HranaHttpError("Turso Hrana n'a pas conservé le flux de transaction.")
-        self._active = True
+        try:
+            self._execute_control("BEGIN")
+            if not self._baton:
+                raise HranaHttpError(
+                    "Turso Hrana n'a pas conservé le flux de transaction."
+                )
+            self._active = True
+        except BaseException:
+            # BEGIN can fail at the SQL layer while Hrana still returns a
+            # live baton. Close that server-side stream before propagating.
+            if self._baton and not self._closed:
+                try:
+                    self._execute_control("ROLLBACK")
+                except BaseException:
+                    pass
+            raise
 
     def _pipeline_with_baton(
         self, requests: list[dict[str, Any]]

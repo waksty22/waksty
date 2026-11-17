@@ -512,14 +512,21 @@ def export_encrypted_logical_backup(
                 + str(verification.get("reason", "unknown"))
             )
     except Exception:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
-        if checksum_temporary is not None:
-            checksum_temporary.unlink(missing_ok=True)
-        if checksum_created:
-            checksum_path.unlink(missing_ok=True)
-        if destination_created:
-            destination.unlink(missing_ok=True)
+        # Cleanup is best-effort: one filesystem error must not mask the
+        # original publication/verification failure or skip later artifacts.
+        cleanup_paths = (
+            temporary_path,
+            checksum_temporary,
+            checksum_path if checksum_created else None,
+            destination if destination_created else None,
+        )
+        for cleanup_path in cleanup_paths:
+            if cleanup_path is None:
+                continue
+            try:
+                cleanup_path.unlink(missing_ok=True)
+            except BaseException:
+                pass
         raise
     return {
         "path": str(destination),

@@ -733,3 +733,57 @@ def test_logical_restore_rejects_inconsistent_schema_summary_before_target_chang
         ).fetchall() == []
     finally:
         target.close()
+
+
+def test_export_preserves_original_error_when_snapshot_rollback_and_release_fail(
+    monkeypatch, tmp_path
+):
+    import storage.logical_backup as backup
+
+    class FailingSnapshotConnection:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql):
+            self.statements.append(sql)
+            if sql == "SAVEPOINT chappie_logical_backup_snapshot":
+                return object()
+            raise RuntimeError("snapshot cleanup failed")
+
+    connection = FailingSnapshotConnection()
+
+    def fail_export(_connection, _sql):
+        raise ValueError("original export failure")
+
+    monkeypatch.setattr(backup, "_query_rows", fail_export)
+
+    with pytest.raises(ValueError, match="original export failure"):
+        backup.export_logical_backup(
+            connection, tmp_path / "failed-export.json"
+        )
+
+    assert connection.statements == [
+        "SAVEPOINT chappie_logical_backup_snapshot",
+        "ROLLBACK TO SAVEPOINT chappie_logical_backup_snapshot",
+        "RELEASE SAVEPOINT chappie_logical_backup_snapshot",
+    ]
+
+
+def test_export_surfaces_snapshot_release_failure_after_success(tmp_path):
+    class ReleaseFailingConnection:
+        def __init__(self):
+            self.database = sqlite3.connect(":memory:")
+
+        def execute(self, sql):
+            if sql == "RELEASE SAVEPOINT chappie_logical_backup_snapshot":
+                raise RuntimeError("snapshot release failed")
+            return self.database.execute(sql)
+
+    connection = ReleaseFailingConnection()
+    try:
+        with pytest.raises(RuntimeError, match="snapshot release failed"):
+            export_logical_backup(
+                connection, tmp_path / "release-failed.json"
+            )
+    finally:
+        connection.database.close()

@@ -650,15 +650,13 @@ def init_db() -> None:
         turso_database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
         turso_auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
         turso_credentials_present = bool(turso_database_url or turso_auth_token)
-        turso_credentials_complete = bool(turso_database_url and turso_auth_token)
         # A remote migration commit can survive a process crash before the
-        # local pending-cutover marker is committed. When both Turso
-        # credentials are configured, always inspect the durable remote marker
-        # even if the operator has since disabled the migration feature flag.
+        # local pending-cutover marker is committed. If either Turso credential
+        # is configured, inspect the durable remote marker even when the
+        # migration feature flag is disabled. A partial credential pair must
+        # fail closed rather than silently allowing SQLite writes.
         # Missing markers remain acceptable while a local SQLite source exists.
-        should_check_remote = migration_enabled or (
-            local_sqlite_exists and turso_credentials_complete
-        ) or (not local_sqlite_exists and turso_credentials_present)
+        should_check_remote = migration_enabled or turso_credentials_present
         if not local_pending and should_check_remote:
             remote_pending = _remote_turso_migration_completed(
                 allow_missing_marker=local_sqlite_exists

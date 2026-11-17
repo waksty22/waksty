@@ -87,7 +87,11 @@ def create_backup_archive(
         os.link(temporary_archive, output)
         temporary_archive.unlink()
     except Exception:
-        temporary_archive.unlink(missing_ok=True)
+        # Best-effort cleanup must not replace the original archive failure.
+        try:
+            temporary_archive.unlink(missing_ok=True)
+        except Exception:
+            pass
         raise
 
     return {

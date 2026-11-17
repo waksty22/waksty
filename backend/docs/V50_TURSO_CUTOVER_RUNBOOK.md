@@ -21,6 +21,18 @@
 6. Le retour arrière doit être préparé et testé avant le cutover.
 7. Les secrets restent dans les variables d'environnement Render ; ne jamais les placer dans Git, les journaux ou les réponses d'API.
 
+
+## Garde-fou de démarrage SQLite après commit Turso
+
+Lorsque le backend SQLite possède encore son fichier local et qu'au moins une des variables `TURSO_DATABASE_URL` ou `TURSO_AUTH_TOKEN` est configurée, le démarrage vérifie désormais le marqueur distant même si `CHAPPIE_ALLOW_TURSO_MIGRATION` est désactivé.
+
+- Si le marqueur distant confirme une migration terminée, le démarrage suspend les écritures SQLite jusqu'à une bascule contrôlée.
+- Si un seul des deux paramètres de connexion est configuré, le démarrage échoue volontairement : une configuration Turso partielle ne doit pas autoriser silencieusement la reprise des écritures locales.
+- Si les deux paramètres sont configurés mais que Turso est temporairement inaccessible, le contrôle distant échoue et le démarrage SQLite est bloqué. C'est un choix *fail-closed* : la disponibilité est sacrifiée pour éviter d'écrire dans une mémoire locale potentiellement obsolète.
+- Si aucun paramètre Turso n'est configuré, ou si le marqueur distant est absent alors que le fichier SQLite local existe, le démarrage SQLite normal reste possible (sous réserve des autres garde-fous).
+
+En exploitation, vérifier la disponibilité de Turso et la paire de paramètres avant un redémarrage Render. Ne jamais supprimer le marqueur distant ni désactiver ce contrôle pour contourner un incident sans avoir établi quelle base contient la mémoire faisant autorité.
+
 ## Phase A — Audit en lecture seule
 
 - Relever le chemin réel de `DB_PATH`, le volume persistant Render et les variables de configuration actives sans afficher leurs valeurs secrètes.

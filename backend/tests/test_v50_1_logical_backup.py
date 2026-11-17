@@ -889,3 +889,44 @@ def test_restore_preserves_commit_error_when_rollback_also_fails(tmp_path):
         assert target.rollback_calls == 1
     finally:
         target.close()
+
+
+def test_encrypted_export_cleanup_failure_does_not_mask_verification_error(
+    tmp_path, monkeypatch
+):
+    import storage.logical_backup as backup
+    from pathlib import Path
+
+    db = _database()
+    destination = tmp_path / "cleanup-verification.enc"
+    checksum = destination.with_suffix(destination.suffix + ".sha256")
+    real_unlink = Path.unlink
+    attempted = []
+
+    def fail_checksum_cleanup(path, *args, **kwargs):
+        if path == checksum:
+            attempted.append(path)
+            raise OSError("simulated checksum cleanup failure")
+        if path == destination:
+            attempted.append(path)
+        return real_unlink(path, *args, **kwargs)
+
+    def fail_verification(*_args, **_kwargs):
+        raise ValueError("original encrypted verification failure")
+
+    monkeypatch.setattr(Path, "unlink", fail_checksum_cleanup)
+    monkeypatch.setattr(
+        backup, "verify_encrypted_logical_backup", fail_verification
+    )
+    try:
+        with pytest.raises(
+            ValueError, match="original encrypted verification failure"
+        ):
+            backup.export_encrypted_logical_backup(
+                db, destination, "test-only-password-123"
+            )
+        assert attempted == [checksum, destination]
+        assert not destination.exists()
+        assert checksum.exists()
+    finally:
+        db.close()

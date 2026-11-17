@@ -425,9 +425,13 @@ def restore_logical_backup_payload(
             "table_count": len(restored_counts), "total_rows": sum(restored_counts.values()),
             "row_counts": restored_counts, "foreign_key_violations": 0,
         }
-    except Exception:
+    except BaseException:
         if owns_transaction:
-            connection.rollback()
+            try:
+                connection.rollback()
+            except BaseException:
+                # A rollback failure must not hide the restore/commit error.
+                pass
         raise
 
 

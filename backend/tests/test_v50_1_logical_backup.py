@@ -787,3 +787,54 @@ def test_export_surfaces_snapshot_release_failure_after_success(tmp_path):
             )
     finally:
         connection.database.close()
+
+
+def test_restore_preserves_original_error_when_rollback_fails(tmp_path):
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    backup_path = tmp_path / "restore-rollback-source.json"
+    try:
+        export_logical_backup(source, backup_path)
+    finally:
+        source.close()
+    payload = json.loads(backup_path.read_text(encoding="utf-8"))
+
+    class RollbackFailingConnection:
+        def __init__(self):
+            self.database = sqlite3.connect(":memory:")
+
+        @property
+        def in_transaction(self):
+            return self.database.in_transaction
+
+        def execute(self, sql, parameters=()):
+            if sql.lstrip().upper().startswith("CREATE TABLE"):
+                raise ValueError("original restore failure")
+            return self.database.execute(sql, parameters)
+
+        def executemany(self, sql, rows):
+            return self.database.executemany(sql, rows)
+
+        def commit(self):
+            return self.database.commit()
+
+        def rollback(self):
+            raise RuntimeError("secondary rollback failure")
+
+        def close(self):
+            self.database.close()
+
+    target = RollbackFailingConnection()
+    try:
+        with pytest.raises(ValueError, match="original restore failure"):
+            restore_logical_backup_payload(
+                target,
+                payload,
+                target_identity="chappie-restore-test",
+                expected_target_identity="chappie-restore-test",
+                production_identity="chappie-db",
+            )
+        assert target.database.in_transaction is True
+    finally:
+        target.close()

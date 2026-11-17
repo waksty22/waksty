@@ -205,7 +205,7 @@ def test_unknown_local_migration_state_fails_closed(monkeypatch, tmp_path):
         server._local_migration_pending_cutover()
 
 
-@pytest.mark.parametrize("failure_mode", ["local_finalize", "commit_ack"])
+@pytest.mark.parametrize("failure_mode", ["local_finalize", "commit_ack", "process_stop"])
 def test_apply_keeps_durable_local_gate_after_remote_commit_failure(
     monkeypatch, tmp_path, failure_mode
 ):
@@ -278,8 +278,10 @@ def test_apply_keeps_durable_local_gate_after_remote_commit_failure(
     monkeypatch.setattr(
         data_migration, "migrate_sqlite_rows_to_turso", fake_migrate
     )
-    if failure_mode == "local_finalize":
+    if failure_mode in {"local_finalize", "process_stop"}:
         def fail_local_finalize(*args, **kwargs):
+            if failure_mode == "process_stop":
+                raise SystemExit("simulated process stop after remote commit")
             raise OSError("simulated local marker write failure")
         monkeypatch.setattr(
             server, "_mark_local_migration_pending_cutover", fail_local_finalize
@@ -289,16 +291,22 @@ def test_apply_keeps_durable_local_gate_after_remote_commit_failure(
         confirmation="MIGRER VERS TURSO",
         backup_downloaded=True,
     )
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(
-            server.api_storage_migration_apply(payload, auth="creator")
-        )
-
-    assert error.value.status_code == 503
-    if failure_mode == "local_finalize":
-        assert "Commit Turso confirmé" in error.value.detail
+    apply_migration = lambda: asyncio.run(
+        server.api_storage_migration_apply(payload, auth="creator")
+    )
+    if failure_mode == "process_stop":
+        # SystemExit bypasses the endpoint's Exception handler, like an abrupt
+        # worker stop, while finally closes the already-committed connections.
+        with pytest.raises(SystemExit, match="simulated process stop"):
+            apply_migration()
     else:
-        assert "indéterminé" in error.value.detail
+        with pytest.raises(HTTPException) as error:
+            apply_migration()
+        assert error.value.status_code == 503
+        if failure_mode == "local_finalize":
+            assert "Commit Turso confirmé" in error.value.detail
+        else:
+            assert "indéterminé" in error.value.detail
 
     remote_check = sqlite3.connect(remote_path)
     try:
@@ -453,6 +461,99 @@ def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
     finally:
         local_check.close()
     remote.close()
+
+
+@pytest.mark.parametrize("remote_status", ["migration_in_progress", "unknown"])
+def test_pre_cutover_cancel_refuses_unconfirmed_remote_marker(
+    monkeypatch, tmp_path, remote_status
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+    from fastapi import HTTPException
+
+    local_path = tmp_path / "source.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    local.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", "migration_in_progress", "t1"),
+    )
+    server._install_sqlite_cutover_write_guards(local)
+    local.commit()
+    local.close()
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES (?, ?)",
+        ("sqlite-to-turso-v50.65", remote_status),
+    )
+    remote.commit()
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def commit(self):
+            return remote.commit()
+
+        def close(self):
+            # Keep the in-memory remote database available for assertions.
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            server.api_storage_migration_cancel(payload, auth="creator")
+        )
+
+    assert error.value.status_code == 409
+    assert "Le verrou SQLite est conservé" in error.value.detail
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+    assert remote.execute(
+        "SELECT status FROM chappie_storage_migrations "
+        "WHERE migration_key='sqlite-to-turso-v50.65'"
+    ).fetchone()[0] == remote_status
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state "
+            "WHERE migration_key='sqlite-to-turso-v50.65'"
+        ).fetchone()[0] == "migration_in_progress"
+        assert local_check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchone()[0] == 3
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            local_check.execute("INSERT INTO probe(label) VALUES ('still blocked')")
+    finally:
+        local_check.close()
+        remote.close()
 
 
 def test_pre_cutover_cancel_recovers_when_local_marker_was_not_written(

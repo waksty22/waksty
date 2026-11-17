@@ -6872,11 +6872,33 @@ async def api_storage_migration_cancel(
             "AND name='chappie_storage_migrations'"
         ).fetchone()
         if remote_marker_table:
-            remote.execute(
-                "DELETE FROM chappie_storage_migrations WHERE migration_key=?",
+            remote_marker = remote.execute(
+                "SELECT status FROM chappie_storage_migrations WHERE migration_key=?",
                 (STORAGE_MIGRATION_KEY,),
-            )
-            remote.commit()
+            ).fetchone()
+            if remote_marker is not None:
+                remote_status = str(remote_marker[0])
+                if remote_status != "completed":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Le marqueur distant ne confirme pas une migration terminée. "
+                            "Le verrou SQLite est conservé."
+                        ),
+                    )
+                remote.execute(
+                    "DELETE FROM chappie_storage_migrations "
+                    "WHERE migration_key=? AND status='completed'",
+                    (STORAGE_MIGRATION_KEY,),
+                )
+                remote.commit()
+                if remote.execute(
+                    "SELECT 1 FROM chappie_storage_migrations WHERE migration_key=?",
+                    (STORAGE_MIGRATION_KEY,),
+                ).fetchone():
+                    raise RuntimeError(
+                        "Le marqueur Turso n'a pas été retiré après confirmation du commit."
+                    )
 
         # Only after the remote marker is durably removed may SQLite be unlocked.
         guards = local.execute(

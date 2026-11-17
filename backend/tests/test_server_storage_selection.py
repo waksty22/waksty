@@ -167,6 +167,38 @@ def test_init_db_detects_remote_commit_without_local_marker_or_flag(
         check.close()
 
 
+
+@pytest.mark.parametrize(
+    "configured_key",
+    ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"],
+)
+def test_init_db_fails_closed_with_partial_turso_credentials(
+    monkeypatch, tmp_path, configured_key
+):
+    import server
+
+    database_path = tmp_path / "chappie.sqlite3"
+    database_path.write_bytes(b"")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "_local_migration_pending_cutover", lambda: False)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv(
+        configured_key,
+        "libsql://isolated-test.invalid"
+        if configured_key == "TURSO_DATABASE_URL"
+        else "isolated-test-token",
+    )
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    with pytest.raises(RuntimeError, match="accès Turso incomplet"):
+        server.init_db()
+
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is False
+
+
 def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
     monkeypatch, tmp_path
 ):

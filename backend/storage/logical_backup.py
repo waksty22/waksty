@@ -73,6 +73,7 @@ def export_logical_backup(
     snapshot = "chappie_logical_backup_snapshot"
     if manage_snapshot:
         connection.execute(f"SAVEPOINT {snapshot}")
+    primary_exception: BaseException | None = None
     try:
         _, object_rows = _query_rows(connection, objects_sql)
         objects = [
@@ -125,13 +126,25 @@ def export_logical_backup(
                 {"table": str(name), "seq": int(seq)}
                 for name, seq in sequence_rows if name in autoincrement_tables
             ]
-    except Exception:
+    except BaseException as exc:
+        primary_exception = exc
         if manage_snapshot:
-            connection.execute(f"ROLLBACK TO SAVEPOINT {snapshot}")
+            try:
+                connection.execute(f"ROLLBACK TO SAVEPOINT {snapshot}")
+            except BaseException:
+                # Keep the export failure as the primary diagnostic; cleanup
+                # must not replace it with a secondary rollback failure.
+                pass
         raise
     finally:
         if manage_snapshot:
-            connection.execute(f"RELEASE SAVEPOINT {snapshot}")
+            try:
+                connection.execute(f"RELEASE SAVEPOINT {snapshot}")
+            except BaseException:
+                # Surface release failures after a successful export, but do
+                # not mask an exception already raised by the export itself.
+                if primary_exception is None:
+                    raise
 
     payload = {
         "format": "chappie-turso-logical-backup",

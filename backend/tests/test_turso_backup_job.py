@@ -145,3 +145,39 @@ def test_backup_job_never_overwrites_archive_created_concurrently(tmp_path, monk
         assert not list(tmp_path.glob("*.tmp"))
     finally:
         db.close()
+
+
+def test_backup_job_preserves_verification_error_when_temp_cleanup_fails(
+    tmp_path, monkeypatch
+):
+    import backup_turso
+
+    db = _database()
+    output = tmp_path / "cleanup-failure.zip"
+    real_unlink = Path.unlink
+    attempted = []
+
+    def fail_temp_cleanup(path, *args, **kwargs):
+        if path.name.startswith(output.name + ".") and path.suffix == ".tmp":
+            attempted.append(path)
+            raise OSError("simulated temporary archive cleanup failure")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_temp_cleanup)
+    monkeypatch.setattr(
+        backup_turso,
+        "verify_encrypted_logical_backup",
+        lambda path, key: {"valid": False, "reason": "forced_test_failure"},
+    )
+    try:
+        with pytest.raises(
+            ValueError, match="Packaged backup verification failed"
+        ):
+            create_backup_archive(
+                db, output, "test-only-backup-key-not-production"
+            )
+        assert len(attempted) == 1
+        assert not output.exists()
+        assert attempted[0].exists()
+    finally:
+        db.close()

@@ -647,16 +647,18 @@ def init_db() -> None:
             os.getenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "").strip() == "1"
         )
         local_sqlite_exists = DB_PATH.is_file()
-        turso_credentials_present = bool(
-            os.getenv("TURSO_DATABASE_URL", "").strip()
-            or os.getenv("TURSO_AUTH_TOKEN", "").strip()
-        )
-        # A fresh local SQLite installation is allowed when migration is not
-        # configured. If migration is enabled, or SQLite vanished while Turso
-        # credentials exist, verify the durable remote migration marker.
+        turso_database_url = os.getenv("TURSO_DATABASE_URL", "").strip()
+        turso_auth_token = os.getenv("TURSO_AUTH_TOKEN", "").strip()
+        turso_credentials_present = bool(turso_database_url or turso_auth_token)
+        turso_credentials_complete = bool(turso_database_url and turso_auth_token)
+        # A remote migration commit can survive a process crash before the
+        # local pending-cutover marker is committed. When both Turso
+        # credentials are configured, always inspect the durable remote marker
+        # even if the operator has since disabled the migration feature flag.
+        # Missing markers remain acceptable while a local SQLite source exists.
         should_check_remote = migration_enabled or (
-            not local_sqlite_exists and turso_credentials_present
-        )
+            local_sqlite_exists and turso_credentials_complete
+        ) or (not local_sqlite_exists and turso_credentials_present)
         if not local_pending and should_check_remote:
             remote_pending = _remote_turso_migration_completed(
                 allow_missing_marker=local_sqlite_exists

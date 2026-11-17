@@ -126,6 +126,47 @@ def test_init_db_stays_read_only_when_local_cutover_marker_exists(
         check.close()
 
 
+def test_init_db_detects_remote_commit_without_local_marker_or_flag(
+    monkeypatch, tmp_path
+):
+    import sqlite3
+    import server
+
+    database_path = tmp_path / "chappie.sqlite3"
+    database_path.write_bytes(b"")
+
+    remote_checks = []
+
+    def completed_remote_migration(*, allow_missing_marker=False):
+        remote_checks.append(allow_missing_marker)
+        return True
+
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "_local_migration_pending_cutover", lambda: False)
+    monkeypatch.setattr(
+        server, "_remote_turso_migration_completed", completed_remote_migration
+    )
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    server.init_db()
+
+    assert remote_checks == [True]
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+    check = sqlite3.connect(database_path)
+    try:
+        # Startup must stop before ordinary schema initialization or writes.
+        assert check.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='conversations'"
+        ).fetchone()[0] == 0
+    finally:
+        check.close()
+
+
 def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
     monkeypatch, tmp_path
 ):

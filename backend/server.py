@@ -6296,7 +6296,6 @@ async def api_storage_migration_preview(
 
     source = None
     target = None
-    remote_migration_committed = False
     try:
         import libsql
         from storage.data_migration import build_data_migration_plan, summarize_data_migration_plan
@@ -6547,6 +6546,7 @@ async def api_storage_migration_apply(
 
     source = None
     target = None
+    remote_migration_committed = False
     try:
         import libsql
         from storage.data_migration import migrate_sqlite_rows_to_turso

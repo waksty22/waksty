@@ -525,7 +525,7 @@ def export_encrypted_logical_backup(
                 continue
             try:
                 cleanup_path.unlink(missing_ok=True)
-            except BaseException:
+            except Exception:
                 pass
         raise
     return {

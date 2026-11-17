@@ -838,3 +838,54 @@ def test_restore_preserves_original_error_when_rollback_fails(tmp_path):
         assert target.database.in_transaction is True
     finally:
         target.close()
+
+
+def test_restore_preserves_commit_error_when_rollback_also_fails(tmp_path):
+    from storage.logical_backup import restore_logical_backup_payload
+
+    source = _database()
+    backup_path = tmp_path / "restore-commit-source.json"
+    try:
+        export_logical_backup(source, backup_path)
+    finally:
+        source.close()
+    payload = json.loads(backup_path.read_text(encoding="utf-8"))
+
+    class CommitAndRollbackFailingConnection:
+        def __init__(self):
+            self.database = sqlite3.connect(":memory:")
+            self.rollback_calls = 0
+
+        @property
+        def in_transaction(self):
+            return self.database.in_transaction
+
+        def execute(self, sql, parameters=()):
+            return self.database.execute(sql, parameters)
+
+        def executemany(self, sql, rows):
+            return self.database.executemany(sql, rows)
+
+        def commit(self):
+            raise ValueError("original commit failure")
+
+        def rollback(self):
+            self.rollback_calls += 1
+            raise RuntimeError("secondary rollback failure")
+
+        def close(self):
+            self.database.close()
+
+    target = CommitAndRollbackFailingConnection()
+    try:
+        with pytest.raises(ValueError, match="original commit failure"):
+            restore_logical_backup_payload(
+                target,
+                payload,
+                target_identity="chappie-restore-test",
+                expected_target_identity="chappie-restore-test",
+                production_identity="chappie-db",
+            )
+        assert target.rollback_calls == 1
+    finally:
+        target.close()

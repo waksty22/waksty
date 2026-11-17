@@ -114,6 +114,55 @@ def test_data_migration_preview_is_read_only_and_reports_no_content():
         target.close()
 
 
+
+def test_data_migration_preview_ignores_local_cutover_gate_metadata():
+    source, target = _databases()
+    try:
+        source.execute(
+            "CREATE TABLE chappie_storage_migration_state "
+            "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        source.execute(
+            "INSERT INTO chappie_storage_migration_state VALUES "
+            "('sqlite-to-turso-v50.65', 'migration_in_progress', 't1')"
+        )
+        source.execute(
+            """
+            CREATE TRIGGER chappie_migration_guard_parent_insert
+            BEFORE INSERT ON parent
+            WHEN EXISTS (
+                SELECT 1 FROM chappie_storage_migration_state
+                WHERE migration_key='sqlite-to-turso-v50.65'
+                  AND status IN ('migration_in_progress', 'pending_cutover')
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Chappie storage migration pending Turso cutover');
+            END
+            """
+        )
+        source.commit()
+
+        plan = build_data_migration_plan(source, target)
+
+        assert plan["ready"] is True
+        assert "chappie_storage_migration_state" not in {
+            item["table"] for item in plan["tables"]
+        }
+        differences = plan["schema_diagnostics"]["differences"]
+        assert not any(
+            item.get("table") == "chappie_storage_migration_state"
+            or "chappie_migration_guard_" in str(item)
+            for item in differences
+        )
+        assert target.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE name='chappie_storage_migration_state'"
+        ).fetchone()[0] == 0
+    finally:
+        source.close()
+        target.close()
+
+
 def test_data_migration_copies_rows_preserves_target_and_is_idempotent():
     source, target = _databases()
     try:

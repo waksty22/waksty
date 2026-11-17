@@ -389,3 +389,58 @@ def test_http_v2_backup_allows_quoted_semicolons_and_rejects_multiple_statements
         transaction.rollback()
     finally:
         client.close()
+
+
+def test_http_closes_stream_when_begin_sql_fails_after_baton_allocation():
+    calls = []
+    baton = None
+    stream_closed = False
+
+    def handler(request):
+        nonlocal baton, stream_closed
+        body = json.loads(request.content)
+        calls.append((body["baton"], body["requests"]))
+        if body["requests"][0].get("stmt", {}).get("sql") == "BEGIN":
+            baton = "begin-error-baton"
+            return httpx.Response(
+                200,
+                json={
+                    "baton": baton,
+                    "results": [{
+                        "type": "error",
+                        "error": {"message": "BEGIN rejected", "code": "SQLITE_ERROR"},
+                    }],
+                },
+            )
+
+        assert body["baton"] == "begin-error-baton"
+        assert body["requests"][0]["stmt"]["sql"] == "ROLLBACK"
+        assert body["requests"][1]["type"] == "close"
+        stream_closed = True
+        baton = None
+        return httpx.Response(
+            200,
+            json={
+                "baton": None,
+                "results": [
+                    {"type": "ok", "response": {"type": "execute", "result": {}}},
+                    {"type": "ok", "response": {"type": "close"}},
+                ],
+            },
+        )
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = HranaHttpClient(
+        "libsql://example-org.turso.io", "test-token", http_client=http
+    )
+    try:
+        with pytest.raises(HranaHttpError, match="BEGIN rejected"):
+            client.transaction()
+        assert [entry[1][0].get("stmt", {}).get("sql") for entry in calls] == [
+            "BEGIN",
+            "ROLLBACK",
+        ]
+        assert stream_closed is True
+        assert baton is None
+    finally:
+        client.close()

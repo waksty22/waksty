@@ -6296,6 +6296,7 @@ async def api_storage_migration_preview(
 
     source = None
     target = None
+    remote_migration_committed = False
     try:
         import libsql
         from storage.data_migration import build_data_migration_plan, summarize_data_migration_plan
@@ -6570,6 +6571,11 @@ async def api_storage_migration_apply(
                 },
             )
 
+        # migrate_sqlite_rows_to_turso returns only after its remote COMMIT.
+        # From this point onward, failures must never be described as a target
+        # rollback: the remote data and completion marker are already durable.
+        remote_migration_committed = True
+
         # The remote transaction is now committed. Block all new app activity
         # immediately, before attempting any further local bookkeeping.
         STORAGE_MIGRATION_PENDING_CUTOVER = True
@@ -6619,11 +6625,26 @@ async def api_storage_migration_apply(
     except HTTPException:
         raise
     except Exception as exc:
-        log.exception("[MIGRATION] SQLite -> Turso aborted; target transaction rolled back.")
-        raise HTTPException(
-            status_code=503,
-            detail="Migration interrompue et transaction annulée : " + type(exc).__name__,
-        )
+        if remote_migration_committed:
+            log.exception(
+                "[MIGRATION] Turso commit is durable, but local cutover bookkeeping failed."
+            )
+            detail = (
+                "La migration Turso est déjà validée, mais la finalisation locale a échoué ("
+                + type(exc).__name__
+                + "). Ne relancez pas la migration : vérifiez le marqueur distant et "
+                "terminez la bascule de manière contrôlée. SQLite reste bloquée en écriture."
+            )
+        else:
+            log.exception(
+                "[MIGRATION] SQLite -> Turso aborted before remote commit; "
+                "target transaction rolled back."
+            )
+            detail = (
+                "Migration interrompue avant validation Turso ; transaction cible annulée : "
+                + type(exc).__name__
+            )
+        raise HTTPException(status_code=503, detail=detail)
     finally:
         for connection in (source, target):
             if connection is not None:

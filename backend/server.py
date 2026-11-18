@@ -3956,6 +3956,85 @@ async def api_memory(
         "result": result,  
     }
 
+@app.post("/api/memory/{memory_id}/confirm")
+async def api_confirm_memory(
+    memory_id: int,
+    auth=Depends(require_auth),
+):
+    """Explicitly confirm one existing memory for the authenticated owner."""
+    user_id = _authenticated_user(auth)
+    if isinstance(memory_id, bool) or memory_id < 1:
+        raise HTTPException(status_code=422, detail="Identifiant de souvenir invalide.")
+
+    with db_connection() as db:
+        try:
+            row = db.execute(
+                """
+                SELECT id, content, source_type
+                FROM memories_v19
+                WHERE id=? AND user_id=?
+                """,
+                (memory_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Souvenir introuvable.")
+
+            previous_source = str(row["source_type"])
+            if previous_source == "confirmed":
+                return {
+                    "success": True,
+                    "memory_id": memory_id,
+                    "source_type": "confirmed",
+                    "already_confirmed": True,
+                }
+
+            db.execute(
+                """
+                UPDATE memories_v19
+                SET source_type='confirmed', updated_at=?
+                WHERE id=? AND user_id=? AND source_type IN ('observed','taught','inferred')
+                """,
+                (utc_now(), memory_id, user_id),
+            )
+            if db.execute("SELECT changes()").fetchone()[0] != 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Le souvenir a changé ; rechargez-le avant confirmation.",
+                )
+
+            db.execute(
+                """
+                INSERT INTO journal(user_id, entry, kind, created_at)
+                VALUES(?,?,?,?)
+                """,
+                (
+                    user_id,
+                    f"Confirmation explicite du souvenir #{memory_id} "
+                    f"(provenance précédente : {previous_source}).",
+                    "memory_confirmation",
+                    utc_now(),
+                ),
+            )
+            db.commit()
+            return {
+                "success": True,
+                "memory_id": memory_id,
+                "source_type": "confirmed",
+                "previous_source_type": previous_source,
+                "already_confirmed": False,
+            }
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            log.exception("Échec de confirmation explicite d'un souvenir")
+            raise HTTPException(
+                status_code=500,
+                detail="La confirmation du souvenir a échoué.",
+            )
+
+
 @app.post("/api/memory/search")
 async def api_memory_search(
     request: MemorySearchRequest,

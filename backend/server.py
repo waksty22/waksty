@@ -157,6 +157,7 @@ from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
 from storage.memory_health import inspect_memory_persistence
 from storage.global_persistence import inspect_global_persistence
+from storage.readiness import check_database_readiness
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
 from diagnostics.persistence_inventory import inspect_sqlite_database
 from storage.migration_audit import build_migration_safety_audit
@@ -3793,12 +3794,29 @@ async def homepage():
 
 @app.get("/health")
 async def health():
+    # Liveness only: this endpoint confirms that the process is responding.
     return {
         "status": "ok",
         "application": "Chappie",
         "version": CHAPPIE_VERSION,
         "gemini_configured": bool(GEMINI_API_KEY),
     }
+
+
+@app.get("/ready")
+async def readiness():
+    # Readiness is separate from liveness so a live process with an
+    # unavailable or incompletely initialized database is not advertised
+    # as ready to receive application traffic.
+    ready = check_database_readiness(db_connection)
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "application": "Chappie",
+            "database": "connected" if ready else "unavailable",
+        },
+    )
 
 @app.get("/api/emotions")
 async def api_emotions(auth=Depends(require_auth)):

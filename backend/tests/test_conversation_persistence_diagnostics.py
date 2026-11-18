@@ -276,7 +276,7 @@ def test_memory_write_gate_does_not_accept_assistant_or_memory_context():
     )
     assert not server._memory_fact_is_grounded_in_user_text(
         "Le créateur aime les dinosaures",
-        "Le souvenir dit que le créateur aime les dinosaures.",
+        "Parle-moi des dinosaures et de leur habitat.",
     )
     assert server._memory_fact_is_grounded_in_user_text(
         "J'aime les dinosaures",

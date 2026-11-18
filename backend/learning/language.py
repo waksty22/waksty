@@ -151,6 +151,16 @@ def record_explicit_word_teaching(
         r"dans\s+l['’]hypothèse\s+où|au\s+cas\s+où)\b",
         flags=re.IGNORECASE | re.UNICODE,
     )
+    # Also inspect the whole sentence: uncertainty or disputed attribution
+    # can follow the definition connector ("coq signifie peut-être...").
+    uncertainty_sentence = re.compile(
+        r"\b(?:ce\s+n['’]est\s+pas\s+vrai\s+que|"
+        r"il\s+est\s+faux\s+que|c['’]est\s+faux\s+que|"
+        r"on\s+(?:prétend|affirme|raconte)\s+que|"
+        r"selon\s+\w+|"
+        r"peut[- ]être|probablement|possiblement|éventuellement)\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
     for match in pattern.finditer(text):
         # A question or an explicitly uncertain statement is not a lesson.
         # Evaluate only the sentence containing this candidate, so an
@@ -165,7 +175,11 @@ def record_explicit_word_teaching(
         sentence_end = min(sentence_end_candidates) if sentence_end_candidates else len(text)
         sentence = text[sentence_start:sentence_end + 1]
         prefix = text[sentence_start:match.start()]
-        if "?" in sentence or uncertainty_prefix.search(prefix):
+        if (
+            "?" in sentence
+            or uncertainty_prefix.search(prefix)
+            or uncertainty_sentence.search(sentence)
+        ):
             continue
         try:
             word = normalize_word(match.group("word"))

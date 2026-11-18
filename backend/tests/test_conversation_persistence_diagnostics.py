@@ -466,3 +466,16 @@ def test_live_tool_call_keeps_accumulated_transcript_and_rejects_oversized_chunk
         }
     }
     assert server._live_user_source_for_tool_call(oversized, accumulated) == accumulated
+
+
+
+def test_gemini_live_text_uses_realtime_input_envelope():
+    import server
+
+    message = server._build_live_text_input_message("  Bonjour Chappie  ")
+
+    assert message == {"realtimeInput": {"text": "Bonjour Chappie"}}
+    assert "clientContent" not in message
+    assert server._build_live_text_input_message("") is None
+    assert server._build_live_text_input_message("x" * (server.MAX_LIVE_TEXT_CHUNK_CHARS + 1)) is None
+    assert server._build_live_text_input_message(None) is None

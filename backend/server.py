@@ -2811,12 +2811,27 @@ def build_live_initial_history(
     return {"role": "user", "parts": parts}
 
 
+def _truncate_context_at_section_boundary(context: str, max_chars: int) -> str:
+    """Bound context without cutting through a serialized record or section."""
+    if not isinstance(context, str):
+        raise ValueError("Le contexte historique doit être du texte.")
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 256:
+        raise ValueError("La limite du contexte historique est invalide.")
+    if len(context) <= max_chars:
+        return context
+    marker = "[Contexte historique partiellement omis : sections entières non transmises.]"
+    available = max_chars - len(marker) - 2
+    boundary = context.rfind("\\n\\n", 0, available + 1)
+    if boundary < 0:
+        return marker
+    return context[:boundary].rstrip() + "\\n\\n" + marker
+
+
 def build_untrusted_identity_context_message(user_id: str, query: str = "") -> dict[str, Any]:
     """Build a bounded user-role context envelope, never a system instruction."""
     context = get_identity_context(user_id, query=query)
     max_chars = 24000
-    if len(context) > max_chars:
-        context = context[:max_chars] + "\\n[Contexte tronqué par limite serveur.]"
+    context = _truncate_context_at_section_boundary(context, max_chars)
     return {
         "role": "user",
         "parts": [{

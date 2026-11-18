@@ -2370,6 +2370,9 @@ def save_conversation_turn(
                     now,
                 ),
             )
+            # Index the newly inserted source messages in the same transaction.
+            # If indexing fails, the conversation and journal entries roll back too.
+            sync_autobiographical_events(db, user_id, commit=False)
             db.commit()
     except Exception:
         record_persistence_event("save_failed", diagnostic_source)
@@ -2386,9 +2389,6 @@ def save_conversation_turn(
     )
 
     try:
-        with db_connection() as db:
-            sync_autobiographical_events(db, user_id)
-
         with db_connection() as db:
             latest = int(
                 db.execute(  

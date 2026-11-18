@@ -165,3 +165,68 @@ def test_interrupted_live_turn_persists_confirmed_transcripts_only(
     empty_state = {"user": "", "assistant": "", "audio": [b"unconfirmed"]}
     assert server.persist_interrupted_live_turn("creator", empty_state) is False
     assert len(captured) == 1
+
+
+def test_conversation_and_autobiographical_index_roll_back_together_on_sync_failure(
+    monkeypatch, tmp_path
+):
+    import sqlite3
+    import pytest
+    import server
+    from memory.autobiographical import init_autobiographical_tables
+
+    database_path = tmp_path / "atomic-conversation-memory.sqlite3"
+
+    def connect():
+        db = sqlite3.connect(database_path)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys=ON")
+        return db
+
+    setup = connect()
+    setup.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE journal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            entry TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE conversation_summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            through_conversation_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(setup)
+    setup.commit()
+    setup.close()
+
+    monkeypatch.setattr(server, "db_connection", connect)
+
+    def fail_sync(*args, **kwargs):
+        raise RuntimeError("simulated autobiographical index failure")
+
+    monkeypatch.setattr(server, "sync_autobiographical_events", fail_sync)
+
+    with pytest.raises(RuntimeError, match="simulated autobiographical index failure"):
+        server.save_conversation_turn(
+            "creator", "Message à conserver", "Réponse Chappie", source="conversation"
+        )
+
+    check = connect()
+    try:
+        assert check.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+        assert check.execute("SELECT COUNT(*) FROM journal").fetchone()[0] == 0
+        assert check.execute("SELECT COUNT(*) FROM autobiographical_events").fetchone()[0] == 0
+    finally:
+        check.close()

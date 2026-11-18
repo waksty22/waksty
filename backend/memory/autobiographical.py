@@ -58,6 +58,7 @@ def sync_autobiographical_events(
     db: sqlite3.Connection,
     user_id: str,
     limit: int = 500,
+    commit: bool = True,
 ) -> dict[str, int]:
     """Indexe idempotemment les conversations absentes du journal autobiographique."""
     limit = max(1, min(int(limit), 2000))
@@ -111,7 +112,8 @@ def sync_autobiographical_events(
         """,
         (user_id,),
     )
-    db.commit()
+    if commit:
+        db.commit()
     total = db.execute(
         "SELECT COUNT(*) FROM autobiographical_events WHERE user_id=?",
         (user_id,),

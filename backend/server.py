@@ -378,6 +378,16 @@ def _live_user_source_for_tool_call(response: Any, accumulated_user_text: Any) -
     return merged if merged is not None else source
 
 
+def _build_live_text_input_message(text_value: Any) -> dict | None:
+    """Build the Gemini Live 3.1 envelope for an in-session text input."""
+    if not isinstance(text_value, str):
+        return None
+    text_value = text_value.strip()
+    if not text_value or len(text_value) > MAX_LIVE_TEXT_CHUNK_CHARS:
+        return None
+    return {"realtimeInput": {"text": text_value}}
+
+
 def _normalize_live_error_message(error: Any) -> str:
     """Expose only bounded provider text; never stringify arbitrary payloads."""
     if not isinstance(error, dict):
@@ -5993,12 +6003,9 @@ async def websocket_endpoint(
                         )
                         pending_live_text_segment = new_text_segment
                         pending_merged_user_text = merged_user_text
-                        message = {
-                            "clientContent": {
-                                "turns": [{"role": "user", "parts": [{"text": text_value}]}],
-                                "turnComplete": True,
-                            }
-                        }
+                        message = _build_live_text_input_message(text_value)
+                        if message is None:
+                            continue
                     else:
                         # Never relay arbitrary client JSON into the provider protocol.
                         continue

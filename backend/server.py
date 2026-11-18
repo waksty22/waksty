@@ -3079,12 +3079,11 @@ async def call_gemini(
             "Clé GEMINI_API_KEY absente. Configure-la dans l'environnement.",  
         )  
 
-    context_message = build_untrusted_identity_context_message(user_id, query=query)
     payload = {  
         "system_instruction": {  
             "parts": [{"text": get_identity_prompt(user_id, query=query)}]  
         },  
-        "contents": [context_message, *contents],  
+        "contents": contents,  
         "tools": TOOLS,  
         "generationConfig": {  
             "temperature": 0.75,  
@@ -3271,18 +3270,6 @@ async def run_brain(
             )  
             db_trace.commit()  
 
-    memory_context = "\n".join(  
-        (  
-            f"- [{m.get('category', 'general')}, "  
-            f"source: {m.get('source_type', 'taught')}, "  
-            f"confiance: {m.get('confidence', 0.8)}] "  
-            f"{m.get('content', '')}"  
-        )  
-        for m in relevant  
-    )  
-
-    autobiographical_summary = get_latest_summary(user_id)  
-
     with db_connection() as db:  
         rows = db.execute(  
             """  
@@ -3306,6 +3293,8 @@ async def run_brain(
         }  
         for row in reversed(rows)  
     ]  
+    history.insert(0, build_untrusted_identity_context_message(user_id, query=message))
+
 
     # Durable memory and autobiographical context are injected separately by
     # call_gemini as an untrusted context envelope, never concatenated with the

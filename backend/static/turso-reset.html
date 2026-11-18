@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Chappie — Nouvelle naissance</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#e8f4ff}
+    *{box-sizing:border-box}
+    body{margin:0;padding:24px 16px;max-width:680px;margin-inline:auto}
+    h1{font-size:1.45rem;color:#7dd3fc}
+    p{color:#b6c9dc;line-height:1.55}
+    .panel{background:#102238;border:1px solid #24445f;border-radius:14px;padding:18px;margin:16px 0}
+    label{display:block;margin:14px 0 7px;font-weight:650}
+    input{width:100%;padding:13px;border-radius:9px;border:1px solid #41617c;background:#071827;color:white;font-size:16px}
+    button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:9px;background:#b91c1c;color:white;font-weight:750;font-size:16px}
+    button:disabled{opacity:.55}
+    #status{white-space:pre-wrap;overflow-wrap:anywhere}
+    .ok{color:#86efac}.bad{color:#fca5a5}.muted{font-size:.9rem;color:#91a8be}
+    ul{padding-left:20px;color:#c8d8e8;line-height:1.6}
+    code{color:#bae6fd}
+  </style>
+</head>
+<body>
+  <h1>🐣 Nouvelle naissance de Chappie</h1>
+  <p>Cette opération remet à zéro la mémoire de Chappie dans Turso et dans la base locale de Render. Elle conserve le code, le cerveau, les compétences de base, les réglages et les profils vocaux.</p>
+  <section class="panel">
+    <strong>Ce qui sera effacé ou remis à zéro</strong>
+    <ul>
+      <li>Conversations, résumés, souvenirs et journal</li>
+      <li>Rêves, humeurs, objectifs et expériences</li>
+      <li>Vocabulaire et progression cognitive enregistrés localement</li>
+      <li>États émotionnels et relationnels remis aux valeurs de naissance</li>
+    </ul>
+    <p class="muted">Le schéma des 13 tables et les profils vocaux seront conservés. Cette action est irréversible.</p>
+  </section>
+  <section class="panel">
+    <label for="apiToken">Jeton API Chappie</label>
+    <input id="apiToken" type="password" autocomplete="off" placeholder="CHAPPIE_API_TOKEN">
+    <label for="confirmation">Tape NAISSANCE pour confirmer</label>
+    <input id="confirmation" type="text" autocomplete="off" placeholder="NAISSANCE">
+    <button id="resetButton" type="button">Réinitialiser Chappie au stade 0</button>
+    <p class="muted">Le jeton est utilisé uniquement pour la requête, jamais enregistré ni envoyé dans cette conversation.</p>
+    <p id="status" role="status"></p>
+  </section>
+  <script>
+    const button = document.getElementById("resetButton");
+    const tokenInput = document.getElementById("apiToken");
+    const confirmInput = document.getElementById("confirmation");
+    const statusBox = document.getElementById("status");
+    button.addEventListener("click", async () => {
+      const token = tokenInput.value.trim();
+      const confirmation = confirmInput.value.trim();
+      if (!token) { statusBox.textContent = "Saisis ton jeton API Chappie."; statusBox.className = "bad"; return; }
+      if (confirmation !== "NAISSANCE") { statusBox.textContent = "La confirmation doit être exactement NAISSANCE."; statusBox.className = "bad"; return; }
+      if (!window.confirm("Dernière confirmation : effacer les anciennes données de Chappie dans Turso et Render ?")) return;
+      button.disabled = true;
+      statusBox.textContent = "Réinitialisation complète en cours… Ne ferme pas cette page.";
+      statusBox.className = "";
+      try {
+        const response = await fetch("/api/reset", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + token }
+        });
+        const data = await response.json();
+        if (!response.ok || data.success !== true) throw new Error(data.detail || "La réinitialisation n'a pas été confirmée.");
+        statusBox.textContent = "Nouvelle naissance effectuée. Turso et SQLite ont été réinitialisés.\n\n" + JSON.stringify(data.turso || {}, null, 2);
+        statusBox.className = "ok";
+        confirmInput.value = "";
+      } catch (error) {
+        statusBox.textContent = error.message || "Erreur pendant la réinitialisation. Consulte les logs Render sans partager de secrets.";
+        statusBox.className = "bad";
+      } finally {
+        tokenInput.value = "";
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

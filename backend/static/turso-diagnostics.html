@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Chappie — Diagnostic Turso</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#07111f;color:#e8f4ff}
+    body{margin:0;padding:24px 16px;max-width:720px;margin-inline:auto}
+    h1{font-size:1.45rem;color:#7dd3fc}p{color:#b6c9dc;line-height:1.5}
+    .panel{background:#102238;border:1px solid #24445f;border-radius:14px;padding:18px;margin:16px 0}
+    label{display:block;margin-bottom:8px;font-weight:600}
+    input{box-sizing:border-box;width:100%;padding:13px;border-radius:9px;border:1px solid #41617c;background:#071827;color:white;font-size:16px}
+    button{margin-top:12px;padding:12px 16px;border:0;border-radius:9px;background:#0284c7;color:white;font-weight:700;font-size:15px}
+    button:disabled{opacity:.6}#status{white-space:pre-wrap}
+    table{width:100%;border-collapse:collapse;margin-top:12px}td,th{text-align:left;padding:10px 6px;border-bottom:1px solid #29445d}
+    td:last-child,th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+    .ok{color:#86efac}.bad{color:#fca5a5}.muted{font-size:.9rem;color:#91a8be}
+  </style>
+</head>
+<body>
+  <h1>Diagnostic de la mémoire Turso</h1>
+  <p>Cette page vérifie la base Turso configurée sur Render. Elle affiche uniquement les noms des tables et le nombre de lignes. Elle ne modifie aucune donnée.</p>
+  <section class="panel">
+    <label for="apiToken">Jeton API Chappie</label>
+    <input id="apiToken" type="password" autocomplete="off" placeholder="Saisis ton CHAPPIE_API_TOKEN">
+    <button id="checkButton" type="button">Vérifier la base Turso</button>
+    <p class="muted">Le jeton est utilisé uniquement pour cette requête et n'est pas enregistré dans le navigateur.</p>
+    <p id="status" role="status"></p>
+  </section>
+  <section class="panel" id="results" hidden>
+    <h2>Tables trouvées</h2>
+    <p id="summary"></p>
+    <table>
+      <thead><tr><th>Table</th><th>Enregistrements</th></tr></thead>
+      <tbody id="tableRows"></tbody>
+    </table>
+  </section>
+  <script>
+    const button = document.getElementById("checkButton");
+    const tokenInput = document.getElementById("apiToken");
+    const statusBox = document.getElementById("status");
+    const results = document.getElementById("results");
+    button.addEventListener("click", async () => {
+      const token = tokenInput.value.trim();
+      results.hidden = true;
+      if (!token) {
+        statusBox.textContent = "Saisis d'abord ton jeton API Chappie.";
+        statusBox.className = "bad";
+        return;
+      }
+      button.disabled = true;
+      statusBox.textContent = "Connexion à Turso en cours…";
+      statusBox.className = "";
+      try {
+        const response = await fetch("/api/turso/diagnostics", {
+          headers: { "Authorization": "Bearer " + token }
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Diagnostic impossible.");
+        if (!data.connected) throw new Error(data.message || "Turso n'est pas configuré.");
+        document.getElementById("summary").textContent =
+          data.table_count + " table(s) — base : " + data.database_host;
+        const tbody = document.getElementById("tableRows");
+        tbody.replaceChildren();
+        for (const table of data.tables) {
+          const row = document.createElement("tr");
+          const name = document.createElement("td");
+          const count = document.createElement("td");
+          name.textContent = table.name;
+          count.textContent = String(table.rows);
+          row.append(name, count);
+          tbody.append(row);
+        }
+        results.hidden = false;
+        statusBox.textContent = "Connexion réussie. Lecture seule : aucune donnée n'a été modifiée.";
+        statusBox.className = "ok";
+      } catch (error) {
+        statusBox.textContent = error.message || "Erreur de connexion.";
+        statusBox.className = "bad";
+      } finally {
+        tokenInput.value = "";
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

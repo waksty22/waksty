@@ -1,0 +1,59 @@
+name: Chappie isolated Turso compatibility probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-turso-readonly-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.CHAPPIE_TEST_TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.CHAPPIE_TEST_TURSO_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/safe-logical-restore-core
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal probe dependency
+        run: python -m pip install --disable-pip-version-check libsql
+
+      - name: Verify isolated database identity before connecting
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          expected = "chappie-test-isolated-chapoue.aws-eu-west-1.turso.io"
+          url = os.environ.get("TURSO_DATABASE_URL", "").strip()
+          token = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+          if not url or not token:
+              raise SystemExit("Missing isolated Turso test secrets.")
+          parsed = urlparse(url)
+          host = (parsed.hostname or "").lower()
+          if parsed.scheme != "libsql" or host != expected:
+              raise SystemExit("Refusing connection: target is not the approved isolated test database.")
+          print(f"Target identity verified: {host}")
+          PY
+
+      - name: Run production-adapter read-only compatibility checks
+        working-directory: backend
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from storage.turso_compat import inspect_turso_driver
+
+          result = inspect_turso_driver()
+          print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+          if not result.get("connected") or not result.get("compatible"):
+              raise SystemExit("Isolated Turso compatibility probe failed.")
+          if result.get("read_only") is not True:
+              raise SystemExit("Safety assertion failed: probe is not marked read-only.")
+          PY

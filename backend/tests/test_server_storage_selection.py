@@ -1,0 +1,1370 @@
+import sys
+from pathlib import Path
+
+import pytest
+
+BACKEND = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND))
+
+
+def test_server_db_connection_uses_factory_and_configured_db_path(
+    monkeypatch, tmp_path
+):
+    import server
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("CHAPPIE_SQLITE_PATH", raising=False)
+    database_path = tmp_path / "actual" / "chappie.sqlite3"
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    connection = server.db_connection()
+    try:
+        connection.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY)")
+        connection.commit()
+        assert database_path.is_file()
+        assert connection.execute("SELECT COUNT(*) FROM probe").fetchone()[0] == 0
+    finally:
+        connection.close()
+
+
+def test_server_refuses_turso_startup_without_cutover_marker(monkeypatch):
+    import server
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.delenv("CHAPPIE_TURSO_CUTOVER_READY", raising=False)
+
+    with pytest.raises(RuntimeError, match="CHAPPIE_TURSO_CUTOVER_READY"):
+        server.init_db()
+
+
+@pytest.mark.parametrize("pending_status", ["migration_in_progress", "pending_cutover"])
+def test_persistent_sqlite_cutover_triggers_reject_insert_update_delete(pending_status):
+    import sqlite3
+    import server
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+        connection.execute("INSERT INTO probe(id, label) VALUES (1, 'existing')")
+        connection.execute(
+            "CREATE TABLE chappie_storage_migration_state "
+            "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+            ("sqlite-to-turso-v50.65", pending_status, "t1"),
+        )
+        count = server._install_sqlite_cutover_write_guards(connection)
+        assert count == 3
+
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            connection.execute("INSERT INTO probe(label) VALUES ('new')")
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            connection.execute("UPDATE probe SET label='changed' WHERE id=1")
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            connection.execute("DELETE FROM probe WHERE id=1")
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("pending_status", ["migration_in_progress", "pending_cutover"])
+def test_local_pending_cutover_marker_is_detected_after_database_reopen(
+    monkeypatch, tmp_path, pending_status
+):
+    import sqlite3
+    import server
+
+    database_path = tmp_path / "chappie.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", pending_status, "t1"),
+    )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    assert server._local_migration_pending_cutover() is True
+
+
+@pytest.mark.parametrize("pending_status", ["migration_in_progress", "pending_cutover"])
+def test_init_db_stays_read_only_when_local_cutover_marker_exists(
+    monkeypatch, tmp_path, pending_status
+):
+    import sqlite3
+    import server
+
+    database_path = tmp_path / "chappie.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", pending_status, "t1"),
+    )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    server.init_db()
+
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+    check = sqlite3.connect(database_path)
+    try:
+        assert check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'"
+        ).fetchone()[0] == 0
+    finally:
+        check.close()
+
+
+def test_init_db_detects_remote_commit_without_local_marker_or_flag(
+    monkeypatch, tmp_path
+):
+    import sqlite3
+    import server
+
+    database_path = tmp_path / "chappie.sqlite3"
+    database_path.write_bytes(b"")
+
+    remote_checks = []
+
+    def completed_remote_migration(*, allow_missing_marker=False):
+        remote_checks.append(allow_missing_marker)
+        return True
+
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "_local_migration_pending_cutover", lambda: False)
+    monkeypatch.setattr(
+        server, "_remote_turso_migration_completed", completed_remote_migration
+    )
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    server.init_db()
+
+    assert remote_checks == [True]
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+    check = sqlite3.connect(database_path)
+    try:
+        # Startup must stop before ordinary schema initialization or writes.
+        assert check.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='conversations'"
+        ).fetchone()[0] == 0
+    finally:
+        check.close()
+
+
+
+def test_local_migration_marker_read_error_fails_closed(monkeypatch, tmp_path):
+    import server
+
+    database_path = tmp_path / "corrupt.sqlite3"
+    database_path.write_bytes(b"not a sqlite database")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    with pytest.raises(RuntimeError, match="Impossible de vérifier le marqueur local"):
+        server._local_migration_pending_cutover()
+
+
+def test_unknown_local_migration_state_fails_closed(monkeypatch, tmp_path):
+    import sqlite3
+    import server
+
+    database_path = tmp_path / "unknown.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", "unexpected", "t1"),
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    with pytest.raises(RuntimeError, match="État local de migration inconnu"):
+        server._local_migration_pending_cutover()
+
+
+@pytest.mark.parametrize("failure_mode", ["local_finalize", "commit_ack", "process_stop"])
+def test_apply_keeps_durable_local_gate_after_remote_commit_failure(
+    monkeypatch, tmp_path, failure_mode
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+    import storage.data_migration as data_migration
+    from fastapi import HTTPException
+
+    local_path = tmp_path / "source.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.commit()
+    local.close()
+
+    remote_path = tmp_path / "remote.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.commit()
+    remote.close()
+
+    class FakeLibsqlConnection:
+        def __init__(self):
+            self.connection = sqlite3.connect(remote_path)
+
+        def execute(self, *args, **kwargs):
+            return self.connection.execute(*args, **kwargs)
+
+        def commit(self):
+            return self.connection.commit()
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    def fake_migrate(source, target, *, apply=False):
+        if not apply:
+            return {"ready": True, "applied": False, "blockers": []}
+        target.execute(
+            "INSERT INTO chappie_storage_migrations VALUES (?, 'completed')",
+            ("sqlite-to-turso-v50.65",),
+        )
+        target.commit()
+        if failure_mode == "commit_ack":
+            raise RuntimeError("simulated lost COMMIT acknowledgement")
+        return {
+            "ready": True,
+            "applied": True,
+            "inserted_rows": 1,
+            "already_present_rows": 0,
+            "tables": [{"table": "probe"}],
+        }
+
+    monkeypatch.setattr(
+        data_migration, "migrate_sqlite_rows_to_turso", fake_migrate
+    )
+    if failure_mode in {"local_finalize", "process_stop"}:
+        def fail_local_finalize(*args, **kwargs):
+            if failure_mode == "process_stop":
+                raise SystemExit("simulated process stop after remote commit")
+            raise OSError("simulated local marker write failure")
+        monkeypatch.setattr(
+            server, "_mark_local_migration_pending_cutover", fail_local_finalize
+        )
+
+    payload = server.TursoMigrationApplyRequest(
+        confirmation="MIGRER VERS TURSO",
+        backup_downloaded=True,
+    )
+    apply_migration = lambda: asyncio.run(
+        server.api_storage_migration_apply(payload, auth="creator")
+    )
+    if failure_mode == "process_stop":
+        # SystemExit bypasses the endpoint's Exception handler, like an abrupt
+        # worker stop, while finally closes the already-committed connections.
+        with pytest.raises(SystemExit, match="simulated process stop"):
+            apply_migration()
+    else:
+        with pytest.raises(HTTPException) as error:
+            apply_migration()
+        assert error.value.status_code == 503
+        if failure_mode == "local_finalize":
+            assert "Commit Turso confirmé" in error.value.detail
+        else:
+            assert "indéterminé" in error.value.detail
+
+    remote_check = sqlite3.connect(remote_path)
+    try:
+        assert remote_check.execute(
+            "SELECT status FROM chappie_storage_migrations "
+            "WHERE migration_key='sqlite-to-turso-v50.65'"
+        ).fetchone()[0] == "completed"
+    finally:
+        remote_check.close()
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state "
+            "WHERE migration_key='sqlite-to-turso-v50.65'"
+        ).fetchone()[0] == "migration_in_progress"
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            local_check.execute("INSERT INTO probe(label) VALUES ('blocked')")
+    finally:
+        local_check.close()
+
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    server.init_db()
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            local_check.execute("INSERT INTO probe(label) VALUES ('still blocked')")
+    finally:
+        local_check.close()
+
+
+
+@pytest.mark.parametrize(
+    "configured_key",
+    ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"],
+)
+def test_init_db_fails_closed_with_partial_turso_credentials(
+    monkeypatch, tmp_path, configured_key
+):
+    import server
+
+    database_path = tmp_path / "chappie.sqlite3"
+    database_path.write_bytes(b"")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "_local_migration_pending_cutover", lambda: False)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv(
+        configured_key,
+        "libsql://isolated-test.invalid"
+        if configured_key == "TURSO_DATABASE_URL"
+        else "isolated-test-token",
+    )
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    with pytest.raises(RuntimeError, match="accès Turso incomplet"):
+        server.init_db()
+
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is False
+
+
+@pytest.mark.parametrize("local_status", ["pending_cutover", "migration_in_progress"])
+def test_pre_cutover_cancel_removes_only_marker_and_local_guards(
+    monkeypatch, tmp_path, local_status
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    local_path = tmp_path / "chappie.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    local.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", local_status, "t1"),
+    )
+    server._install_sqlite_cutover_write_guards(local)
+    local.commit()
+    local.close()
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('sqlite-to-turso-v50.65', 'completed')"
+    )
+    remote.commit()
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def commit(self):
+            return remote.commit()
+
+        def close(self):
+            # Keep the in-memory test database available for post-call assertions.
+            return None
+
+    fake_libsql = types.SimpleNamespace(
+        connect=lambda **kwargs: FakeLibsqlConnection()
+    )
+    monkeypatch.setitem(sys.modules, "libsql", fake_libsql)
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    result = asyncio.run(
+        server.api_storage_migration_cancel(payload, auth="creator")
+    )
+
+    assert result["cancelled"] is True
+    assert result["turso_data_preserved"] is True
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is False
+    assert remote.execute(
+        "SELECT COUNT(*) FROM chappie_storage_migrations"
+    ).fetchone()[0] == 0
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state"
+        ).fetchone()[0] == "cancelled"
+        assert local_check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchone()[0] == 0
+        local_check.execute("INSERT INTO probe(label) VALUES ('resumed')")
+        local_check.commit()
+    finally:
+        local_check.close()
+    remote.close()
+
+
+@pytest.mark.parametrize("remote_status", ["migration_in_progress", "unknown"])
+def test_pre_cutover_cancel_refuses_unconfirmed_remote_marker(
+    monkeypatch, tmp_path, remote_status
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+    from fastapi import HTTPException
+
+    local_path = tmp_path / "source.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    local.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES (?, ?, ?)",
+        ("sqlite-to-turso-v50.65", "migration_in_progress", "t1"),
+    )
+    server._install_sqlite_cutover_write_guards(local)
+    local.commit()
+    local.close()
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES (?, ?)",
+        ("sqlite-to-turso-v50.65", remote_status),
+    )
+    remote.commit()
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def commit(self):
+            return remote.commit()
+
+        def close(self):
+            # Keep the in-memory remote database available for assertions.
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            server.api_storage_migration_cancel(payload, auth="creator")
+        )
+
+    assert error.value.status_code == 409
+    assert "Le verrou SQLite est conservé" in error.value.detail
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is True
+    assert remote.execute(
+        "SELECT status FROM chappie_storage_migrations "
+        "WHERE migration_key='sqlite-to-turso-v50.65'"
+    ).fetchone()[0] == remote_status
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state "
+            "WHERE migration_key='sqlite-to-turso-v50.65'"
+        ).fetchone()[0] == "migration_in_progress"
+        assert local_check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchone()[0] == 3
+        with pytest.raises(sqlite3.IntegrityError, match="pending Turso cutover"):
+            local_check.execute("INSERT INTO probe(label) VALUES ('still blocked')")
+    finally:
+        local_check.close()
+        remote.close()
+
+
+def test_pre_cutover_cancel_recovers_when_local_marker_was_not_written(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    local_path = tmp_path / "chappie.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.commit()
+    local.close()
+
+    remote_path = tmp_path / "turso.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('sqlite-to-turso-v50.65', 'completed')"
+    )
+    remote.commit()
+    remote.close()
+
+    class FakeLibsqlConnection:
+        def __init__(self):
+            self.connection = sqlite3.connect(remote_path)
+
+        def execute(self, *args, **kwargs):
+            return self.connection.execute(*args, **kwargs)
+
+        def commit(self):
+            return self.connection.commit()
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    result = asyncio.run(
+        server.api_storage_migration_cancel(payload, auth="creator")
+    )
+
+    assert result["cancelled"] is True
+    assert server.STORAGE_MIGRATION_PENDING_CUTOVER is False
+
+    local_check = sqlite3.connect(local_path)
+    try:
+        local_check.execute("INSERT INTO probe(label) VALUES ('resumed')")
+        local_check.commit()
+    finally:
+        local_check.close()
+
+    remote_check = sqlite3.connect(remote_path)
+    try:
+        assert remote_check.execute(
+            "SELECT COUNT(*) FROM chappie_storage_migrations"
+        ).fetchone()[0] == 0
+    finally:
+        remote_check.close()
+
+
+
+def test_pre_cutover_cancel_handles_missing_remote_marker_table(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    local_path = tmp_path / "chappie.sqlite3"
+    local = sqlite3.connect(local_path)
+    local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, label TEXT)")
+    local.execute(
+        "CREATE TABLE chappie_storage_migration_state "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    local.execute(
+        "INSERT INTO chappie_storage_migration_state VALUES "
+        "('sqlite-to-turso-v50.65', 'migration_in_progress', 't1')"
+    )
+    server._install_sqlite_cutover_write_guards(local)
+    local.commit()
+    local.close()
+
+    class FakeLibsqlConnection:
+        def __init__(self):
+            self.connection = sqlite3.connect(":memory:")
+
+        def execute(self, *args, **kwargs):
+            return self.connection.execute(*args, **kwargs)
+
+        def commit(self):
+            return self.connection.commit()
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setattr(server, "DB_PATH", local_path)
+    monkeypatch.setenv("CHAPPIE_ALLOW_SQLITE_ROLLBACK", "1")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", True)
+
+    payload = server.TursoMigrationCancelRequest(
+        confirmation="ANNULER LA BASCULE TURSO"
+    )
+    result = asyncio.run(
+        server.api_storage_migration_cancel(payload, auth="creator")
+    )
+
+    assert result["cancelled"] is True
+    assert result["turso_data_preserved"] is True
+    local_check = sqlite3.connect(local_path)
+    try:
+        assert local_check.execute(
+            "SELECT status FROM chappie_storage_migration_state"
+        ).fetchone()[0] == "cancelled"
+        assert local_check.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chappie_migration_guard_%'"
+        ).fetchone()[0] == 0
+        local_check.execute("INSERT INTO probe(label) VALUES ('resumed')")
+        local_check.commit()
+    finally:
+        local_check.close()
+
+
+def test_missing_local_sqlite_and_missing_turso_credentials_fail_closed(
+    monkeypatch,
+):
+    import server
+
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="accès Turso incomplet"):
+        server._remote_turso_migration_completed()
+
+
+def test_missing_local_sqlite_and_missing_remote_marker_fail_closed(
+    monkeypatch, tmp_path,
+):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote_path = tmp_path / "empty-turso.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(
+            connect=lambda **kwargs: sqlite3.connect(remote_path)
+        ),
+    )
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    with pytest.raises(RuntimeError, match="Base SQLite absente"):
+        server._remote_turso_migration_completed()
+
+
+def test_missing_local_sqlite_and_completed_v50_65_remote_marker_is_detected(
+    monkeypatch, tmp_path,
+):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote_path = tmp_path / "completed-turso.sqlite3"
+    remote = sqlite3.connect(remote_path)
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations "
+        "(migration_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('sqlite-to-turso-v50.65', 'completed')"
+    )
+    remote.commit()
+    remote.close()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "libsql",
+        types.SimpleNamespace(
+            connect=lambda **kwargs: sqlite3.connect(remote_path)
+        ),
+    )
+    monkeypatch.setenv("CHAPPIE_ALLOW_TURSO_MIGRATION", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    assert server._remote_turso_migration_completed() is True
+
+
+def test_empty_turso_database_can_be_bootstrapped_once(monkeypatch):
+    import sqlite3
+    import server
+
+    connection = sqlite3.connect(":memory:")
+    monkeypatch.setattr(server, "db_connection", lambda: connection)
+    monkeypatch.setattr(
+        server, "_remote_turso_migration_completed", lambda allow_missing_marker=False, allow_fresh_bootstrap=False: False
+    )
+    for name in (
+        "init_memory_tables", "init_world_tables", "init_spatial_tables",
+        "init_learning_tables", "init_language_tables", "init_sensory_tables",
+        "init_object_learning_tables", "init_causal_learning_tables",
+        "init_supervised_learning_tables", "init_perception_fusion_tables",
+        "init_autobiographical_tables", "init_cognition_tables",
+        "init_development_tables",
+    ):
+        monkeypatch.setattr(server, name, lambda db: None)
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.setenv("CHAPPIE_TURSO_CUTOVER_READY", "1")
+    monkeypatch.setenv("CHAPPIE_TURSO_FRESH_START", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://fresh-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    try:
+        server.init_db()
+        marker = connection.execute(
+            "SELECT status, source_row_count FROM chappie_storage_migrations "
+            "WHERE migration_key='turso-fresh-bootstrap-v1'"
+        ).fetchone()
+        assert marker == ("completed", 0)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='skills'"
+        ).fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+def test_fresh_turso_bootstrap_refuses_nonempty_unmarked_database(monkeypatch):
+    import sqlite3
+    import server
+
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE existing_data (id INTEGER PRIMARY KEY)")
+    connection.commit()
+    monkeypatch.setattr(server, "db_connection", lambda: connection)
+    monkeypatch.setattr(
+        server, "_remote_turso_migration_completed", lambda allow_missing_marker=False: False
+    )
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.setenv("CHAPPIE_TURSO_CUTOVER_READY", "1")
+    monkeypatch.setenv("CHAPPIE_TURSO_FRESH_START", "1")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://nonempty-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    try:
+        with pytest.raises(RuntimeError, match="Démarrage Turso refusé"):
+            server.init_db()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='existing_data'"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='conversations'"
+        ).fetchone()[0] == 0
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("with_xp", [True, False])
+def test_reset_skill_progress_supports_legacy_and_turso_schemas(with_xp):
+    import sqlite3
+    import server
+
+    connection = sqlite3.connect(":memory:")
+    xp_column = ", xp REAL NOT NULL DEFAULT 9.0" if with_xp else ""
+    connection.execute(
+        "CREATE TABLE skills (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, "
+        "level REAL NOT NULL" + xp_column +
+        ", evidence TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    if with_xp:
+        connection.execute(
+            "INSERT INTO skills(user_id, level, xp, evidence, updated_at) "
+            "VALUES ('creator', 8.0, 42.0, 'old', 'before')"
+        )
+    else:
+        connection.execute(
+            "INSERT INTO skills(user_id, level, evidence, updated_at) "
+            "VALUES ('creator', 8.0, 'old', 'before')"
+        )
+
+    try:
+        changed = server._reset_skill_progress(connection, "creator", "after")
+        assert changed == 1
+        row = connection.execute(
+            "SELECT level, evidence, updated_at FROM skills WHERE user_id='creator'"
+        ).fetchone()
+        assert row == (0.0, "Renaissance (Page Blanche)", "after")
+        if with_xp:
+            assert connection.execute(
+                "SELECT xp FROM skills WHERE user_id='creator'"
+            ).fetchone()[0] == 0.0
+    finally:
+        connection.close()
+
+
+def test_remote_turso_readiness_accepts_completed_fresh_bootstrap_marker(monkeypatch):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations ("
+        "migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, "
+        "source_table_count INTEGER NOT NULL, source_row_count INTEGER NOT NULL, "
+        "inserted_rows INTEGER NOT NULL, already_present_rows INTEGER NOT NULL, "
+        "completed_at TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('turso-fresh-bootstrap-v1', 'completed', 0, 0, 0, 0, 'test')"
+    )
+    remote.commit()
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://fresh-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    try:
+        assert server._remote_turso_migration_completed(allow_fresh_bootstrap=True) is True
+    finally:
+        remote.close()
+
+
+def test_fresh_bootstrap_marker_is_not_a_sqlite_data_migration(monkeypatch):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote = sqlite3.connect(":memory:")
+    remote.execute(
+        "CREATE TABLE chappie_storage_migrations ("
+        "migration_key TEXT PRIMARY KEY, status TEXT NOT NULL, "
+        "source_table_count INTEGER NOT NULL, source_row_count INTEGER NOT NULL, "
+        "inserted_rows INTEGER NOT NULL, already_present_rows INTEGER NOT NULL, "
+        "completed_at TEXT NOT NULL)"
+    )
+    remote.execute(
+        "INSERT INTO chappie_storage_migrations VALUES "
+        "('turso-fresh-bootstrap-v1', 'completed', 0, 0, 0, 0, 'test')"
+    )
+    remote.commit()
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://fresh-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+    try:
+        assert server._remote_turso_migration_completed(
+            allow_missing_marker=True
+        ) is False
+    finally:
+        remote.close()
+
+
+
+@pytest.mark.parametrize("backend,expected", [
+    ("sqlite", "sqlite-reset"),
+    ("turso", "turso-reset"),
+])
+def test_reset_api_uses_only_the_active_storage_backend(
+    monkeypatch, backend, expected
+):
+    import asyncio
+    import types
+    import server
+
+    calls = []
+    monkeypatch.setattr(
+        server.StorageSettings,
+        "from_env",
+        staticmethod(lambda: types.SimpleNamespace(backend=backend)),
+    )
+    monkeypatch.setattr(
+        server, "reset_chappie_life",
+        lambda user_id: calls.append(("sqlite", user_id)) or {"source": "sqlite-reset"},
+    )
+    monkeypatch.setattr(
+        server, "reset_turso_life",
+        lambda user_id: calls.append(("turso", user_id)) or {"source": "turso-reset"},
+    )
+    monkeypatch.setattr(
+        server.cognitive_engine, "invalidate_cache",
+        lambda user_id: calls.append(("cache", user_id)),
+    )
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+
+    result = asyncio.run(
+        server.api_reset(
+            server.ResetRequest(confirmation="REINITIALISER CHAPPIE"),
+            auth="creator",
+        )
+    )
+
+    assert result["database_reset"] == backend
+    assert result["result"]["source"] == expected
+    assert calls == [(backend, "creator"), ("cache", "creator")]
+
+
+
+def test_turso_reset_clears_new_user_tables_and_preserves_voice_profile(
+    monkeypatch,
+):
+    import sqlite3
+    import sys
+    import types
+    import server
+
+    remote = sqlite3.connect(":memory:")
+    remote.executescript("""
+        CREATE TABLE conversation_summaries (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE conversations (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE dreams (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE goal_steps (id INTEGER PRIMARY KEY, goal_id INTEGER);
+        CREATE TABLE goals (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE emotional_state (
+            user_id TEXT PRIMARY KEY, joy REAL, fear REAL, curiosity REAL,
+            frustration REAL, sadness REAL, energy REAL, updated_at TEXT
+        );
+        CREATE TABLE journal (
+            id INTEGER PRIMARY KEY, user_id TEXT, entry TEXT, kind TEXT, created_at TEXT
+        );
+        CREATE TABLE maintenance_state (
+            user_id TEXT PRIMARY KEY, last_active_at TEXT, last_dream_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE memories (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE mood_events (id INTEGER PRIMARY KEY, user_id TEXT);
+        CREATE TABLE relationships (
+            user_id TEXT PRIMARY KEY, trust REAL, affection REAL,
+            dependence REAL, updated_at TEXT
+        );
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY, user_id TEXT, level REAL, xp REAL,
+            evidence TEXT, updated_at TEXT
+        );
+        CREATE TABLE voice_profiles (id INTEGER PRIMARY KEY, user_id TEXT, profile_name TEXT);
+        CREATE TABLE world_entities (id INTEGER PRIMARY KEY, user_id TEXT, label TEXT);
+        CREATE TABLE world_relations (
+            id INTEGER PRIMARY KEY, user_id TEXT, entity_id INTEGER REFERENCES world_entities(id)
+        );
+        CREATE TABLE user_intentions (
+            user_id TEXT PRIMARY KEY, current_intent TEXT, confidence REAL,
+            details TEXT, updated_at TEXT
+        );
+        INSERT INTO goals VALUES (7, 'creator');
+        INSERT INTO goal_steps VALUES (8, 7);
+        INSERT INTO world_entities VALUES (9, 'creator', 'old entity');
+        INSERT INTO world_relations VALUES (10, 'creator', 9);
+        INSERT INTO conversations VALUES (1, 'creator');
+        INSERT INTO memories VALUES (2, 'creator');
+        INSERT INTO skills VALUES (3, 'creator', 8, 90, 'old', 'before');
+        INSERT INTO emotional_state VALUES ('creator', 5, 4, 3, 2, 1, 10, 'before');
+        INSERT INTO relationships VALUES ('creator', 8, 7, 6, 'before');
+        INSERT INTO maintenance_state VALUES ('creator', 'before', 'dream', 'before');
+        INSERT INTO voice_profiles VALUES (11, 'creator', 'stable voice');
+        INSERT INTO user_intentions VALUES ('creator', 'old intent', 0.9, 'old', 'before');
+    """)
+
+    class FakeLibsqlConnection:
+        def execute(self, *args, **kwargs):
+            return remote.execute(*args, **kwargs)
+
+        def commit(self):
+            return remote.commit()
+
+        def rollback(self):
+            return remote.rollback()
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "libsql",
+        types.SimpleNamespace(connect=lambda **kwargs: FakeLibsqlConnection()),
+    )
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+
+    try:
+        result = server.reset_turso_life("creator")
+        assert result["voice_profiles_preserved"] is True
+        assert remote.execute("SELECT COUNT(*) FROM voice_profiles").fetchone()[0] == 1
+        for table in (
+            "conversations", "memories", "goals", "goal_steps",
+            "world_entities", "world_relations",
+        ):
+            assert remote.execute(
+                f'SELECT COUNT(*) FROM "{table}"'
+            ).fetchone()[0] == 0
+        assert remote.execute(
+            "SELECT level, xp, evidence FROM skills WHERE user_id='creator'"
+        ).fetchone() == (0.0, 0.0, "Renaissance (Page Blanche)")
+        assert remote.execute(
+            "SELECT joy, fear, curiosity, frustration, sadness, energy "
+            "FROM emotional_state WHERE user_id='creator'"
+        ).fetchone() == (0.0, 0.0, 0.0, 0.0, 0.0, 100.0)
+        assert remote.execute(
+            "SELECT current_intent, confidence, details "
+            "FROM user_intentions WHERE user_id='creator'"
+        ).fetchone() == (
+            "éveil sensoriel", 0.0,
+            "Aucune intention acquise : naissance",
+        )
+        assert remote.execute(
+            "SELECT kind FROM journal WHERE user_id='creator'"
+        ).fetchone() == ("reset",)
+    finally:
+        remote.close()
+
+
+def test_server_db_connection_routes_explicit_turso_selection_through_factory(
+    monkeypatch,
+):
+    import server
+
+    captured = {}
+    sentinel = object()
+
+    def fake_open_storage_connection(settings):
+        captured["settings"] = settings
+        return sentinel
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.turso.io")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-only-token")
+    monkeypatch.setattr(
+        server, "open_storage_connection", fake_open_storage_connection
+    )
+
+    connection = server.db_connection()
+
+    assert connection is sentinel
+    assert captured["settings"].backend == "turso"
+    assert captured["settings"].turso_database_url == "libsql://isolated-test.turso.io"
+    assert captured["settings"].turso_auth_token == "test-only-token"
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        ({"message": "Erreur réseau"}, "Erreur réseau"),
+        ({"message": {"secret": "value"}}, "Erreur Gemini Live."),
+        ({"message": ["unexpected"]}, "Erreur Gemini Live."),
+        ({"message": 503}, "Erreur Gemini Live."),
+        ("not-an-object", "Erreur Gemini Live."),
+        ({"message": "  "}, "Erreur Gemini Live."),
+    ],
+)
+def test_live_provider_error_message_accepts_only_bounded_text(error, expected):
+    import server
+
+    assert server._normalize_live_error_message(error) == expected
+
+
+def test_live_provider_error_message_truncates_long_text():
+    import server
+
+    assert server._normalize_live_error_message({"message": "x" * 1000}) == "x" * 500
+
+
+@pytest.mark.parametrize(
+    "data,current,chunk_count,expected",
+    [
+        ("abc", 0, 0, 3),
+        ("", 0, 0, 0),
+        (None, 0, 0, 0),
+        ("x" * 1_000_001, 0, 0, 0),
+        ("x" * 10, 8_000_000 - 5, 0, 8_000_000 - 5),
+        ("x", 0, 256, 0),
+    ],
+)
+def test_live_audio_buffer_rejects_oversized_or_invalid_chunks(
+    data, current, chunk_count, expected
+):
+    import server
+
+    chunks = [{"audio": "a", "sample_rate": 24000}] * chunk_count
+    result = server._append_live_audio_chunk(chunks, data, 24000, current)
+    assert result == expected
+    assert len(chunks) == chunk_count + (1 if expected != current else 0)
+
+
+def test_live_audio_buffer_enforces_total_turn_limit_and_sample_rate():
+    import server
+
+    chunks = []
+    current = 0
+    for _ in range(8):
+        current = server._append_live_audio_chunk(
+            chunks, "x" * 1_000_000, 96000, current
+        )
+    assert current == server.MAX_LIVE_AUDIO_TURN_CHARS
+    assert len(chunks) == 8
+    assert all(item["sample_rate"] == 24000 for item in chunks)
+    current = server._append_live_audio_chunk(chunks, "x", 24000, current)
+    assert current == server.MAX_LIVE_AUDIO_TURN_CHARS
+    assert len(chunks) == 8
+
+
+
+def test_interrupted_live_turn_persists_only_text_and_resets_audio_state(monkeypatch):
+    import server
+
+    saved = []
+    monkeypatch.setattr(
+        server, "save_conversation_turn",
+        lambda *args, **kwargs: saved.append((args, kwargs)),
+    )
+    state = {
+        "user": "  Bonjour  ",
+        "assistant": {"malformed": "not text"},
+        "audio": [{"audio": "YWJj", "sample_rate": 24000}],
+        "audio_chars": 4,
+    }
+
+    assert server.persist_interrupted_live_turn("creator", state) is True
+
+    assert saved == [
+        (("creator", "Bonjour", "",), {"source": "gemini_live_interrupted"})
+    ]
+    assert state == {
+        "user": "", "assistant": "", "audio": [], "audio_chars": 0
+    }
+
+
+def test_interrupted_live_turn_with_no_valid_text_discards_audio(monkeypatch):
+    import server
+
+    saved = []
+    monkeypatch.setattr(
+        server, "save_conversation_turn",
+        lambda *args, **kwargs: saved.append((args, kwargs)),
+    )
+    state = {
+        "user": {"not": "text"},
+        "assistant": 123,
+        "audio": [{"audio": "YWJj", "sample_rate": 24000}],
+        "audio_chars": 4,
+    }
+
+    assert server.persist_interrupted_live_turn("creator", state) is False
+    assert saved == []
+    assert state["audio"] == []
+    assert state["audio_chars"] == 0
+
+
+@pytest.mark.parametrize(
+    ("previous", "merged", "expected"),
+    [
+        ("", "Bonjour Chappie", "Bonjour Chappie"),
+        ("Bonjour", "Bonjour Chappie", "Chappie"),
+        ("Bonjour", "bonjour Chappie", "Chappie"),
+        ("Bonjour Chappie", "Bonjour Chappie", ""),
+        ("Bonjour Chappie", "Bonjour", ""),
+        ("Bonjour monde", "Bonjour monde encore", "encore"),
+    ],
+)
+def test_live_transcript_delta_excludes_repeated_prefixes(
+    previous, merged, expected
+):
+    import server
+
+    assert server._new_live_transcript_segment(previous, merged) == expected
+
+
+def test_live_transcript_delta_rejects_non_text_values():
+    import server
+
+    assert server._new_live_transcript_segment("Bonjour", None) == ""
+    assert server._new_live_transcript_segment(123, "Bonjour") == "Bonjour"
+
+
+def test_live_transcript_learning_delta_ignores_provider_retransmissions():
+    import server
+    from cognition.shared_brain import merge_live_transcript
+
+    transcript = ""
+    learned_segments = []
+    for incoming in (
+        "Bonjour tout le monde",
+        "Bonjour tout",
+        "Bonjour tout le monde",
+        "Bonjour tout le monde encore",
+    ):
+        merged = merge_live_transcript(transcript, incoming)
+        new_segment = server._new_live_transcript_segment(transcript, merged)
+        transcript = merged
+        if new_segment:
+            learned_segments.append(new_segment)
+
+    assert transcript == "Bonjour tout le monde encore"
+    assert learned_segments == ["Bonjour tout le monde", "encore"]
+
+
+def test_live_transcript_merge_enforces_chunk_and_turn_limits():
+    import server
+
+    assert server._merge_bounded_live_transcript("", "Bonjour") == "Bonjour"
+    assert server._merge_bounded_live_transcript(
+        "Bonjour tout le monde", "Bonjour tout"
+    ) == "Bonjour tout le monde"
+    assert server._merge_bounded_live_transcript(
+        "", "x" * (server.MAX_LIVE_TEXT_CHUNK_CHARS + 1)
+    ) is None
+    assert server._merge_bounded_live_transcript(
+        "x" * server.MAX_LIVE_TRANSCRIPT_CHARS, "y"
+    ) is None
+    assert server._merge_bounded_live_transcript(None, "Bonjour") is None
+    assert server._merge_bounded_live_transcript("Bonjour", 123) is None
+
+
+def test_gemini_live_text_input_records_only_new_lexical_exposure(monkeypatch):
+    import sqlite3
+    import server
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute(
+        """CREATE TABLE personal_vocabulary (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            word TEXT NOT NULL,
+            meaning TEXT,
+            state TEXT NOT NULL,
+            exposure_count INTEGER NOT NULL,
+            evidence TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, word)
+        )"""
+    )
+    monkeypatch.setattr(server, "db_connection", lambda: db)
+
+    transcript = ""
+    for incoming in ("Bonjour Chappie", "Bonjour", "Bonjour Chappie", "encore"):
+        merged = server._merge_bounded_live_transcript(transcript, incoming)
+        assert merged is not None
+        delta = server._new_live_transcript_segment(transcript, merged)
+        transcript = merged
+        if delta:
+            server._record_live_text_exposure("creator", delta)
+
+    rows = {
+        row["word"]: row["exposure_count"]
+        for row in db.execute(
+            "SELECT word, exposure_count FROM personal_vocabulary"
+        ).fetchall()
+    }
+    assert rows == {"bonjour": 1, "chappie": 1, "encore": 1}
+    db.close()

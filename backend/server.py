@@ -155,7 +155,7 @@ from storage.turso_compat import inspect_turso_driver
 from storage.connection_factory import StorageSettings, open_storage_connection
 from storage.schema_audit import inspect_database, compare_database_inventories
 from storage.path_diagnostics import inspect_sqlite_path_diagnostics
-from storage.memory_health import inspect_memory_persistence
+from storage.memory_health import inspect_memory_persistence, count_active_episodic_memories
 from storage.global_persistence import inspect_global_persistence
 from storage.readiness import check_database_readiness
 from diagnostics.runtime import collect_runtime_snapshot, runtime_monitor_loop
@@ -2480,14 +2480,7 @@ def get_identity_prompt(user_id: str, query: str = "") -> str:
     behavior = cognitive_profile.get("behavior", {})  
 
     with db_connection() as db:  
-        count = db.execute(  
-            """  
-            SELECT COUNT(*)  
-            FROM memories  
-            WHERE user_id=?  
-            """,  
-            (user_id,),  
-        ).fetchone()[0]  
+        count = count_active_episodic_memories(db, user_id)  
 
         goals = db.execute(  
             """  

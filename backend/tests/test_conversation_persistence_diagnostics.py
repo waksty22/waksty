@@ -282,3 +282,87 @@ def test_memory_write_gate_does_not_accept_assistant_or_memory_context():
         "J'aime les dinosaures",
         "J'aime les dinosaures depuis tout petit.",
     )
+
+
+
+def test_explicit_memory_confirmation_is_owner_scoped_audited_and_idempotent(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    import sqlite3
+    import pytest
+    import server
+    from fastapi import HTTPException
+
+    database_path = tmp_path / "memory-confirmation.sqlite3"
+
+    def connect():
+        db = sqlite3.connect(database_path)
+        db.row_factory = sqlite3.Row
+        return db
+
+    setup = connect()
+    setup.executescript("""
+        CREATE TABLE memories_v19 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            content TEXT NOT NULL,
+            importance INTEGER NOT NULL,
+            source_type TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            tags TEXT NOT NULL DEFAULT '[]',
+            access_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, content)
+        );
+        CREATE TABLE journal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            entry TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        INSERT INTO memories_v19
+            (user_id, category, content, importance, source_type,
+             confidence, created_at, updated_at)
+        VALUES
+            ('creator', 'general', 'J’aime les dinosaures', 3, 'taught',
+             0.8, '2026-01-01', '2026-01-01'),
+            ('other-user', 'general', 'Secret privé', 3, 'observed',
+             0.5, '2026-01-01', '2026-01-01');
+    """)
+    setup.commit()
+    setup.close()
+    monkeypatch.setattr(server, "db_connection", connect)
+
+    confirmed = asyncio.run(server.api_confirm_memory(1, auth="creator"))
+    assert confirmed["success"] is True
+    assert confirmed["source_type"] == "confirmed"
+    assert confirmed["previous_source_type"] == "taught"
+    assert confirmed["already_confirmed"] is False
+
+    # Repeating the same explicit request is safe and does not duplicate audit rows.
+    repeated = asyncio.run(server.api_confirm_memory(1, auth="creator"))
+    assert repeated["already_confirmed"] is True
+
+    with pytest.raises(HTTPException) as hidden:
+        asyncio.run(server.api_confirm_memory(2, auth="creator"))
+    assert hidden.value.status_code == 404
+
+    check = connect()
+    try:
+        row = check.execute(
+            "SELECT source_type, confidence FROM memories_v19 WHERE id=1"
+        ).fetchone()
+        assert row["source_type"] == "confirmed"
+        assert row["confidence"] == 0.8
+        assert check.execute(
+            "SELECT COUNT(*) FROM journal WHERE kind='memory_confirmation'"
+        ).fetchone()[0] == 1
+        assert check.execute(
+            "SELECT source_type FROM memories_v19 WHERE id=2"
+        ).fetchone()[0] == "observed"
+    finally:
+        check.close()

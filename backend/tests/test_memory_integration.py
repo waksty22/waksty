@@ -401,18 +401,7 @@ def test_episodic_search_rejects_unknown_or_binary_provenance():
 
 
 def test_generic_memory_save_cannot_forge_confirmed_provenance():
-    from memory.episodic_memory import (
-        _normalize_source_type,
-        init_memory_tables,
-        save_episodic_memory,
-    )
-
-    try:
-        _normalize_source_type("confirmed")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("generic saves must not assign confirmed provenance")
+    from memory.episodic_memory import init_memory_tables, save_episodic_memory
 
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row

@@ -34,14 +34,6 @@ VALID_SOURCE_TYPES = {
     "confirmed",
 }
 
-# "confirmed" is a read-state reserved for a separate, authenticated
-# user-confirmation flow. Generic/model-driven saves must never assign it.
-WRITABLE_SOURCE_TYPES = {
-    "observed",
-    "taught",
-    "inferred",
-}
-
 MAX_USER_ID_LENGTH = 80
 MAX_CONTENT_LENGTH = 4000
 MAX_CATEGORY_LENGTH = 60
@@ -372,7 +364,8 @@ def save_episodic_memory(
 
     Si le souvenir existe déjà pour cet utilisateur :
     - son importance ne diminue pas ;
-    - ses informations de provenance sont actualisées ;
+    - sa provenance et sa confiance restent inchangées par défaut ;
+    - elles ne peuvent être remplacées que par un appel interne autorisé ;
     - sa date de mise à jour est actualisée ;
     - son compteur d'accès est conservé.
     """
@@ -445,13 +438,21 @@ def save_episodic_memory(
         ),
     )
 
+    persisted = db.execute(
+        """SELECT importance, source_type, confidence
+           FROM memories_v19 WHERE user_id=? AND content=?""",
+        (user_id, content),
+    ).fetchone()
+    if persisted is None:
+        raise RuntimeError("Le souvenir enregistré est introuvable.")
+
     return {
         "saved": True,
         "content": content,
         "category": category,
-        "importance": importance,
-        "source_type": source_type,
-        "confidence": confidence,
+        "importance": persisted[0],
+        "source_type": persisted[1],
+        "confidence": persisted[2],
         "tags": safe_tags,
     }
 

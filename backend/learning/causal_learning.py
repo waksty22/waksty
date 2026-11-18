@@ -241,11 +241,13 @@ def evaluate_experiment(
         updated = prior
         hypothesis_status = "uncertain"
     now = _now()
-    db.execute(
+    finalized = db.execute(
         """UPDATE causal_experiments SET status='completed', result=?, evaluation=?, completed_at=?
-           WHERE id=? AND user_id=?""",
+           WHERE id=? AND user_id=? AND status='planned'""",
         (observed_result, evaluation, now, experiment_id, user_id),
     )
+    if finalized.rowcount != 1:
+        raise ValueError("Cette expérience a déjà été clôturée.")
     db.execute(
         """UPDATE causal_hypotheses SET confidence=?, status=?, evidence_count=evidence_count+1,
            updated_at=? WHERE id=? AND user_id=?""",

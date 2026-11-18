@@ -395,6 +395,8 @@ def test_explicit_definition_after_unrelated_question_is_still_taught(language_d
         "On prétend que coq signifie un oiseau domestique.",
         "Selon Julien, coq signifie un oiseau domestique.",
         "Le mot coq ne signifie pas un oiseau domestique.",
+        "Coq signifie pas un oiseau domestique.",
+        "Le mot coq ne signifie jamais un oiseau domestique.",
     ],
 )
 def test_disputed_or_reported_definitions_are_not_taught(language_db, statement):

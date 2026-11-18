@@ -392,3 +392,77 @@ def test_explicit_memory_confirmation_is_owner_scoped_audited_and_idempotent(
         ).fetchone()[0] == "observed"
     finally:
         check.close()
+
+
+
+def test_memory_intent_gate_handles_french_positive_and_negative_forms():
+    import server
+
+    fact = "J'aime les dinosaures"
+    assert server._memory_fact_is_grounded_in_user_text(
+        fact, "N'oublie pas de retenir : J'aime les dinosaures."
+    )
+    assert not server._memory_fact_is_grounded_in_user_text(
+        fact, "Ne garde pas en mémoire ceci : J'aime les dinosaures."
+    )
+    assert not server._memory_fact_is_grounded_in_user_text(
+        fact, "Je ne veux pas que tu gardes en mémoire ceci : J'aime les dinosaures."
+    )
+
+
+def test_live_tool_call_uses_confirmed_transcription_from_same_provider_packet(
+    monkeypatch,
+):
+    import server
+
+    saved = []
+    monkeypatch.setattr(
+        server,
+        "remember",
+        lambda *args, **kwargs: saved.append((args, kwargs)) or {"saved": True},
+    )
+    provider_packet = {
+        "toolCall": {
+            "functionCalls": [
+                {"name": "remember_fact", "args": {"content": "J'aime les dinosaures"}}
+            ]
+        },
+        "serverContent": {
+            "inputTranscription": {
+                "text": "Mémorise ceci : J'aime les dinosaures."
+            }
+        },
+    }
+
+    source = server._live_user_source_for_tool_call(provider_packet, "")
+    result = server.execute_tool(
+        "remember_fact",
+        {"content": "J'aime les dinosaures", "source_type": "taught"},
+        "creator",
+        user_source_text=source,
+    )
+
+    assert source == "Mémorise ceci : J'aime les dinosaures."
+    assert result == {"saved": True}
+    assert len(saved) == 1
+
+
+def test_live_tool_call_keeps_accumulated_transcript_and_rejects_oversized_chunk():
+    import server
+
+    accumulated = "Mémorise ceci : J'aime"
+    packet = {
+        "serverContent": {
+            "inputTranscription": {"text": "les dinosaures."}
+        }
+    }
+    assert server._live_user_source_for_tool_call(packet, accumulated) == (
+        "Mémorise ceci : J'aime les dinosaures."
+    )
+
+    oversized = {
+        "serverContent": {
+            "inputTranscription": {"text": "x" * (server.MAX_LIVE_TEXT_CHUNK_CHARS + 1)}
+        }
+    }
+    assert server._live_user_source_for_tool_call(oversized, accumulated) == accumulated

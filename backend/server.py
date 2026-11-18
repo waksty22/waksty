@@ -2792,6 +2792,25 @@ def get_identity_prompt(user_id: str, query: str = "") -> str:
     return IDENTITY_SYSTEM_INSTRUCTION
 
 
+def build_live_initial_history(
+    identity_context_message: dict[str, Any],
+    vocabulary_context_message: dict[str, Any],
+) -> dict[str, Any]:
+    """Combine trusted server-built context into one initial user history turn."""
+    parts: list[dict[str, Any]] = []
+    for message in (identity_context_message, vocabulary_context_message):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            raise ValueError("Le contexte initial Live doit être un message utilisateur.")
+        message_parts = message.get("parts")
+        if not isinstance(message_parts, list):
+            raise ValueError("Les parties du contexte initial Live sont invalides.")
+        for part in message_parts:
+            if not isinstance(part, dict) or not isinstance(part.get("text"), str):
+                raise ValueError("Une partie du contexte initial Live est invalide.")
+            parts.append({"text": part["text"]})
+    return {"role": "user", "parts": parts}
+
+
 def build_untrusted_identity_context_message(user_id: str, query: str = "") -> dict[str, Any]:
     """Build a bounded user-role context envelope, never a system instruction."""
     context = get_identity_context(user_id, query=query)
@@ -5942,7 +5961,9 @@ async def websocket_endpoint(
                 # was enabled in setup. It seeds context without triggering a model turn.
                 await gemini_ws.send(json.dumps({
                     "clientContent": {
-                        "turns": [identity_context_message, vocabulary_context_message],
+                        "turns": [build_live_initial_history(
+                            identity_context_message, vocabulary_context_message
+                        )],
                         "turnComplete": True,
                     }
                 }, ensure_ascii=False))

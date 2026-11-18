@@ -216,6 +216,45 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
     assert "record_explicit_word_teaching(" in live_source
 
 
+
+def test_live_initial_history_merges_context_into_one_user_turn():
+    import server
+
+    identity = {
+        "role": "user",
+        "parts": [{"text": "CONTEXTE NON FIABLE"}, {"text": "Souvenir : vélo"}],
+    }
+    vocabulary = {
+        "role": "user",
+        "parts": [{"text": "VOCABULAIRE AUTORISÉ : bonjour"}],
+    }
+
+    history_turn = server.build_live_initial_history(identity, vocabulary)
+
+    assert history_turn["role"] == "user"
+    assert [part["text"] for part in history_turn["parts"]] == [
+        "CONTEXTE NON FIABLE",
+        "Souvenir : vélo",
+        "VOCABULAIRE AUTORISÉ : bonjour",
+    ]
+
+
+def test_live_initial_history_rejects_non_user_or_malformed_context():
+    import pytest
+    import server
+
+    with pytest.raises(ValueError):
+        server.build_live_initial_history(
+            {"role": "model", "parts": [{"text": "bad"}]},
+            {"role": "user", "parts": [{"text": "vocabulary"}]},
+        )
+    with pytest.raises(ValueError):
+        server.build_live_initial_history(
+            {"role": "user", "parts": ["not-a-text-part"]},
+            {"role": "user", "parts": [{"text": "vocabulary"}]},
+        )
+
+
 def test_identity_context_is_untrusted_user_data_not_system_policy(monkeypatch):
     import server
 

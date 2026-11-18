@@ -255,6 +255,39 @@ def test_live_initial_history_rejects_non_user_or_malformed_context():
         )
 
 
+
+def test_identity_context_truncation_preserves_complete_sections():
+    import server
+
+    large_json_section = (
+        "Section initiale conservée.\\n\\n"
+        "SECTION JSON :\\n[\\n"
+        + '{"content":"' + ("x" * 30000) + '"}\\n'
+        + "]\\n\\n"
+        + "Section finale."
+    )
+
+    bounded = server._truncate_context_at_section_boundary(
+        large_json_section, 1200
+    )
+
+    assert len(bounded) <= 1200
+    assert bounded.startswith("Section initiale conservée.")
+    assert "SECTION JSON" not in bounded
+    assert "Section finale" not in bounded
+    assert "sections entières non transmises" in bounded
+
+
+def test_identity_context_truncation_fails_closed_without_safe_boundary():
+    import server
+
+    bounded = server._truncate_context_at_section_boundary("x" * 5000, 1200)
+
+    assert bounded == (
+        "[Contexte historique partiellement omis : sections entières non transmises.]"
+    )
+
+
 def test_identity_context_is_untrusted_user_data_not_system_policy(monkeypatch):
     import server
 

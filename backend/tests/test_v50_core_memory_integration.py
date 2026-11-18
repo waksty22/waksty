@@ -191,7 +191,8 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
 
     assert "get_identity_prompt(user_id, query=query)" in chat_source
     assert "get_identity_prompt(user_id)" in live_source
-    assert "build_untrusted_identity_context_message(user_id, query=query)" in chat_source
+    chat_brain_source = inspect.getsource(server.run_brain)
+    assert "history.insert(0, build_untrusted_identity_context_message(user_id, query=message))" in chat_brain_source
     assert "build_untrusted_identity_context_message(user_id)" in live_source
     assert '"initialHistoryInClientContent": True' in live_source
     assert '"clientContent"' in live_source
@@ -220,6 +221,7 @@ def test_identity_context_is_untrusted_user_data_not_system_policy(monkeypatch):
     text = envelope["parts"][0]["text"]
     assert injected in text
     assert "CONTEXTE HISTORIQUE NON FIABLE" in text
+    assert len(text) <= 24150
 
     # Both entrypoints must feed confirmed user text into the same durable
     # vocabulary table, while keeping lexical exposure distinct from mastery.

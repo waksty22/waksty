@@ -2753,7 +2753,7 @@ TOOLS = [{
     "functionDeclarations": [
         {
             "name": "remember_fact",
-            "description": "Enregistrer un fait utile fourni ou confirmé par l'utilisateur.",
+            "description": "Enregistrer uniquement une citation littérale présente dans le dernier message de l'utilisateur. Refuser toute reformulation, déduction ou contenu provenant de souvenirs.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
@@ -2863,15 +2863,35 @@ TOOLS = [{
     ]
 }]
 
+def _memory_fact_is_grounded_in_user_text(content: str, user_text: str) -> bool:
+    """Allow model-requested memory writes only for a literal current-user quote."""
+    fact = re.sub(r"\s+", " ", str(content or "")).strip().casefold()
+    source = re.sub(r"\s+", " ", str(user_text or "")).strip().casefold()
+    if len(fact) < 4 or not source:
+        return False
+    return fact in source
+
+
 def execute_tool(
     name: str,
     args: dict[str, Any],
     user_id: str,
+    user_source_text: str = "",
 ) -> dict[str, Any]:
 
     try:  
-        if name == "remember_fact":  
-            content = str(args.get("content", ""))[:4000]  
+        if name == "remember_fact":
+            content = str(args.get("content", "")).strip()[:4000]
+            if not _memory_fact_is_grounded_in_user_text(
+                content, user_source_text
+            ):
+                return {
+                    "saved": False,
+                    "error": (
+                        "Souvenir refusé : le contenu doit être une citation "
+                        "littérale du dernier message de l'utilisateur."
+                    ),
+                }
 
             return remember(  
                 user_id,  
@@ -3273,10 +3293,11 @@ async def run_brain(
             if not isinstance(args, dict):  
                 args = {}  
 
-            result = execute_tool(  
-                name,  
-                args,  
-                user_id,  
+            result = execute_tool(
+                name,
+                args,
+                user_id,
+                user_source_text=message,
             )  
 
             function_responses.append({  
@@ -5920,7 +5941,10 @@ async def websocket_endpoint(
                             if not isinstance(function_args, dict):
                                 function_args = {}
                             function_result = execute_tool(
-                                function_name, function_args, user_id
+                                function_name,
+                                function_args,
+                                user_id,
+                                user_source_text=live_turn_state.get("user", ""),
                             )
                             function_response = {
                                 "name": function_name,

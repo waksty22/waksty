@@ -128,6 +128,7 @@ from cognition.reasoning import (
     evaluate_decision_doubt,
     run_metacognitive_audit,
 )
+from cognition.maintenance import apply_passive_maintenance
 from cognition.development import (
     init_development_tables,
     record_affective_snapshot,
@@ -3631,41 +3632,11 @@ async def autonomous_maintenance_loop() -> None:
                     ).total_seconds() / 60,  
                 )  
 
-                em = db.execute(  
-                    """  
-                    SELECT energy, sadness  
-                    FROM emotional_state  
-                    WHERE user_id=?  
-                    """,  
-                    (uid,),  
-                ).fetchone()  
-
-                if em:  
-                    energy = max(  
-                        0.0,  
-                        float(em["energy"]) - 1.0,  
-                    )  
-
-                    sadness = min(  
-                        100.0,  
-                        float(em["sadness"])  
-                        + (  
-                            1.0  
-                            if inactive_minutes >= 30  
-                            else 0.0  
-                        ),  
-                    )  
-
-                    db.execute(  
-                        """  
-                        UPDATE emotional_state  
-                        SET energy=?, sadness=?, updated_at=?  
-                        WHERE user_id=?  
-                        """,  
-                        (energy, sadness, now, uid),  
-                    )  
-
-                apply_memory_decay(db, uid)  
+                # La maintenance passive ne consomme pas d'énergie et ne
+                # déduit pas de tristesse de la seule absence d'interaction.
+                # La récupération énergétique est déjà calculée à partir du
+                # temps écoulé lors des interactions.
+                apply_passive_maintenance(db, uid)
 
                 last_dream = state["last_dream_at"]  
 
@@ -3718,24 +3689,8 @@ async def autonomous_maintenance_loop() -> None:
                     except (ValueError, TypeError):  
                         pass  
 
-                db.execute(  
-                    """  
-                    INSERT INTO journal(  
-                        user_id, entry, kind, created_at  
-                    )  
-                    VALUES(?,?,?,?)  
-                    """,  
-                    (  
-                        uid,  
-                        (  
-                            "Maintenance autonome effectuée; "  
-                            f"inactivité estimée {inactive_minutes:.0f} minutes."  
-                        ),  
-                        "maintenance",  
-                        now,  
-                    ),  
-                )  
-
+                # Ne pas transformer chaque cycle technique de 10 minutes
+                # en entrée du journal autobiographique de Chappie.
                 db.commit()
 
             if STORAGE_MIGRATION_PENDING_CUTOVER:

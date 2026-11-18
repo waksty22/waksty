@@ -129,9 +129,24 @@ def test_experiment_cannot_be_evaluated_twice(db):
         db, "creator", hypothesis["id"], "simulation",
         "test virtuel", "la balle tombe", True,
     )
-    evaluate_experiment(db, "creator", experiment["id"], "elle tombe", "supported")
+    first = evaluate_experiment(
+        db, "creator", experiment["id"], "elle tombe", "supported"
+    )
     with pytest.raises(ValueError):
         evaluate_experiment(db, "creator", experiment["id"], "elle tombe", "supported")
+
+    hypothesis_row = db.execute(
+        "SELECT confidence, evidence_count FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    experiment_row = db.execute(
+        "SELECT status, evaluation FROM causal_experiments WHERE id=?",
+        (experiment["id"],),
+    ).fetchone()
+    assert hypothesis_row["confidence"] == first["confidence"]
+    assert hypothesis_row["evidence_count"] == 1
+    assert experiment_row["status"] == "completed"
+    assert experiment_row["evaluation"] == "supported"
 
 
 def test_dashboard_is_scoped_to_user(db):

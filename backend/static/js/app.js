@@ -467,8 +467,6 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         liveSocket = initWebSocket(wsUrlFactory, (data) => {
-            console.log("Message Live reçu :", data);
-
             if (data.message && liveStatus) {
                 liveStatus.textContent = data.message;
             }
@@ -505,7 +503,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             if (data.type === "error" || data.error) {
-                console.error("Erreur Gemini Live :", data.message || data.error);
+                console.error("Erreur Gemini Live (erreur serveur).");
                 if (liveStatus) liveStatus.textContent = "Erreur Gemini Live : " + (data.message || data.error);
             }
         }, (state, detail) => {

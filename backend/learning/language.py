@@ -156,8 +156,12 @@ def record_explicit_word_teaching(
     uncertainty_sentence = re.compile(
         r"\b(?:ce\s+n['’]est\s+pas\s+vrai\s+que|"
         r"il\s+est\s+faux\s+que|c['’]est\s+faux\s+que|"
+        r"je\s+ne\s+(?:pense|crois|dis)\s+pas\s+que|"
+        r"je\s+ne\s+suis\s+pas\s+(?:s[uû]r(?:e)?|certain(?:e)?|convaincu(?:e)?)|"
+        r"(?:il|elle|on|quelqu['’]un)\s+(?:dit|a\s+dit|affirme|prétend)\s+que|"
+        r"\w+\s+(?:dit|a\s+dit|affirme|prétend)\s+que|"
         r"on\s+(?:prétend|affirme|raconte)\s+que|"
-        r"selon\s+\w+|"
+        r"selon\s+\w+|d['’]après\s+\w+|"
         r"peut[- ]être|probablement|possiblement|éventuellement)\b",
         flags=re.IGNORECASE | re.UNICODE,
     )

@@ -360,6 +360,24 @@ def _new_live_transcript_segment(previous: Any, merged: Any) -> str:
     return merged.strip()
 
 
+def _live_user_source_for_tool_call(response: Any, accumulated_user_text: Any) -> str:
+    """Include a confirmed transcript delivered alongside a Live tool call."""
+    source = accumulated_user_text if isinstance(accumulated_user_text, str) else ""
+    if not isinstance(response, dict):
+        return source
+    server_content = response.get("serverContent")
+    if not isinstance(server_content, dict):
+        return source
+    input_transcription = server_content.get("inputTranscription")
+    if not isinstance(input_transcription, dict):
+        return source
+    incoming = input_transcription.get("text")
+    if not isinstance(incoming, str) or not incoming.strip():
+        return source
+    merged = _merge_bounded_live_transcript(source, incoming.strip())
+    return merged if merged is not None else source
+
+
 def _normalize_live_error_message(error: Any) -> str:
     """Expose only bounded provider text; never stringify arbitrary payloads."""
     if not isinstance(error, dict):
@@ -2883,9 +2901,10 @@ def _memory_fact_is_grounded_in_user_text(content: str, user_text: str) -> bool:
     )
     negative_intent = re.compile(
         r"\b(?:ne\s+(?:me\s+)?(?:retiens|retenir|mémorise|memorise|"
-        r"souviens|rappelle)|n'\s*(?:oublie|oublies)|"
-        r"n’\s*(?:oublie|oublies)|"
-        r"je ne veux pas que tu (?:te souviennes|te rappelles|mémorises|memorises|retiennes))\b"
+        r"souviens|rappelle)|"
+        r"ne\s+(?:me\s+)?garde\s+pas\s+en\s+(?:mémoire|memoire)|"
+        r"je ne veux pas que tu (?:te souviennes|te rappelles|mémorises|memorises|"
+        r"retiennes|gardes en (?:mémoire|memoire)))\b"
     )
     return any(
         positive_intent.search(clause) and not negative_intent.search(clause)
@@ -6044,7 +6063,9 @@ async def websocket_endpoint(
                                 function_name,
                                 function_args,
                                 user_id,
-                                user_source_text=live_turn_state.get("user", ""),
+                                user_source_text=_live_user_source_for_tool_call(
+                                    response, live_turn_state.get("user", "")
+                                ),
                             )
                             function_response = {
                                 "name": function_name,

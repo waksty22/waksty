@@ -2864,12 +2864,33 @@ TOOLS = [{
 }]
 
 def _memory_fact_is_grounded_in_user_text(content: str, user_text: str) -> bool:
-    """Allow model-requested memory writes only for a literal current-user quote."""
+    """Require both an exact user quote and an explicit, non-negated memory request."""
     fact = re.sub(r"\s+", " ", str(content or "")).strip().casefold()
     source = re.sub(r"\s+", " ", str(user_text or "")).strip().casefold()
-    if len(fact) < 4 or not source:
+    if len(fact) < 4 or not source or fact not in source:
         return False
-    return fact in source
+
+    # Split into short clauses so a refusal in one sentence does not cancel a
+    # separate, explicit request in another sentence.
+    clauses = re.split(r"[.!?;\n]+", source)
+    positive_intent = re.compile(
+        r"\b(?:retiens|retenez|mémorise|memorise|"
+        r"souviens[- ]toi|rappelle[- ]toi|"
+        r"garde en mémoire|garde en memoire|"
+        r"n'oublie pas|n’oublie pas|"
+        r"note bien|note que|"
+        r"je veux que tu (?:te souviennes|te rappelles|mémorises|memorises|retiennes))\b"
+    )
+    negative_intent = re.compile(
+        r"\b(?:ne\s+(?:me\s+)?(?:retiens|retenir|mémorise|memorise|"
+        r"souviens|rappelle)|n'\s*(?:oublie|oublies)|"
+        r"n’\s*(?:oublie|oublies)|"
+        r"je ne veux pas que tu (?:te souviennes|te rappelles|mémorises|memorises|retiennes))\b"
+    )
+    return any(
+        positive_intent.search(clause) and not negative_intent.search(clause)
+        for clause in clauses
+    )
 
 
 def execute_tool(

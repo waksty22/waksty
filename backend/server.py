@@ -1335,7 +1335,7 @@ class MemoryRequest(BaseModel):
     importance: int = Field(default=3, ge=1, le=5)  
     source_type: str = Field(  
         default="taught",  
-        pattern=r"^(observed|taught|inferred|confirmed)$",  
+        pattern=r"^(observed|taught|inferred)$",  
     )  
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)  
     tags: list[str] = Field(default_factory=list, max_length=20)
@@ -2033,9 +2033,14 @@ def remember(
         raise HTTPException(422, "La catégorie doit être du texte.")
 
     if not isinstance(source_type, str) or source_type.strip().lower() not in {
-        "observed", "taught", "inferred", "confirmed"
+        "observed", "taught", "inferred"
     }:
-        raise HTTPException(422, "La provenance du souvenir est invalide.")
+        raise HTTPException(
+            422,
+            "La provenance 'confirmed' ne peut pas être attribuée par un "
+            "enregistrement ordinaire ; une confirmation explicite "
+            "et authentifiée est nécessaire.",
+        )
 
     if isinstance(importance, bool) or not isinstance(importance, int):
         raise HTTPException(422, "L'importance doit être un entier.")
@@ -2757,7 +2762,7 @@ TOOLS = [{
                         "type": "STRING",
                         "enum": [
                             "observed", "taught",
-                            "inferred", "confirmed",
+                            "inferred",
                         ],
                     },
                     "confidence": {"type": "NUMBER"},

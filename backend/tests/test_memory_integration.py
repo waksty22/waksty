@@ -397,3 +397,54 @@ def test_episodic_search_rejects_unknown_or_binary_provenance():
     )
     assert search_episodic_memories(db, "creator") == []
     db.close()
+
+
+
+def test_generic_memory_save_cannot_forge_confirmed_provenance():
+    from memory.episodic_memory import (
+        _normalize_source_type,
+        init_memory_tables,
+        save_episodic_memory,
+    )
+
+    try:
+        _normalize_source_type("confirmed")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("generic saves must not assign confirmed provenance")
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    try:
+        save_episodic_memory(
+            db, "creator", "Fait non confirmé", source_type="confirmed"
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("confirmed provenance must be rejected on insert")
+    assert db.execute("SELECT COUNT(*) FROM memories_v19").fetchone()[0] == 0
+    db.close()
+
+
+def test_duplicate_memory_save_preserves_existing_provenance_and_confidence():
+    from memory.episodic_memory import init_memory_tables, save_episodic_memory
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    save_episodic_memory(
+        db, "creator", "Même fait", source_type="taught", confidence=0.91
+    )
+    save_episodic_memory(
+        db, "creator", "Même fait", source_type="inferred", confidence=0.2
+    )
+    row = db.execute(
+        "SELECT source_type, confidence FROM memories_v19 "
+        "WHERE user_id='creator' AND content='Même fait'"
+    ).fetchone()
+    assert row["source_type"] == "taught"
+    assert row["confidence"] == 0.91
+    db.close()

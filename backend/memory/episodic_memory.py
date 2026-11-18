@@ -34,6 +34,14 @@ VALID_SOURCE_TYPES = {
     "confirmed",
 }
 
+# "confirmed" is a read-state reserved for a separate, authenticated
+# user-confirmation flow. Generic/model-driven saves must never assign it.
+WRITABLE_SOURCE_TYPES = {
+    "observed",
+    "taught",
+    "inferred",
+}
+
 MAX_USER_ID_LENGTH = 80
 MAX_CONTENT_LENGTH = 4000
 MAX_CATEGORY_LENGTH = 60
@@ -73,10 +81,11 @@ def _normalize_source_type(source_type: str) -> str:
         raise ValueError("La provenance doit être du texte.")
     source = source_type.strip().lower()
 
-    if source not in VALID_SOURCE_TYPES:
+    if source not in WRITABLE_SOURCE_TYPES:
         raise ValueError(
-            "source_type invalide. Valeurs autorisées : "
-            + ", ".join(sorted(VALID_SOURCE_TYPES))
+            "source_type invalide pour un enregistrement ordinaire. "
+            "La provenance 'confirmed' exige une confirmation explicite "
+            "et authentifiée de l'utilisateur."
         )
 
     return source
@@ -402,8 +411,11 @@ def save_episodic_memory(
                 excluded.importance
             ),
 
-            source_type = excluded.source_type,
-            confidence = excluded.confidence,
+            -- A generic save may refresh a memory, but it cannot rewrite
+            -- its original provenance or confidence. In particular, a
+            -- later model inference must not downgrade a user-confirmed fact.
+            source_type = memories_v19.source_type,
+            confidence = memories_v19.confidence,
             tags = excluded.tags,
             updated_at = excluded.updated_at
         """,

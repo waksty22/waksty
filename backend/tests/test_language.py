@@ -383,3 +383,47 @@ def test_explicit_definition_after_unrelated_question_is_still_taught(language_d
     )
 
     assert [item["word"] for item in taught] == ["coq"]
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "Ce n'est pas vrai que le mot coq signifie un oiseau domestique.",
+        "Il est faux que coq signifie un oiseau domestique.",
+        "Le mot coq signifie peut-être un oiseau domestique.",
+        "Coq signifie probablement un oiseau domestique.",
+        "On prétend que coq signifie un oiseau domestique.",
+        "Selon Julien, coq signifie un oiseau domestique.",
+        "Le mot coq ne signifie pas un oiseau domestique.",
+    ],
+)
+def test_disputed_or_reported_definitions_are_not_taught(language_db, statement):
+    from learning.language import record_explicit_word_teaching, list_vocabulary
+
+    assert record_explicit_word_teaching(
+        language_db, "creator", statement
+    ) == []
+    assert list_vocabulary(language_db, "creator") == []
+
+
+def test_disputed_definition_cannot_overwrite_an_existing_meaning(language_db):
+    from learning.language import record_explicit_word_teaching
+
+    record_explicit_word_teaching(
+        language_db,
+        "creator",
+        "Le mot coq signifie un oiseau domestique.",
+    )
+    record_explicit_word_teaching(
+        language_db,
+        "creator",
+        "Le mot coq signifie peut-être un animal imaginaire.",
+    )
+
+    row = language_db.execute(
+        "SELECT meaning, state FROM personal_vocabulary "
+        "WHERE user_id=? AND word=?",
+        ("creator", "coq"),
+    ).fetchone()
+    assert row["meaning"] == "un oiseau domestique"
+    assert row["state"] == "heard"

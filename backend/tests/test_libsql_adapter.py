@@ -389,6 +389,7 @@ def test_real_libsql_episodic_memory_module_round_trip():
             importance=2,
             source_type="confirmed",
             confidence=1.0,
+            allow_confirmation=True,
         )
         db.commit()
         refreshed = search_episodic_memories(db, "creator", query="guitare")

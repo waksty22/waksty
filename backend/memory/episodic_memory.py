@@ -74,18 +74,17 @@ def _normalize_user_id(user_id: str) -> str:
 
 
 def _normalize_source_type(source_type: str) -> str:
-    """Valide la provenance d'un souvenir."""
+    """Valide la provenance d'un souvenir, y compris l'état confirmé."""
     if source_type is None:
         return "taught"
     if not isinstance(source_type, str):
         raise ValueError("La provenance doit être du texte.")
     source = source_type.strip().lower()
 
-    if source not in WRITABLE_SOURCE_TYPES:
+    if source not in VALID_SOURCE_TYPES:
         raise ValueError(
-            "source_type invalide pour un enregistrement ordinaire. "
-            "La provenance 'confirmed' exige une confirmation explicite "
-            "et authentifiée de l'utilisateur."
+            "source_type invalide. Valeurs autorisées : "
+            + ", ".join(sorted(VALID_SOURCE_TYPES))
         )
 
     return source
@@ -366,6 +365,7 @@ def save_episodic_memory(
     source_type: str = "taught",
     confidence: float = 0.8,
     tags: list[str] | None = None,
+    allow_confirmation: bool = False,
 ) -> dict[str, Any]:
     """
     Enregistre ou actualise un souvenir épisodique.
@@ -381,6 +381,11 @@ def save_episodic_memory(
     category = _normalize_category(category)
     importance = _normalize_importance(importance)
     source_type = _normalize_source_type(source_type)
+    if source_type == "confirmed" and allow_confirmation is not True:
+        raise ValueError(
+            "La provenance 'confirmed' exige un appel interne explicitement "
+            "autorisé ; les enregistrements ordinaires ne peuvent pas la définir."
+        )
     confidence = _normalize_confidence(confidence)
 
     safe_tags = _normalize_tags(tags)
@@ -414,8 +419,14 @@ def save_episodic_memory(
             -- A generic save may refresh a memory, but it cannot rewrite
             -- its original provenance or confidence. In particular, a
             -- later model inference must not downgrade a user-confirmed fact.
-            source_type = memories_v19.source_type,
-            confidence = memories_v19.confidence,
+            source_type = CASE
+                WHEN ? = 1 THEN excluded.source_type
+                ELSE memories_v19.source_type
+            END,
+            confidence = CASE
+                WHEN ? = 1 THEN excluded.confidence
+                ELSE memories_v19.confidence
+            END,
             tags = excluded.tags,
             updated_at = excluded.updated_at
         """,
@@ -429,6 +440,8 @@ def save_episodic_memory(
             tags_json,
             now,
             now,
+            1 if allow_confirmation is True else 0,
+            1 if allow_confirmation is True else 0,
         ),
     )
 

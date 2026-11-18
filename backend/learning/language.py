@@ -190,7 +190,7 @@ def record_explicit_word_teaching(
         # particle itself (e.g. "coq ne signifie pas...") or accepted as
         # a positive definition whose meaning starts with "pas".
         if word in {"ne", "n'", "pas"} or re.match(
-            r"^(?:pas|plus|jamais|aucun(?:e)?|nul(?:le)?)\\b",
+            r"^(?:pas|plus|jamais|aucun(?:e)?|nul(?:le)?)\b",
             meaning,
             flags=re.IGNORECASE | re.UNICODE,
         ):

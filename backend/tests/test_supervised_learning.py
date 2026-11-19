@@ -98,6 +98,28 @@ def test_validated_imitation_needs_practice_and_approval(db):
     assert state["examples"][0]["supervisor_approved"] == 1
 
 
+def test_rejected_imitation_cannot_be_rejected_or_rewritten_again(db):
+    item = demonstration(db)
+    first = reject_imitation(
+        db, "creator", item["id"], "Démonstration incorrecte"
+    )
+    before = db.execute(
+        "SELECT status,evidence,updated_at FROM imitation_examples WHERE id=?",
+        (item["id"],),
+    ).fetchone()
+    with pytest.raises(ValueError, match="clôturée"):
+        reject_imitation(
+            db, "creator", item["id"], "Deuxième motif qui ne doit pas s'ajouter"
+        )
+    after = db.execute(
+        "SELECT status,evidence,updated_at FROM imitation_examples WHERE id=?",
+        (item["id"],),
+    ).fetchone()
+    assert first["status"] == "rejected"
+    assert tuple(after) == tuple(before)
+    assert after["evidence"].count("Rejet :") == 1
+
+
 def test_rejected_imitation_cannot_be_practiced(db):
     item = demonstration(db)
     reject_imitation(db, "creator", item["id"], "Démonstration incorrecte")

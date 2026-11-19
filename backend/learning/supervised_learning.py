@@ -215,15 +215,18 @@ def reject_imitation(
     ).fetchone()
     if row is None:
         raise ValueError("Démonstration introuvable pour cet utilisateur.")
-    if row["status"] == "validated":
-        raise ValueError("Une imitation validée ne peut pas être rejetée directement.")
+    if row["status"] in {"validated", "rejected"}:
+        raise ValueError("Cette imitation est déjà clôturée et ne peut plus être modifiée.")
     now = _now()
-    db.execute(
+    cur = db.execute(
         """UPDATE imitation_examples SET status='rejected',
            evidence=evidence || char(10) || 'Rejet : ' || ?,
-           updated_at=? WHERE id=? AND user_id=?""",
+           updated_at=? WHERE id=? AND user_id=?
+             AND status NOT IN ('validated', 'rejected')""",
         (reason, now, example_id, user_id),
     )
+    if cur.rowcount != 1:
+        raise ValueError("Cette imitation a déjà été clôturée.")
     db.commit()
     return {"example_id": example_id, "status": "rejected", "reason": reason}
 

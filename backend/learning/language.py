@@ -268,9 +268,13 @@ def advance_word(
     db.execute(
         """UPDATE personal_vocabulary
            SET state=?, meaning=CASE WHEN ? <> '' THEN ? ELSE meaning END,
-               evidence=?, updated_at=?
+               evidence=CASE WHEN ? <> '' THEN ? ELSE evidence END,
+               updated_at=?
            WHERE user_id=? AND word=?""",
-        (target_state, meaning, meaning, evidence[:500], utc_now(), user_id, clean),
+        (
+            target_state, meaning, meaning, evidence, evidence[:500],
+            utc_now(), user_id, clean,
+        ),
     )
     updated = db.execute(
         "SELECT * FROM personal_vocabulary WHERE user_id=? AND word=?",

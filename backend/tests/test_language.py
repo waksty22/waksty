@@ -57,6 +57,38 @@ def test_repeated_exposure_does_not_overwrite_learning_evidence(language_db):
     assert updated["exposure_count"] == 2
 
 
+def test_advancing_word_without_new_evidence_preserves_existing_proof(language_db):
+    record_heard_word(
+        language_db, "creator", "coq", "Exposition initiale"
+    )
+    advance_word(
+        language_db, "creator", "coq", "imitated",
+        evidence="Imitation répétée devant le créateur",
+    )
+    updated = advance_word(
+        language_db, "creator", "coq", "recognized"
+    )
+
+    assert updated["state"] == "recognized"
+    assert updated["evidence"] == "Imitation répétée devant le créateur"
+
+
+def test_advancing_word_with_new_evidence_replaces_previous_proof(language_db):
+    record_heard_word(
+        language_db, "creator", "coq", "Exposition initiale"
+    )
+    advance_word(
+        language_db, "creator", "coq", "imitated",
+        evidence="Imitation observée",
+    )
+    updated = advance_word(
+        language_db, "creator", "coq", "recognized",
+        evidence="Reconnaissance visuelle validée",
+    )
+
+    assert updated["evidence"] == "Reconnaissance visuelle validée"
+
+
 def test_word_requires_stepwise_learning(language_db):
     record_heard_word(language_db, "creator", "coq")
 

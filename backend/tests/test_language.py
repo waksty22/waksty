@@ -542,7 +542,7 @@ def test_confirmed_live_turn_records_merged_exposure_once(language_db):
     ).fetchone()
     assert row["exposure_count"] == 1
     assert row["state"] == "heard"
-    assert row["meaning"] == "un objet qui permet de lire l'heure."
+    assert row["meaning"] == "un objet qui permet de lire l'heure"
 
 
 def test_confirmed_live_turn_does_not_promote_ordinary_words(language_db):

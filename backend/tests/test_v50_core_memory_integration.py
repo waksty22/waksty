@@ -210,10 +210,12 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
     chat_brain_source = inspect.getsource(server.run_brain)
     assert "record_heard_text(" in chat_brain_source
     assert "Message écrit reçu par le chat classique" in chat_brain_source
-    assert "record_heard_text(" in live_source
-    assert "Transcription confirmée par Gemini Live" in live_source
+    assert "record_confirmed_turn_learning(" in live_source
+    live_learning_source = inspect.getsource(server.record_confirmed_turn_learning)
+    assert "record_heard_text(" in live_learning_source
+    assert "Transcription complète confirmée par Gemini Live" in live_learning_source
     assert "record_explicit_word_teaching(" in chat_brain_source
-    assert "record_explicit_word_teaching(" in live_source
+    assert "record_explicit_word_teaching(" in live_learning_source
 
 
 

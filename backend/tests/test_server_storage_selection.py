@@ -1349,16 +1349,14 @@ def test_gemini_live_text_input_records_only_new_lexical_exposure(monkeypatch):
             UNIQUE(user_id, word)
         )"""
     )
-    monkeypatch.setattr(server, "db_connection", lambda: db)
-
     transcript = ""
     for incoming in ("Bonjour Chappie", "Bonjour", "Bonjour Chappie", "encore"):
         merged = server._merge_bounded_live_transcript(transcript, incoming)
         assert merged is not None
-        delta = server._new_live_transcript_segment(transcript, merged)
         transcript = merged
-        if delta:
-            server._record_live_text_exposure("creator", delta)
+
+    # Lexical exposure is persisted once, after the final transcript is merged.
+    server.record_confirmed_turn_learning(db, "creator", transcript)
 
     rows = {
         row["word"]: row["exposure_count"]

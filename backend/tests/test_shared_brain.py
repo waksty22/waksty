@@ -217,3 +217,37 @@ def test_live_transcript_rejects_non_text_chunks_without_stringifying_them():
     for invalid in (None, 123, 1.5, True, b"Bonjour", {"text": "Bonjour"}, ["Bonjour"]):
         assert merge_live_transcript("Bonjour", invalid) == "Bonjour"
         assert merge_live_transcript(invalid, "salut") == "salut"
+
+
+def test_snapshot_includes_validated_word_links_and_unconfirmed_perception_candidates():
+    db = make_db()
+    db.executescript("""
+        CREATE TABLE word_visual_associations (
+            id INTEGER PRIMARY KEY, user_id TEXT, word TEXT,
+            observation_id TEXT, evidence TEXT, created_at TEXT
+        );
+        CREATE TABLE perception_fusion_candidates (
+            id INTEGER PRIMARY KEY, user_id TEXT,
+            audio_observation_id TEXT, vision_observation_id TEXT,
+            time_delta_seconds REAL, status TEXT, evidence_json TEXT,
+            created_at TEXT
+        );
+    """)
+    db.execute(
+        "INSERT INTO word_visual_associations VALUES (1,'creator','pomme','vision-1','validation explicite','t2')"
+    )
+    db.execute(
+        "INSERT INTO perception_fusion_candidates VALUES (1,'creator','audio-1','vision-1',1.2,'candidate',?, 't3')",
+        (json.dumps({"rule": "temporal_cooccurrence_only"}),),
+    )
+
+    snapshot = get_shared_brain_snapshot(db, "creator")
+    assert snapshot["word_visual_associations"][0]["word"] == "pomme"
+    assert snapshot["perception_fusions"][0]["status"] == "candidate"
+    assert snapshot["perception_fusions"][0]["evidence"]["rule"] == "temporal_cooccurrence_only"
+
+    context = format_shared_brain_context(snapshot)
+    assert "ASSOCIATIONS MOT-IMAGE" in context
+    assert "RAPPROCHEMENTS AUDIO/VISION" in context
+    assert "coïncidences temporelles, non confirmées" in context
+    db.close()

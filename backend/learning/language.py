@@ -212,8 +212,19 @@ def record_explicit_word_teaching(
                (user_id, word, meaning, state, exposure_count, evidence, created_at, updated_at)
                VALUES (?, ?, ?, 'heard', 1, ?, ?, ?)
                ON CONFLICT(user_id, word) DO UPDATE SET
-                 meaning=excluded.meaning,
-                 evidence=excluded.evidence, updated_at=excluded.updated_at""",
+                 -- An explicit lesson may fill an empty meaning, but a later
+                 -- statement must not silently replace an existing definition.
+                 meaning=CASE
+                     WHEN personal_vocabulary.meaning=''
+                     THEN excluded.meaning
+                     ELSE personal_vocabulary.meaning
+                 END,
+                 evidence=CASE
+                     WHEN personal_vocabulary.meaning=''
+                     THEN excluded.evidence
+                     ELSE personal_vocabulary.evidence
+                 END,
+                 updated_at=excluded.updated_at""",
             (user_id, word, meaning, evidence[:500], now, now),
         )
         row = db.execute(

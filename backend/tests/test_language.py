@@ -436,6 +436,38 @@ def test_disputed_or_reported_definitions_are_not_taught(language_db, statement)
     assert list_vocabulary(language_db, "creator") == []
 
 
+def test_new_explicit_definition_cannot_silently_replace_existing_meaning(language_db):
+    from learning.language import record_explicit_word_teaching, advance_word
+
+    record_explicit_word_teaching(
+        language_db, "creator", "Le mot coq signifie un oiseau domestique."
+    )
+    advance_word(
+        language_db, "creator", "coq", "imitated",
+        evidence="Imitation observée",
+    )
+    advance_word(
+        language_db, "creator", "coq", "recognized",
+        evidence="Reconnaissance validée",
+    )
+
+    result = record_explicit_word_teaching(
+        language_db, "creator",
+        "Le mot coq signifie un animal imaginaire.",
+        evidence="Nouvelle déclaration",
+    )
+
+    row = language_db.execute(
+        "SELECT meaning, state, evidence FROM personal_vocabulary "
+        "WHERE user_id=? AND word=?",
+        ("creator", "coq"),
+    ).fetchone()
+    assert result[0]["meaning"] == "un oiseau domestique"
+    assert row["meaning"] == "un oiseau domestique"
+    assert row["state"] == "recognized"
+    assert row["evidence"] == "Reconnaissance validée"
+
+
 def test_disputed_definition_cannot_overwrite_an_existing_meaning(language_db):
     from learning.language import record_explicit_word_teaching
 

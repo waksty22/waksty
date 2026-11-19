@@ -69,7 +69,7 @@ assert snapshot["perception_fusions"][0]["status"] == "candidate"
 assert snapshot["perception_fusions"][0]["evidence"]["rule"] == "temporal_cooccurrence_only"
 context = format_shared_brain_context(snapshot)
 assert "ASSOCIATIONS MOT-IMAGE" in context
-assert "RAPPROCHEMENTS AUDIO-VISION" in context
+assert "RAPPROCHEMENTS AUDIO/VISION" in context
 print(json.dumps({
     "vocabulary": len(snapshot["vocabulary"]),
     "visual_associations": len(snapshot["word_visual_associations"]),

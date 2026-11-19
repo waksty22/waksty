@@ -111,6 +111,13 @@ def sync_autobiographical_events(
          AND a.happened_at=u.happened_at
          AND a.actor='assistant'
         WHERE u.user_id=? AND u.actor='user'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM conversations previous
+              WHERE previous.user_id=u.user_id
+                AND previous.id=u.source_conversation_id - 1
+                AND previous.role='user'
+          )
         """,
         (user_id,),
     )

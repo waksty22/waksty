@@ -235,6 +235,34 @@ def record_explicit_word_teaching(
             recorded.append(dict(row))
     return recorded
 
+
+def record_confirmed_turn_learning(
+    db: sqlite3.Connection,
+    user_id: str,
+    text: str,
+    *,
+    evidence: str = "Transcription complète confirmée par Gemini Live",
+) -> dict[str, list[dict[str, Any]]]:
+    """Record lexical exposure and explicit lessons once from a completed turn.
+
+    Incremental provider transcripts are deliberately not passed here: the
+    caller invokes this only after the turn has been merged and confirmed.
+    """
+    user_id = _require_user_id(user_id)
+    if not isinstance(text, str):
+        raise ValueError("Le texte confirmé doit être une chaîne de caractères.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'exposition doit être du texte.")
+    heard = record_heard_text(
+        db, user_id, text, evidence=evidence, max_tokens=30
+    )
+    taught = record_explicit_word_teaching(
+        db, user_id, text,
+        evidence="Enseignement explicite via le tour confirmé",
+    )
+    return {"heard": heard, "taught": taught}
+
+
 def advance_word(
     db: sqlite3.Connection,
     user_id: str,

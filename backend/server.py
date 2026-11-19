@@ -88,7 +88,7 @@ from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
     get_usable_words, get_repeatable_words, gate_spoken_text,
     record_heard_word, record_heard_text, record_explicit_word_teaching,
-    text_uses_only_allowed_words,
+    record_confirmed_turn_learning, text_uses_only_allowed_words,
 )
 from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,
@@ -312,22 +312,6 @@ def _append_live_audio_chunk(
         sample_rate = 24000
     chunks.append({"audio": data, "sample_rate": sample_rate})
     return current_chars + len(data)
-
-
-def _record_live_text_exposure(user_id: str, text: Any) -> int:
-    """Persist lexical exposure from text sent directly through Gemini Live."""
-    if not isinstance(text, str) or not text.strip():
-        return 0
-    with db_connection() as db:
-        recorded = record_heard_text(
-            db,
-            user_id,
-            text,
-            evidence="Message texte transmis via Gemini Live",
-        )
-        if recorded:
-            db.commit()
-    return len(recorded)
 
 
 def _merge_bounded_live_transcript(previous: Any, incoming: Any) -> str | None:
@@ -6027,7 +6011,6 @@ async def websocket_endpoint(
                     if not isinstance(payload, dict):
                         continue
                     action = payload.get("action")
-                    pending_live_text_segment = ""
                     pending_merged_user_text = None
                     if action == "audio_chunk":
                         pcm = payload.get("pcm_data")
@@ -6082,10 +6065,6 @@ async def websocket_endpoint(
                         if merged_user_text is None:
                             continue
                         previous_user_text = live_turn_state["user"]
-                        new_text_segment = _new_live_transcript_segment(
-                            previous_user_text, merged_user_text
-                        )
-                        pending_live_text_segment = new_text_segment
                         pending_merged_user_text = merged_user_text
                         message = _build_live_text_input_message(text_value)
                         if message is None:
@@ -6096,16 +6075,6 @@ async def websocket_endpoint(
                     await gemini_ws.send(json.dumps(message, ensure_ascii=False))
                     if pending_merged_user_text is not None:
                         live_turn_state["user"] = pending_merged_user_text
-                    if pending_live_text_segment:
-                        try:
-                            _record_live_text_exposure(
-                                user_id, pending_live_text_segment
-                            )
-                        except Exception:
-                            log.exception(
-                                "[GEMINI LIVE] Échec mémorisation exposition texte"
-                            )
-
             async def gemini_to_client():
                 async for raw_message in gemini_ws:
                     response = json.loads(raw_message)
@@ -6204,10 +6173,6 @@ async def websocket_endpoint(
                                             sensory_db, user_id, live_emotions,
                                             source="gemini_live",
                                             event_label="transcription utilisateur",
-                                        )
-                                        record_heard_text(
-                                            sensory_db, user_id, new_heard_text,
-                                            evidence="Transcription confirmée par Gemini Live",
                                         )
                                         audio_observation = record_observation(
                                             sensory_db, user_id, "audio", new_heard_text,
@@ -6316,13 +6281,23 @@ async def websocket_endpoint(
                         if live_turn_state["user"] or assistant_text:
                             try:
                                 with db_connection() as teaching_db:
-                                    taught = record_explicit_word_teaching(
-                                        teaching_db, user_id, live_turn_state["user"],
-                                        evidence="Enseignement explicite via Gemini Live",
+                                    live_learning = record_confirmed_turn_learning(
+                                        teaching_db, user_id, live_turn_state["user"]
                                     )
-                                    if taught:
+                                    heard = live_learning["heard"]
+                                    taught = live_learning["taught"]
+                                    if heard or taught:
                                         teaching_db.commit()
-                                        log.info("[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis Gemini Live", len(taught))
+                                    if heard:
+                                        log.info(
+                                            "[APPRENTISSAGE PARTAGÉ] Exposition Live enregistrée après fusion : %s mot(s)",
+                                            len(heard),
+                                        )
+                                    if taught:
+                                        log.info(
+                                            "[APPRENTISSAGE PARTAGÉ] %s mot(s) enseigné(s) depuis le tour Live confirmé",
+                                            len(taught),
+                                        )
                             except Exception:
                                 log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")
                             try:

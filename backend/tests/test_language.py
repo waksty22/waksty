@@ -521,3 +521,37 @@ def test_disputed_definition_cannot_overwrite_an_existing_meaning(language_db):
     ).fetchone()
     assert row["meaning"] == "un oiseau domestique"
     assert row["state"] == "heard"
+
+
+
+def test_confirmed_live_turn_records_merged_exposure_once(language_db):
+    from learning.language import record_confirmed_turn_learning
+
+    result = record_confirmed_turn_learning(
+        language_db,
+        "creator",
+        "Le mot montre signifie un objet qui permet de lire l'heure.",
+    )
+
+    assert [item["word"] for item in result["heard"]].count("montre") == 1
+    assert [item["word"] for item in result["taught"]] == ["montre"]
+    row = language_db.execute(
+        "SELECT exposure_count, state, meaning FROM personal_vocabulary "
+        "WHERE user_id=? AND word=?",
+        ("creator", "montre"),
+    ).fetchone()
+    assert row["exposure_count"] == 1
+    assert row["state"] == "heard"
+    assert row["meaning"] == "un objet qui permet de lire l'heure."
+
+
+def test_confirmed_live_turn_does_not_promote_ordinary_words(language_db):
+    from learning.language import record_confirmed_turn_learning
+
+    result = record_confirmed_turn_learning(
+        language_db, "creator", "Bonjour Chappie, regarde le jardin."
+    )
+
+    assert result["heard"]
+    assert result["taught"] == []
+    assert all(item["state"] == "heard" for item in result["heard"])

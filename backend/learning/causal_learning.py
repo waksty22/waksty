@@ -7,6 +7,7 @@ after an explicit supervisor approval and must be performed externally.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -36,8 +37,8 @@ def _confidence(value: Any, field: str = "Confiance") -> float:
         value = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{field} invalide.") from exc
-    if not 0.0 <= value <= 1.0:
-        raise ValueError(f"{field} doit être comprise entre 0 et 1.")
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{field} doit être une valeur finie comprise entre 0 et 1.")
     return value
 
 

@@ -1513,3 +1513,55 @@ def test_perception_review_endpoint_persists_authenticated_confirmation(monkeypa
     ).fetchone()
     assert persisted["status"] == "confirmed"
     db.close()
+
+
+
+def test_render_sqlite_bootstrap_fails_closed_without_persistence_ack(
+    monkeypatch, tmp_path
+):
+    import server
+    from storage.connection_factory import StorageSettings
+
+    database_path = tmp_path / "missing.sqlite3"
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setenv("RENDER_SERVICE_ID", "srv-test")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("CHAPPIE_SQLITE_PERSISTENCE_ACK", raising=False)
+    monkeypatch.delenv("CHAPPIE_SQLITE_FRESH_START", raising=False)
+    settings = StorageSettings(backend="sqlite", sqlite_path=str(database_path))
+
+    with pytest.raises(RuntimeError, match="CHAPPIE_SQLITE_PERSISTENCE_ACK"):
+        server._assert_render_sqlite_storage_is_safe(settings)
+    assert not database_path.exists()
+
+
+def test_render_sqlite_missing_file_requires_explicit_one_time_fresh_start(
+    monkeypatch, tmp_path
+):
+    import server
+    from storage.connection_factory import StorageSettings
+
+    database_path = tmp_path / "missing.sqlite3"
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setenv("RENDER_SERVICE_ID", "srv-test")
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_SQLITE_PERSISTENCE_ACK", "1")
+    monkeypatch.delenv("CHAPPIE_SQLITE_FRESH_START", raising=False)
+    settings = StorageSettings(backend="sqlite", sqlite_path=str(database_path))
+
+    with pytest.raises(RuntimeError, match="CHAPPIE_SQLITE_FRESH_START"):
+        server._assert_render_sqlite_storage_is_safe(settings)
+    assert not database_path.exists()
+
+    monkeypatch.setenv("CHAPPIE_SQLITE_FRESH_START", "1")
+    server._assert_render_sqlite_storage_is_safe(settings)
+
+
+def test_explicit_sqlite_path_is_respected_by_server_configuration(
+    monkeypatch, tmp_path
+):
+    import server
+
+    configured_path = tmp_path / "custom" / "chappie.sqlite3"
+    monkeypatch.setenv("CHAPPIE_SQLITE_PATH", str(configured_path))
+    assert server._resolve_db_path() == configured_path.resolve()

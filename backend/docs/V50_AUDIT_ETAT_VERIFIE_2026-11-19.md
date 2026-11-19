@@ -68,6 +68,7 @@ Le test E2E Turso utilise son propre jeu de données synthétiques et sa propre 
 ### Stockage et reprise
 
 - Le backend sélectionne SQLite par défaut si `CHAPPIE_STORAGE_BACKEND` n'est pas configuré. Le dépôt ne permet pas à lui seul de confirmer le backend réellement actif dans Render ; les variables de production n'ont pas été inspectées.
+- Un garde-fou fail-closed exige désormais sur Render `CHAPPIE_SQLITE_PERSISTENCE_ACK=1` pour accepter SQLite, et `CHAPPIE_SQLITE_FRESH_START=1` uniquement pour une initialisation volontaire d'un fichier absent/vide. Cette seconde variable doit être retirée après le bootstrap. Le garde-fou ne remplace pas un disque réellement persistant ; il oblige l'opérateur à l'attester.
 - La migration/coupure vers Turso et son rollback opérationnel ne sont pas considérés comme terminés.
 - Une restauration E2E de test isolée existe, mais elle utilise un instantané synthétique. Il reste à restaurer **un artefact quotidien réel** dans une base Turso de récupération distincte et à comparer schéma, volumes, contraintes et empreintes.
 - Aucun outil opérationnel général de restauration de production n'est livré. Le plan détaillé est dans `docs/operations/turso-logical-restore-design.md`.

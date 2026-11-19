@@ -179,7 +179,14 @@ BASE_DIR = Path(
 ).expanduser().resolve()
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = BASE_DIR / "chappie_v16.sqlite3"
+def _resolve_db_path() -> Path:
+    configured_path = os.getenv("CHAPPIE_SQLITE_PATH", "").strip()
+    if configured_path:
+        return Path(configured_path).expanduser().resolve()
+    return (BASE_DIR / "chappie_v16.sqlite3").resolve()
+
+
+DB_PATH = _resolve_db_path()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv(
@@ -747,9 +754,47 @@ def _turso_existing_schema_compatible() -> bool:
         db.close()
 
 
+def _is_render_runtime() -> bool:
+    return bool(
+        os.getenv("RENDER_SERVICE_ID")
+        or os.getenv("RENDER_INSTANCE_ID")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or os.getenv("RENDER", "").strip().lower() == "true"
+    )
+
+
+def _assert_render_sqlite_storage_is_safe(settings: StorageSettings) -> None:
+    """Fail closed instead of silently bootstrapping an empty Render SQLite DB."""
+    if settings.backend != "sqlite" or not _is_render_runtime():
+        return
+    if os.getenv("CHAPPIE_SQLITE_PERSISTENCE_ACK") != "1":
+        raise RuntimeError(
+            "SQLite sur Render exige CHAPPIE_SQLITE_PERSISTENCE_ACK=1 après "
+            "vérification qu'un disque persistant est monté sur le chemin DB_PATH. "
+            "Préférer Turso si aucun disque persistant n'est disponible."
+        )
+    try:
+        database_ready = DB_PATH.is_file() and DB_PATH.stat().st_size > 0
+    except OSError:
+        database_ready = False
+    if not database_ready:
+        if os.getenv("CHAPPIE_SQLITE_FRESH_START") != "1":
+            raise RuntimeError(
+                "Fichier SQLite absent ou vide sur Render : démarrage bloqué "
+                "pour éviter une mémoire neuve silencieuse. Pour un bootstrap "
+                "initial explicitement autorisé, définir temporairement "
+                "CHAPPIE_SQLITE_FRESH_START=1, puis retirer cette variable."
+            )
+        log.warning(
+            "[STORAGE] Bootstrap SQLite Render explicitement autorisé ; "
+            "retirer CHAPPIE_SQLITE_FRESH_START après l'initialisation."
+        )
+
+
 def init_db() -> None:
     global STORAGE_MIGRATION_PENDING_CUTOVER
     settings = StorageSettings.from_env()
+    _assert_render_sqlite_storage_is_safe(settings)
     fresh_turso_bootstrap_pending = False
     existing_schema_adoption_pending = False
     if settings.backend == "sqlite":

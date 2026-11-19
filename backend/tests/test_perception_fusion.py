@@ -73,6 +73,26 @@ def test_reprocessing_does_not_resurrect_a_rejected_fusion(db):
     assert list_perception_fusions(db, "creator")[0]["status"] == "rejected"
 
 
+def test_replayed_fusion_reports_original_persisted_time_delta(db):
+    _, vision = make_audio_and_vision(db)
+    first = link_temporally_cooccurring_observation(
+        db, "creator", vision["observation_id"]
+    )
+    fusion_id = first[0]["id"]
+    db.execute(
+        "UPDATE perception_fusion_candidates SET time_delta_seconds=42.125 WHERE id=?",
+        (fusion_id,),
+    )
+
+    replay = link_temporally_cooccurring_observation(
+        db, "creator", vision["observation_id"]
+    )
+
+    assert replay[0]["id"] == fusion_id
+    assert replay[0]["created"] is False
+    assert replay[0]["time_delta_seconds"] == 42.125
+
+
 def test_temporal_fusion_never_links_observations_across_users(db):
     record_observation(
         db, "alice", "audio", "Son privé.", "microphone"

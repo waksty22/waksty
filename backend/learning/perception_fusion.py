@@ -114,7 +114,7 @@ def link_temporally_cooccurring_observation(
              json.dumps(evidence, ensure_ascii=False), _now().isoformat()),
         )
         persisted = db.execute(
-            """SELECT id, status
+            """SELECT id, status, time_delta_seconds
                FROM perception_fusion_candidates
                WHERE user_id=? AND audio_observation_id=?
                  AND vision_observation_id=?""",
@@ -128,7 +128,9 @@ def link_temporally_cooccurring_observation(
             "id": persisted["id"],
             "audio_observation_id": audio_id,
             "vision_observation_id": vision_id,
-            "time_delta_seconds": round(delta, 3),
+            # Replays must describe the persisted candidate, not a newly
+            # computed temporal delta that may differ from the original.
+            "time_delta_seconds": round(float(persisted["time_delta_seconds"]), 3),
             "status": persisted["status"],
             "created": cursor.rowcount == 1,
             "requires_validation": persisted["status"] == "candidate",

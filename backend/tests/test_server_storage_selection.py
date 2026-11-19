@@ -1149,7 +1149,8 @@ def test_server_db_connection_routes_explicit_turso_selection_through_factory(
 
     connection = server.db_connection()
 
-    assert connection is sentinel
+    assert isinstance(connection, server.ClosingConnection)
+    assert connection._connection is sentinel
     assert captured["settings"].backend == "turso"
     assert captured["settings"].turso_database_url == "libsql://isolated-test.turso.io"
     assert captured["settings"].turso_auth_token == "test-only-token"
@@ -1366,3 +1367,25 @@ def test_gemini_live_text_input_records_only_new_lexical_exposure(monkeypatch):
     }
     assert rows == {"bonjour": 1, "chappie": 1, "encore": 1}
     db.close()
+
+
+
+def test_server_db_connection_closes_sqlite_handle_after_context_exit(
+    monkeypatch, tmp_path
+):
+    import sqlite3
+    import server
+
+    raw = sqlite3.connect(tmp_path / "request.sqlite3")
+    raw.row_factory = sqlite3.Row
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "request.sqlite3")
+    monkeypatch.setattr(server, "open_storage_connection", lambda settings: raw)
+
+    connection = server.db_connection()
+    with connection as db:
+        db.execute("CREATE TABLE request_probe (value TEXT)")
+        db.execute("INSERT INTO request_probe(value) VALUES ('committed')")
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")

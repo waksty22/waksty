@@ -82,7 +82,7 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
             database=selected.turso_database_url,
             auth_token=selected.turso_auth_token,
         )
-        connection = adapt_libsql_connection(native, close_on_context_exit=True)
+        connection = adapt_libsql_connection(native)
         try:
             connection.execute("PRAGMA foreign_keys=ON")
         except Exception:
@@ -95,3 +95,48 @@ def open_storage_connection(settings: StorageSettings | None = None) -> Any:
         return connection
 
     raise ValueError("Backend de stockage non pris en charge.")
+
+
+
+class ClosingConnection:
+    """DB-API proxy that closes the underlying handle after a context block.
+
+    sqlite3.Connection.__exit__ commits or rolls back but does not close.
+    The same request-scoped lifetime is applied to the libSQL adapter.
+    """
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+    def __enter__(self) -> "ClosingConnection":
+        try:
+            self._connection.__enter__()
+        except BaseException:
+            try:
+                self._connection.close()
+            except Exception:
+                pass
+            raise
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
+        primary_error = exc if exc_type is not None else None
+        try:
+            return bool(self._connection.__exit__(exc_type, exc, traceback))
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            try:
+                self._connection.close()
+            except Exception:
+                # Preserve a transaction/body exception; a close-only failure
+                # remains visible when no earlier failure exists.
+                if primary_error is None:
+                    raise
+
+    def close(self) -> None:
+        self._connection.close()

@@ -328,3 +328,45 @@ def test_memory_server_entrypoints_reject_coercion_before_storage():
     assert "not isinstance(query, str)" in retrieve_source
     assert "isinstance(limit, bool) or not isinstance(limit, int)" in retrieve_source
     assert "int(limit)" not in retrieve_source
+
+
+
+def test_shared_brain_memory_survives_local_libsql_reconnect(tmp_path):
+    import libsql
+
+    from storage.libsql_adapter import adapt_libsql_connection
+    from cognition.shared_brain import get_shared_brain_snapshot
+    from learning.language import init_language_tables, record_heard_word
+    from learning.sensory import init_sensory_tables, record_observation
+
+    database_path = str(tmp_path / "chappie-persistence.db")
+    first = adapt_libsql_connection(libsql.connect(database=database_path))
+    try:
+        init_language_tables(first)
+        init_sensory_tables(first)
+        record_heard_word(first, "owner", "bonjour", "mot entendu dans un test")
+        observation = record_observation(
+            first, "owner", "audio", "Bonjour Chappie",
+            "test-local-libsql", confidence=0.9,
+        )
+        first.commit()
+        observation_id = observation["observation_id"]
+    finally:
+        first.close()
+
+    second = adapt_libsql_connection(libsql.connect(database=database_path))
+    try:
+        snapshot = get_shared_brain_snapshot(second, "owner")
+        assert any(
+            item["word"] == "bonjour" and item["state"] == "heard"
+            for item in snapshot["vocabulary"]
+        )
+        assert any(
+            item["observation_id"] == observation_id
+            and item["modality"] == "audio"
+            for item in snapshot["sensory_observations"]
+        )
+        assert snapshot["statistics"]["totals"]["vocabulary"] == 1
+        assert snapshot["statistics"]["totals"]["sensory_observations"] == 1
+    finally:
+        second.close()

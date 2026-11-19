@@ -163,3 +163,35 @@ def test_practice_rejects_invalid_example_id(db, bad):
 def test_imitation_listing_rejects_invalid_limit(db, bad):
     with pytest.raises(ValueError):
         list_imitation_learning(db, "creator", limit=bad)
+
+def test_rejected_imitation_cannot_be_reopened_by_practice_or_validation(db):
+    item = demonstration(db)
+    record_practice(
+        db, "creator", item["id"], "geste reproduit",
+        "Une pratique réussie est documentée.", True,
+    )
+    reject_imitation(db, "creator", item["id"], "Rejet du superviseur")
+    attempts_before = db.execute(
+        "SELECT COUNT(*) FROM imitation_attempts WHERE example_id=?",
+        (item["id"],),
+    ).fetchone()[0]
+    with pytest.raises(ValueError):
+        record_practice(
+            db, "creator", item["id"], "nouvelle tentative",
+            "Ne doit pas être enregistrée.", True,
+        )
+    with pytest.raises(ValueError):
+        validate_imitation(
+            db, "creator", item["id"], True, "Ne doit pas valider le rejet"
+        )
+    row = db.execute(
+        "SELECT status,supervisor_approved,evidence FROM imitation_examples WHERE id=?",
+        (item["id"],),
+    ).fetchone()
+    assert row["status"] == "rejected"
+    assert row["supervisor_approved"] == 0
+    assert row["evidence"].count("Rejet :") == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM imitation_attempts WHERE example_id=?",
+        (item["id"],),
+    ).fetchone()[0] == attempts_before

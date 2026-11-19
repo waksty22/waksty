@@ -262,3 +262,22 @@ def test_malformed_assessment_labels_and_evidence_are_not_stringified():
     assert "not human proof" not in vision["content"]
     assert vision["content"] == "Compétence évaluée : tete:vision"
     db.close()
+
+def test_supervised_skill_score_above_100_is_not_validated():
+    db = make_db()
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Score corrompu hors barème.",
+    }
+    db.execute(
+        """INSERT INTO competency_tests VALUES
+           (20, 'creator', 'tete:score_corrompu', 1, 101, ?, '2026-11-07')""",
+        (json.dumps(details),),
+    )
+    db.commit()
+    items = retrieve_acquired_knowledge(db, "creator")["items"]
+    item = next(row for row in items if row.get("skill") == "tete:score_corrompu")
+    assert item["status"] == "supervised_assessment_not_validated"
+    assert item["score"] == 101.0
+    db.close()

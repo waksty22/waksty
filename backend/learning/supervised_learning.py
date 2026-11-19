@@ -134,18 +134,27 @@ def record_practice(
     if not isinstance(successful, bool):
         raise ValueError("successful doit être un booléen.")
     now = _now()
-    cur = db.execute(
-        """INSERT INTO imitation_attempts
-           (user_id,example_id,result,evidence,successful,created_at)
-           VALUES (?,?,?,?,?,?)""",
-        (user_id, example_id, result, evidence, int(successful), now),
-    )
-    db.execute(
-        """UPDATE imitation_examples SET status='practiced',updated_at=?
-           WHERE id=? AND user_id=?""",
-        (now, example_id, user_id),
-    )
-    db.commit()
+    db.execute("SAVEPOINT record_practice_transition")
+    try:
+        transition = db.execute(
+            """UPDATE imitation_examples SET status='practiced',updated_at=?
+               WHERE id=? AND user_id=? AND status IN ('observed','practiced')""",
+            (now, example_id, user_id),
+        )
+        if transition.rowcount != 1:
+            raise ValueError("Cette démonstration a déjà été clôturée.")
+        cur = db.execute(
+            """INSERT INTO imitation_attempts
+               (user_id,example_id,result,evidence,successful,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (user_id, example_id, result, evidence, int(successful), now),
+        )
+        db.execute("RELEASE SAVEPOINT record_practice_transition")
+        db.commit()
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT record_practice_transition")
+        db.execute("RELEASE SAVEPOINT record_practice_transition")
+        raise
     return {
         "attempt_id": cur.lastrowid, "example_id": example_id,
         "result": result, "evidence": evidence,
@@ -184,14 +193,16 @@ def validate_imitation(
     if not attempts:
         raise ValueError("Aucune pratique réussie documentée.")
     now = _now()
-    db.execute(
+    cur = db.execute(
         """UPDATE imitation_examples
            SET status='validated',supervisor_approved=1,
                evidence=evidence || char(10) || 'Validation : ' || ?,
                updated_at=?
-           WHERE id=? AND user_id=?""",
+           WHERE id=? AND user_id=? AND status='practiced'""",
         (validation_evidence, now, example_id, user_id),
     )
+    if cur.rowcount != 1:
+        raise ValueError("Cette imitation a déjà été clôturée ou modifiée.")
     db.commit()
     return {
         "example_id": example_id, "status": "validated",

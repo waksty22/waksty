@@ -55,7 +55,7 @@ def _validated_assessment(details: Any, passed: Any, score: Any) -> bool:
         numeric_score = float(score)
     except (OverflowError, TypeError, ValueError):
         return False
-    return math.isfinite(numeric_score) and numeric_score >= 70
+    return math.isfinite(numeric_score) and 70 <= numeric_score <= 100
 
 
 def _safe_score(value: Any) -> float:

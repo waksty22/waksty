@@ -1421,3 +1421,95 @@ def test_perception_review_endpoint_rejects_invalid_json_before_database_access(
         with pytest.raises(server.HTTPException) as exc:
             asyncio.run(server.api_review_perception_fusion(1, request, "creator"))
         assert exc.value.status_code == 422
+
+
+
+def test_thoughts_endpoint_returns_rumination_and_cognitive_traces(monkeypatch):
+    import asyncio
+    import sqlite3
+    import server
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE thoughts (
+            id INTEGER PRIMARY KEY, user_id TEXT, content TEXT, created_at TEXT
+        );
+        CREATE TABLE cognitive_traces (
+            id INTEGER PRIMARY KEY, user_id TEXT, thought_type TEXT,
+            context_summary TEXT, decision_made TEXT, confidence REAL,
+            created_at TEXT
+        );
+    """)
+    db.execute(
+        "INSERT INTO thoughts VALUES (1, 'creator', 'Pensée vagabonde', '2026-11-19T10:00:00+00:00')"
+    )
+    db.execute(
+        "INSERT INTO cognitive_traces VALUES "
+        "(2, 'creator', 'decision', 'Contexte de décision', 'Choix vérifiable', 0.7, "
+        "'2026-11-19T11:00:00+00:00')"
+    )
+    db.commit()
+    monkeypatch.setattr(server, "_authenticated_user", lambda auth: "creator")
+    monkeypatch.setattr(server, "db_connection", lambda: db)
+
+    result = asyncio.run(server.api_thoughts("creator"))
+
+    assert [item["source"] for item in result["thoughts"]] == [
+        "cognitive_trace", "rumination",
+    ]
+    assert result["thoughts"][0]["content"] == "Choix vérifiable"
+    assert result["thoughts"][1]["content"] == "Pensée vagabonde"
+    assert len(result["cognitive_traces"]) == 1
+    db.close()
+
+
+def test_perception_review_endpoint_persists_authenticated_confirmation(monkeypatch):
+    import asyncio
+    import sqlite3
+    import server
+    from learning.perception_fusion import (
+        init_perception_fusion_tables, link_temporally_cooccurring_observation,
+    )
+    from learning.sensory import init_sensory_tables, record_observation
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_sensory_tables(db)
+    init_perception_fusion_tables(db)
+    vision = record_observation(
+        db, "creator", "vision", "Une pomme rouge.", "camera_test"
+    )
+    audio = record_observation(
+        db, "creator", "audio", "Le mot pomme.", "micro_test"
+    )
+    candidates = link_temporally_cooccurring_observation(
+        db, "creator", audio["observation_id"], 30
+    )
+    assert candidates
+    db.commit()
+
+    class JsonRequest:
+        async def json(self):
+            return {
+                "decision": "confirm",
+                "evidence": "Le créateur a vérifié le même objet dans l'image et le son.",
+            }
+
+    monkeypatch.setattr(server, "_authenticated_user", lambda auth: "creator")
+    monkeypatch.setattr(server, "db_connection", lambda: db)
+
+    result = asyncio.run(
+        server.api_review_perception_fusion(
+            candidates[0]["id"], JsonRequest(), "creator"
+        )
+    )
+
+    assert result["review"]["status"] == "confirmed"
+    assert result["review"]["world_knowledge_promoted"] is False
+    persisted = db.execute(
+        "SELECT status FROM perception_fusion_candidates WHERE id=?",
+        (candidates[0]["id"],),
+    ).fetchone()
+    assert persisted["status"] == "confirmed"
+    db.close()

@@ -4721,27 +4721,58 @@ async def api_generate_dream(
 async def api_thoughts(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
 
-    try:  
-        with db_connection() as conn:  
-            rows = conn.execute(  
-                """  
-                SELECT *  
-                FROM cognitive_traces  
-                WHERE user_id = ?  
-                ORDER BY created_at DESC  
-                LIMIT 50  
-                """,  
-                (user_id,),  
-            ).fetchall()  
+    try:
+        with db_connection() as conn:
+            thought_rows = conn.execute(
+                """SELECT id, content, created_at
+                   FROM thoughts WHERE user_id=?
+                   ORDER BY created_at DESC, id DESC LIMIT 50""",
+                (user_id,),
+            ).fetchall()
+            trace_rows = conn.execute(
+                """SELECT id, thought_type, context_summary, decision_made,
+                          confidence, created_at
+                   FROM cognitive_traces WHERE user_id=?
+                   ORDER BY created_at DESC, id DESC LIMIT 50""",
+                (user_id,),
+            ).fetchall()
 
-            thoughts = [dict(row) for row in rows]  
+        thoughts = [
+            {
+                "id": row["id"],
+                "source": "rumination",
+                "content": row["content"],
+                "created_at": row["created_at"],
+            }
+            for row in thought_rows
+        ]
+        cognitive_traces = [dict(row) for row in trace_rows]
+        thoughts.extend(
+            {
+                "id": row["id"],
+                "source": "cognitive_trace",
+                "content": row["decision_made"] or row["context_summary"],
+                "thought_type": row["thought_type"],
+                "context_summary": row["context_summary"],
+                "decision_made": row["decision_made"],
+                "confidence": row["confidence"],
+                "created_at": row["created_at"],
+            }
+            for row in cognitive_traces
+        )
+        thoughts.sort(
+            key=lambda item: item.get("created_at") or "",
+            reverse=True,
+        )
+        thoughts = thoughts[:50]
+    except Exception:
+        log.exception("[THOUGHTS] Impossible de charger les pensées et traces")
+        thoughts = []
+        cognitive_traces = []
 
-    except Exception as exc:  
-        print("[THOUGHTS]", repr(exc))  
-        thoughts = []  
-
-    return {  
-        "thoughts": thoughts,  
+    return {
+        "thoughts": thoughts,
+        "cognitive_traces": cognitive_traces,
     }
 
 @app.get("/api/mood/history")

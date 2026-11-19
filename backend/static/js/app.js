@@ -219,13 +219,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: { first, second }
             });
             const comparison = data.comparison;
+            const detailsFor = (key, word, value) => {
+                const entries = (comparison.property_details?.[key]?.[word] || [])
+                    .filter(item => item.value === value);
+                return entries.map(item => item.source_type + ", confiance "
+                    + Math.round(item.confidence * 100) + "%").join(" ; ");
+            };
+            const describeValues = (key, word, values) => values.length
+                ? values.map(value => value + (detailsFor(key, word, value)
+                    ? " [" + detailsFor(key, word, value) + "]" : "")).join(", ")
+                : "inconnu";
             const shared = Object.entries(comparison.shared_properties || {})
-                .map(([key, values]) => key + " : " + values.join(", "));
+                .map(([key, values]) => key + " : " + values.map(value => {
+                    const firstMeta = detailsFor(key, first, value);
+                    const secondMeta = detailsFor(key, second, value);
+                    const meta = [firstMeta && first + " : " + firstMeta,
+                        secondMeta && second + " : " + secondMeta].filter(Boolean).join(" / ");
+                    return value + (meta ? " [" + meta + "]" : "");
+                }).join(", "));
             const differences = Object.entries(comparison.differences || {})
                 .map(([key, values]) => key + " — " + first + " : "
-                    + (values[first].join(", ") || "inconnu")
+                    + describeValues(key, first, values[first] || [])
                     + " / " + second + " : "
-                    + (values[second].join(", ") || "inconnu"));
+                    + describeValues(key, second, values[second] || []));
             if (output) output.textContent =
                 "Points communs\\n" + (shared.join("\\n") || "Aucun connu")
                 + "\\n\\nDifférences connues\\n"

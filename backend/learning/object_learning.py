@@ -159,14 +159,18 @@ def teach_object_property(
                WHEN object_properties.source_type='confirmed'
                     AND excluded.source_type<>'confirmed'
                THEN object_properties.source_type
-               ELSE excluded.source_type
+               WHEN excluded.confidence >= object_properties.confidence
+               THEN excluded.source_type
+               ELSE object_properties.source_type
              END,
              confidence=MAX(object_properties.confidence, excluded.confidence),
              evidence=CASE
                WHEN object_properties.source_type='confirmed'
                     AND excluded.source_type<>'confirmed'
                THEN object_properties.evidence
-               ELSE excluded.evidence
+               WHEN excluded.confidence >= object_properties.confidence
+               THEN excluded.evidence
+               ELSE object_properties.evidence
              END,
              updated_at=excluded.updated_at""",
         (user_id, object_id, key, value, source_type, confidence, evidence, now, now),

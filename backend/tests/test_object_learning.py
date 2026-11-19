@@ -299,3 +299,33 @@ def test_world_relations_are_scoped_to_the_owning_user(db):
             db, "other", "person:julien", "place:home",
             relation_type="lives_at",
         )
+
+
+def test_lower_confidence_object_observation_cannot_replace_stronger_evidence(db):
+    add_recognized_object(db, "pomme")
+    taught = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Enseignement détaillé du créateur.",
+        confidence=0.9, source_type="taught",
+    )
+    observed = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Observation visuelle moins fiable.",
+        confidence=0.2, source_type="observed",
+    )
+
+    assert taught["source_type"] == "taught"
+    assert observed["source_type"] == "taught"
+    assert observed["confidence"] == pytest.approx(0.9)
+    assert observed["evidence"] == "Enseignement détaillé du créateur."
+
+    stored = db.execute(
+        """SELECT source_type, confidence, evidence FROM object_properties
+           WHERE user_id=? AND object_id=? AND property_key=? AND property_value=?""",
+        ("creator", "object:pomme", "couleur", "rouge"),
+    ).fetchone()
+    assert dict(stored) == {
+        "source_type": "taught",
+        "confidence": pytest.approx(0.9),
+        "evidence": "Enseignement détaillé du créateur.",
+    }

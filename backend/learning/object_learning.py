@@ -154,9 +154,21 @@ def teach_object_property(
             confidence, evidence, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(user_id, object_id, property_key, property_value)
-           DO UPDATE SET source_type=excluded.source_type,
+           DO UPDATE SET
+             source_type=CASE
+               WHEN object_properties.source_type='confirmed'
+                    AND excluded.source_type<>'confirmed'
+               THEN object_properties.source_type
+               ELSE excluded.source_type
+             END,
              confidence=MAX(object_properties.confidence, excluded.confidence),
-             evidence=excluded.evidence, updated_at=excluded.updated_at""",
+             evidence=CASE
+               WHEN object_properties.source_type='confirmed'
+                    AND excluded.source_type<>'confirmed'
+               THEN object_properties.evidence
+               ELSE excluded.evidence
+             END,
+             updated_at=excluded.updated_at""",
         (user_id, object_id, key, value, source_type, confidence, evidence, now, now),
     )
     row = db.execute(
@@ -216,21 +228,35 @@ def compare_known_objects(
     second_word, second_id = _require_known_object(db, user_id, second_word)
     if first_id == second_id:
         raise ValueError("Choisis deux objets différents.")
-    def load(object_id: str) -> dict[str, set[str]]:
+    def load(object_id: str) -> dict[str, list[dict[str, Any]]]:
         rows = db.execute(
-            """SELECT property_key, property_value FROM object_properties
-               WHERE user_id=? AND object_id=?""",
+            """SELECT property_key, property_value, source_type, confidence, evidence
+               FROM object_properties
+               WHERE user_id=? AND object_id=?
+               ORDER BY property_key, property_value""",
             (user_id, object_id),
         ).fetchall()
-        result: dict[str, set[str]] = {}
+        result: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            result.setdefault(row["property_key"], set()).add(row["property_value"])
+            result.setdefault(row["property_key"], []).append({
+                "value": row["property_value"],
+                "source_type": row["source_type"],
+                "confidence": row["confidence"],
+                "evidence": row["evidence"],
+            })
         return result
     first, second = load(first_id), load(second_id)
+    first_values = {key: {item["value"] for item in items} for key, items in first.items()}
+    second_values = {key: {item["value"] for item in items} for key, items in second.items()}
     shared = {}
     differences = {}
+    property_details = {}
     for key in sorted(set(first) | set(second)):
-        a, b = first.get(key, set()), second.get(key, set())
+        a, b = first_values.get(key, set()), second_values.get(key, set())
+        property_details[key] = {
+            first_word: first.get(key, []),
+            second_word: second.get(key, []),
+        }
         common = sorted(a & b)
         only_a, only_b = sorted(a - b), sorted(b - a)
         if common:
@@ -245,7 +271,8 @@ def compare_known_objects(
         "second": second_word,
         "shared_properties": shared,
         "differences": differences,
-        "compared_property_count": len(set(first) | set(second)),
+        "property_details": property_details,
+        "compared_property_count": len(set(first_values) | set(second_values)),
         "warning": "Une propriété absente signifie inconnue, pas opposée.",
     }
 

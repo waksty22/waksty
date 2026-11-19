@@ -171,7 +171,9 @@ def get_shared_brain_snapshot(
         raise ValueError("Identifiant utilisateur invalide.")
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise ValueError("La limite doit être un entier.")
-    limit = max(1, min(limit, MAX_LIMIT))
+    if limit < 1:
+        raise ValueError("La limite doit être un entier positif.")
+    limit = min(limit, MAX_LIMIT)
 
     data: dict[str, Any] = {}
     totals: dict[str, int] = {}

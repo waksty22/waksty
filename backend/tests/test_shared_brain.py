@@ -175,7 +175,7 @@ def test_context_keeps_statistics_and_all_records_when_under_budget():
 
 def test_snapshot_rejects_coerced_limits_and_invalid_user_ids():
     db = make_db()
-    for invalid_limit in (True, False, 1.5, "5", None):
+    for invalid_limit in (True, False, 1.5, "5", None, 0, -1):
         try:
             get_shared_brain_snapshot(db, "creator", limit=invalid_limit)
         except ValueError:

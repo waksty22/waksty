@@ -96,8 +96,9 @@ def sync_autobiographical_events(
         )
         inserted += max(0, cursor.rowcount)
 
-    # Relie uniquement les deux messages qui partagent exactement l'horodatage
-    # créé par save_conversation_turn : c'est un lien de dialogue, pas de sens.
+    # Relie uniquement les messages user/assistant consécutifs du même tour.
+    # L'horodatage seul ne suffit pas : deux tours distincts peuvent partager
+    # le même timestamp (résolution de l'horloge ou écritures rapprochées).
     db.execute(
         """
         INSERT OR IGNORE INTO autobiographical_links
@@ -106,6 +107,7 @@ def sync_autobiographical_events(
         FROM autobiographical_events u
         JOIN autobiographical_events a
           ON a.user_id=u.user_id
+         AND a.source_conversation_id=u.source_conversation_id + 1
          AND a.happened_at=u.happened_at
          AND a.actor='assistant'
         WHERE u.user_id=? AND u.actor='user'

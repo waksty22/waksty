@@ -183,7 +183,6 @@ def associate_word_with_observation(
         db.execute(
             """UPDATE personal_vocabulary
                SET state='recognized',
-                   evidence='Mot associé à une observation visuelle validée',
                    updated_at=?
                WHERE user_id=? AND word=? AND state='imitated'""",
             (now, user_id, word),

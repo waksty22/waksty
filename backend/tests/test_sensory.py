@@ -83,6 +83,38 @@ def test_visual_association_rejects_non_text_or_blank_evidence(db, invalid_evide
         )
 
 
+def test_visual_recognition_preserves_imitation_evidence_and_stores_visual_proof(db):
+    record_heard_word(db, "creator", "coq", "Exposition initiale")
+    advance_word(
+        db, "creator", "coq", "imitated",
+        evidence="Chappie a imité le mot coq à voix haute.",
+    )
+    observation = record_observation(
+        db, "creator", "vision", "Un coq dans le jardin.",
+        "camera_snapshot", confidence=0.45,
+    )
+
+    result = associate_word_with_observation(
+        db, "creator", "coq", observation["observation_id"],
+        "Le créateur confirme que l'image représente un coq.",
+    )
+
+    vocabulary = db.execute(
+        "SELECT state, evidence FROM personal_vocabulary WHERE user_id=? AND word=?",
+        ("creator", "coq"),
+    ).fetchone()
+    association = db.execute(
+        """SELECT evidence FROM word_visual_associations
+           WHERE user_id=? AND word=? AND observation_id=?""",
+        ("creator", "coq", observation["observation_id"]),
+    ).fetchone()
+
+    assert result["vocabulary_state"] == "recognized"
+    assert vocabulary["state"] == "recognized"
+    assert vocabulary["evidence"] == "Chappie a imité le mot coq à voix haute."
+    assert association["evidence"] == "Le créateur confirme que l'image représente un coq."
+
+
 def test_observations_are_isolated_by_user(db):
     observation = record_observation(
         db, "creator", "vision", "Objet rouge", "camera_snapshot"

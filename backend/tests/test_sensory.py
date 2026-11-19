@@ -25,6 +25,23 @@ def db():
     connection.close()
 
 
+
+@pytest.mark.parametrize(
+    "invalid_confidence",
+    [float("nan"), float("inf"), float("-inf"), "nan", "inf", "-inf"],
+)
+def test_observation_rejects_non_finite_confidence_without_writing(
+    db, invalid_confidence
+):
+    with pytest.raises(ValueError, match="confiance|Confiance"):
+        record_observation(
+            db, "creator", "vision", "Objet", "camera",
+            confidence=invalid_confidence,
+        )
+    assert db.execute(
+        "SELECT COUNT(*) FROM sensory_observations"
+    ).fetchone()[0] == 0
+
 def test_audio_observation_is_persisted_without_claiming_understanding(db):
     from learning.language import record_heard_text
 

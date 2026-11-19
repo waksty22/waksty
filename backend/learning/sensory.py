@@ -6,6 +6,7 @@ automatically promoted into personal vocabulary or factual knowledge.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -73,8 +74,8 @@ def record_observation(
         confidence = float(confidence)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("Confiance sensorielle invalide.") from exc
-    if not 0.0 <= confidence <= 1.0:
-        raise ValueError("La confiance doit être comprise entre 0 et 1.")
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        raise ValueError("La confiance doit être un nombre fini compris entre 0 et 1.")
     if not isinstance(source, str):
         raise ValueError("La source de l’observation doit être du texte.")
     source = source.strip()

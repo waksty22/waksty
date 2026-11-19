@@ -18,7 +18,7 @@ from learning.object_learning import (
 from learning.sensory import (
     init_sensory_tables, record_observation, associate_word_with_observation,
 )
-from world.world_model import init_world_tables, upsert_world_entity
+from world.world_model import init_world_tables, upsert_world_entity, add_world_relation
 
 
 @pytest.fixture
@@ -248,3 +248,54 @@ def test_confirmed_world_entity_cannot_be_overwritten_by_higher_confidence_obser
     properties = json.loads(row["properties_json"])
     assert properties["label"] == "Pomme vérifiée"
     assert properties["verified_detail"] == "confirmé"
+
+
+def test_confirmed_world_relation_cannot_be_downgraded_by_higher_confidence_observation(db):
+    upsert_world_entity(
+        db, "creator", "person:julien", "person",
+        {"label": "Julien"}, source_type="taught", confidence=0.7,
+    )
+    upsert_world_entity(
+        db, "creator", "place:home", "place",
+        {"label": "Maison"}, source_type="taught", confidence=0.7,
+    )
+
+    confirmed = add_world_relation(
+        db, "creator", "person:julien", "place:home",
+        relation_type="lives_at", source_type="confirmed", confidence=0.7,
+    )
+    assert confirmed["source_type"] == "confirmed"
+
+    observed = add_world_relation(
+        db, "creator", "person:julien", "place:home",
+        relation_type="lives_at", source_type="observed", confidence=0.99,
+    )
+    assert observed["source_type"] == "confirmed"
+    assert observed["confidence"] == pytest.approx(0.99)
+
+    row = db.execute(
+        """
+        SELECT source_type, confidence
+        FROM world_relations
+        WHERE user_id=? AND subject_id=? AND predicate=? AND object_id=?
+        """,
+        ("creator", "person:julien", "lives_at", "place:home"),
+    ).fetchone()
+    assert row["source_type"] == "confirmed"
+    assert row["confidence"] == pytest.approx(0.99)
+
+
+def test_world_relations_are_scoped_to_the_owning_user(db):
+    upsert_world_entity(
+        db, "creator", "person:julien", "person",
+        {"label": "Julien"}, source_type="taught",
+    )
+    upsert_world_entity(
+        db, "creator", "place:home", "place",
+        {"label": "Maison"}, source_type="taught",
+    )
+    with pytest.raises(ValueError, match="n'existe pas"):
+        add_world_relation(
+            db, "other", "person:julien", "place:home",
+            relation_type="lives_at",
+        )

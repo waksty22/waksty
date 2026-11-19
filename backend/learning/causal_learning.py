@@ -291,23 +291,40 @@ def review_causal_learning(
     reviewed: list[dict[str, Any]] = []
     for hypothesis_row in hypotheses:
         hypothesis = dict(hypothesis_row)
+        hypothesis_id = int(hypothesis["id"])
+        aggregate = db.execute(
+            """
+            SELECT COUNT(*) AS total_count,
+                   SUM(CASE WHEN status='completed' AND evaluation='supported' THEN 1 ELSE 0 END) AS supported_count,
+                   SUM(CASE WHEN status='completed' AND evaluation='contradicted' THEN 1 ELSE 0 END) AS contradicted_count,
+                   SUM(CASE WHEN status='completed' AND evaluation='inconclusive' THEN 1 ELSE 0 END) AS inconclusive_count,
+                   SUM(CASE WHEN status='planned' THEN 1 ELSE 0 END) AS planned_count
+            FROM causal_experiments
+            WHERE user_id=? AND hypothesis_id=?
+            """,
+            (user_id, hypothesis_id),
+        ).fetchone()
+        total_count = int(aggregate["total_count"] or 0)
+        counts = {
+            "supported": int(aggregate["supported_count"] or 0),
+            "contradicted": int(aggregate["contradicted_count"] or 0),
+            "inconclusive": int(aggregate["inconclusive_count"] or 0),
+        }
+        planned_count = int(aggregate["planned_count"] or 0)
         experiments = db.execute(
             """
             SELECT id, environment, procedure, prediction, status, result,
                    evaluation, created_at, completed_at
             FROM causal_experiments
             WHERE user_id=? AND hypothesis_id=?
-            ORDER BY id ASC
+            ORDER BY id DESC
             LIMIT 200
             """,
-            (user_id, int(hypothesis["id"])),
+            (user_id, hypothesis_id),
         ).fetchall()
-        history = [dict(row) for row in experiments]
-        counts = {
-            key: sum(1 for item in history
-                     if item["status"] == "completed" and item["evaluation"] == key)
-            for key in ALLOWED_RESULTS
-        }
+        # Keep the most recent bounded detail window in chronological order;
+        # aggregate counts and planned-state checks always cover the full history.
+        history = list(reversed([dict(row) for row in experiments]))
         if counts["supported"] and counts["contradicted"]:
             assessment = "mixed_evidence"
         elif counts["contradicted"]:
@@ -316,13 +333,16 @@ def review_causal_learning(
             assessment = "supported_by_recorded_tests"
         elif counts["inconclusive"]:
             assessment = "inconclusive"
-        elif any(item["status"] == "planned" for item in history):
+        elif planned_count:
             assessment = "awaiting_evaluation"
         else:
             assessment = "not_tested"
 
         hypothesis["evaluation_history"] = history
         hypothesis["evidence_counts"] = counts
+        hypothesis["total_experiments"] = total_count
+        hypothesis["planned_experiments_count"] = planned_count
+        hypothesis["history_truncated"] = total_count > len(history)
         hypothesis["evidence_assessment"] = assessment
         hypothesis["confidence_note"] = (
             "Score interne ajusté par les évaluations successives ; "
@@ -421,7 +441,7 @@ def suggest_supervised_learning_agenda(
 
     for hypothesis in review["hypotheses"]:
         history = hypothesis["evaluation_history"]
-        if any(item["status"] == "planned" for item in history):
+        if hypothesis.get("planned_experiments_count", 0) > 0:
             continue
         assessment = hypothesis["evidence_assessment"]
         if assessment == "mixed_evidence":

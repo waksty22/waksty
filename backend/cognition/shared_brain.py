@@ -58,6 +58,11 @@ def _decode_json_fields(item: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def _is_missing_table_error(error: sqlite3.OperationalError, table: str) -> bool:
+    message = str(error).casefold()
+    return "no such table" in message and table.casefold() in message
+
+
 def _rows(
     db: sqlite3.Connection,
     table: str,
@@ -70,19 +75,25 @@ def _rows(
             f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
             (user_id, limit),
         ).fetchall()
-    except sqlite3.OperationalError:
-        # Read legacy rows until startup migration copies them into memories_v19.
-        if table == "memories_v19":
+    except sqlite3.OperationalError as exc:
+        # Missing optional tables are expected during legacy migrations.
+        # Missing columns, locks, and other operational failures must surface:
+        # silently returning [] would make Chappie appear to have forgotten data.
+        if table == "memories_v19" and _is_missing_table_error(exc, table):
             try:
                 rows = db.execute(
                     "SELECT * FROM memories WHERE user_id=? "
                     "ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ?",
                     (user_id, limit),
                 ).fetchall()
-            except sqlite3.OperationalError:
-                return []
-        else:
+            except sqlite3.OperationalError as legacy_exc:
+                if _is_missing_table_error(legacy_exc, "memories"):
+                    return []
+                raise
+        elif _is_missing_table_error(exc, table):
             return []
+        else:
+            raise
     decoded_rows: list[dict[str, Any]] = []
     for raw_row in rows:
         item = _decode_json_fields(dict(raw_row))
@@ -132,15 +143,19 @@ def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
         return int(db.execute(
             f"SELECT COUNT(*) FROM {table} WHERE user_id=?", (user_id,)
         ).fetchone()[0])
-    except sqlite3.OperationalError:
-        if table == "memories_v19":
+    except sqlite3.OperationalError as exc:
+        if table == "memories_v19" and _is_missing_table_error(exc, table):
             try:
                 return int(db.execute(
                     "SELECT COUNT(*) FROM memories WHERE user_id=?", (user_id,)
                 ).fetchone()[0])
-            except sqlite3.OperationalError:
-                return 0
-        return 0
+            except sqlite3.OperationalError as legacy_exc:
+                if _is_missing_table_error(legacy_exc, "memories"):
+                    return 0
+                raise
+        if _is_missing_table_error(exc, table):
+            return 0
+        raise
 
 
 def get_shared_brain_snapshot(

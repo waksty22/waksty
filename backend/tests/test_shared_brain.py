@@ -63,6 +63,38 @@ def test_snapshot_unifies_persisted_modules_without_promoting_observations():
     db.close()
 
 
+def test_snapshot_surfaces_schema_errors_instead_of_silently_hiding_data():
+    db = make_db()
+    db.execute("DROP TABLE personal_vocabulary")
+    db.execute(
+        "CREATE TABLE personal_vocabulary "
+        "(user_id TEXT, word TEXT, state TEXT)"
+    )
+
+    try:
+        get_shared_brain_snapshot(db, "creator")
+    except sqlite3.OperationalError as exc:
+        assert "no such column" in str(exc).casefold()
+    else:
+        raise AssertionError("A broken existing table must not look like empty vocabulary")
+    db.close()
+
+
+def test_memories_v19_schema_error_does_not_fall_back_to_legacy_memories():
+    db = make_db()
+    db.execute(
+        "CREATE TABLE memories_v19 (id INTEGER, user_id TEXT, category TEXT, content TEXT)"
+    )
+
+    try:
+        get_shared_brain_snapshot(db, "creator")
+    except sqlite3.OperationalError as exc:
+        assert "no such column" in str(exc).casefold()
+    else:
+        raise AssertionError("A broken V19 memory table must not be hidden by legacy fallback")
+    db.close()
+
+
 def test_snapshot_is_scoped_to_user():
     db = make_db()
     db.execute(

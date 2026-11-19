@@ -685,6 +685,9 @@ def add_world_relation(
         DO UPDATE SET
 
             source_type = CASE
+                WHEN world_relations.source_type = 'confirmed'
+                     AND excluded.source_type <> 'confirmed'
+                THEN world_relations.source_type
                 WHEN excluded.confidence >= world_relations.confidence
                 THEN excluded.source_type
                 ELSE world_relations.source_type

@@ -464,18 +464,27 @@ def upsert_world_entity(
         ON CONFLICT(id) DO UPDATE SET
 
             entity_type = CASE
+                WHEN world_entities.source_type = 'confirmed'
+                     AND excluded.source_type <> 'confirmed'
+                THEN world_entities.entity_type
                 WHEN excluded.confidence >= world_entities.confidence
                 THEN excluded.entity_type
                 ELSE world_entities.entity_type
             END,
 
             properties_json = CASE
+                WHEN world_entities.source_type = 'confirmed'
+                     AND excluded.source_type <> 'confirmed'
+                THEN world_entities.properties_json
                 WHEN excluded.confidence >= world_entities.confidence
                 THEN excluded.properties_json
                 ELSE world_entities.properties_json
             END,
 
             source_type = CASE
+                WHEN world_entities.source_type = 'confirmed'
+                     AND excluded.source_type <> 'confirmed'
+                THEN world_entities.source_type
                 WHEN excluded.confidence >= world_entities.confidence
                 THEN excluded.source_type
                 ELSE world_entities.source_type

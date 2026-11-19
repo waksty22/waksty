@@ -41,7 +41,10 @@ init_perception_fusion_tables(db)
 record_heard_word(db, "owner", "pomme", "Entendu pendant la session 1")
 advance_word(db, "owner", "pomme", "imitated")
 vision = record_observation(db, "owner", "vision", "Une pomme rouge.", "camera_test")
-associate_word_with_observation(db, "owner", "pomme", vision["observation_id"])
+associate_word_with_observation(
+    db, "owner", "pomme", vision["observation_id"],
+    evidence="Association explicite de test",
+)
 audio = record_observation(db, "owner", "audio", "Le mot pomme.", "micro_test")
 stamp = "2026-01-01T12:00:00+00:00"
 db.execute("UPDATE sensory_observations SET created_at=? WHERE observation_id IN (?, ?)",

@@ -40,3 +40,27 @@ Après fusion sur `main` et ajout des secrets :
 5. réaliser périodiquement un exercice de restauration sur une base de test isolée.
 
 Le workflow ne modifie jamais les tables Turso : il effectue uniquement des lectures et produit un artefact chiffré.
+
+
+
+## Limites de restauration vérifiées
+
+La sauvegarde quotidienne et la restauration distante sont deux contrôles distincts :
+
+- Le workflow quotidien chiffre l'instantané, vérifie son checksum et son authenticité, puis reconstruit les données dans une base SQLite temporaire. Cela valide l'archive et sa reconstruction locale, pas un import dans Turso.
+- Le workflow `.github/workflows/chappie-full-schema-isolated-e2e.yml` exécute un test séparé sur une base Turso de test explicitement autorisée. Il crée son propre jeu de données de test et son propre instantané chiffré ; il vérifie le refus d'une cible déjà remplie, la restauration dans la cible de test vide, les lignes, les clés étrangères, la reconnexion distante et l'adaptateur libSQL.
+- Ce test E2E **ne restaure pas l'artefact quotidien réel** et n'écrit jamais dans la base configurée pour la production. L'URL de production ne sert qu'à vérifier que la cible de test est différente.
+
+### Ce qui reste à faire avant de parler de restauration opérationnelle
+
+Il n'existe pas encore de procédure/outil général validé pour restaurer l'artefact quotidien réel vers une base Turso de récupération. Il faudra :
+1. télécharger un artefact quotidien précis et vérifier son checksum ;
+2. le restaurer dans une base Turso de récupération distincte ;
+3. vérifier le schéma, toutes les lignes, les contraintes et la lecture via les chemins applicatifs ;
+4. documenter le rapport et les limites avant toute décision de restauration de production.
+
+**Ne jamais utiliser `chappie-db` comme cible d'essai.** Une restauration de production reste une opération séparée, avec validation explicite de la cible et autorisation de l'opérateur.
+
+### Dernière sauvegarde observée
+
+Le 19 novembre 2026, le workflow de sauvegarde a terminé avec succès : 42 tables et 81 lignes ont été exportées dans l'archive chiffrée, puis la vérification après empaquetage a réussi. L'artefact GitHub Actions observé était conservé jusqu'au 17 février 2027. Cette réussite ne change pas les limites de restauration décrites ci-dessus.

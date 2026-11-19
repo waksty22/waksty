@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -182,3 +183,68 @@ def test_object_learning_rejects_invalid_user_identity(db, invalid_user_id):
         teach_object_property(
             db, invalid_user_id, "pomme", "couleur", "rouge"
         )
+
+
+
+def test_confirmed_object_property_cannot_be_downgraded_by_later_teaching(db):
+    add_recognized_object(db, "pomme")
+    confirmed = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Confirmation explicite après vérification.",
+        confidence=0.8, source_type="confirmed",
+    )
+    assert confirmed["source_type"] == "confirmed"
+
+    updated = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Nouvelle répétition de l'enseignement.",
+        confidence=0.99, source_type="taught",
+    )
+    assert updated["source_type"] == "confirmed"
+    assert updated["evidence"] == "Confirmation explicite après vérification."
+    assert updated["confidence"] == 0.99
+
+
+def test_comparison_returns_provenance_and_confidence_for_each_value(db):
+    add_recognized_object(db, "pomme")
+    add_recognized_object(db, "banane")
+    teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        confidence=0.9, source_type="taught",
+    )
+    teach_object_property(
+        db, "creator", "banane", "couleur", "jaune",
+        confidence=0.6, source_type="observed",
+    )
+
+    result = compare_known_objects(db, "creator", "pomme", "banane")
+    details = result["property_details"]["couleur"]
+    assert details["pomme"][0]["value"] == "rouge"
+    assert details["pomme"][0]["source_type"] == "taught"
+    assert details["pomme"][0]["confidence"] == 0.9
+    assert details["banane"][0]["value"] == "jaune"
+    assert details["banane"][0]["source_type"] == "observed"
+    assert details["banane"][0]["confidence"] == 0.6
+
+
+def test_confirmed_world_entity_cannot_be_overwritten_by_higher_confidence_observation(db):
+    add_recognized_object(db, "pomme")
+    upsert_world_entity(
+        db, "creator", "object:pomme", "object",
+        {"label": "Pomme vérifiée", "verified_detail": "confirmé"},
+        source_type="confirmed", confidence=0.8,
+    )
+
+    upsert_world_entity(
+        db, "creator", "object:pomme", "object",
+        {"label": "Pomme simplement observée"},
+        source_type="observed", confidence=0.99,
+    )
+    row = db.execute(
+        "SELECT source_type, properties_json FROM world_entities WHERE id=? AND user_id=?",
+        ("object:pomme", "creator"),
+    ).fetchone()
+    assert row["source_type"] == "confirmed"
+    properties = json.loads(row["properties_json"])
+    assert properties["label"] == "Pomme vérifiée"
+    assert properties["verified_detail"] == "confirmé"

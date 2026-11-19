@@ -437,3 +437,30 @@ def test_duplicate_memory_save_preserves_existing_provenance_and_confidence():
     assert row["source_type"] == "taught"
     assert row["confidence"] == 0.91
     db.close()
+
+
+
+def test_episodic_retrieval_matches_complete_tokens_not_substrings():
+    from memory.episodic_memory import (
+        init_memory_tables, save_episodic_memory, search_episodic_memories,
+    )
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    save_episodic_memory(
+        db, "creator", "Nous partageons une information importante.",
+        category="general", importance=5,
+    )
+    save_episodic_memory(
+        db, "creator", "L'art est un sujet différent.",
+        category="general", importance=1,
+    )
+    db.commit()
+
+    results = search_episodic_memories(db, "creator", "art", limit=5)
+
+    assert len(results) == 1
+    assert results[0]["content"] == "L'art est un sujet différent."
+    assert results[0]["relevance_score"] > 0
+    db.close()

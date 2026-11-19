@@ -33,6 +33,26 @@ def make_audio_and_vision(db):
     return audio, vision
 
 
+
+@pytest.mark.parametrize("window_seconds", [0, -1, -300])
+def test_temporal_fusion_rejects_non_positive_window(db, window_seconds):
+    _, vision = make_audio_and_vision(db)
+    with pytest.raises(ValueError, match="fenêtre temporelle"):
+        link_temporally_cooccurring_observation(
+            db, "creator", vision["observation_id"],
+            window_seconds=window_seconds,
+        )
+    assert db.execute(
+        "SELECT COUNT(*) FROM perception_fusion_candidates"
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("limit", [0, -1, -100])
+def test_listing_fusions_rejects_non_positive_limit(db, limit):
+    with pytest.raises(ValueError, match="limite"):
+        list_perception_fusions(db, "creator", limit=limit)
+
+
 def test_temporal_fusion_is_only_a_candidate_and_reports_persisted_state(db):
     audio, vision = make_audio_and_vision(db)
 

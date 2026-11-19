@@ -55,7 +55,9 @@ def link_temporally_cooccurring_observation(
         raise ValueError("Identifiant d’observation invalide.")
     if isinstance(window_seconds, bool) or not isinstance(window_seconds, int):
         raise ValueError("La fenêtre temporelle doit être un entier.")
-    window = max(1, min(window_seconds, MAX_WINDOW_SECONDS))
+    if window_seconds < 1:
+        raise ValueError("La fenêtre temporelle doit être au moins égale à une seconde.")
+    window = min(window_seconds, MAX_WINDOW_SECONDS)
     current = db.execute(
         """SELECT observation_id, modality, content, created_at
            FROM sensory_observations
@@ -145,7 +147,9 @@ def list_perception_fusions(
         raise ValueError("Identifiant utilisateur invalide.")
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise ValueError("La limite doit être un entier.")
-    limit = max(1, min(limit, 100))
+    if limit < 1:
+        raise ValueError("La limite doit être un entier positif.")
+    limit = min(limit, 100)
     rows = db.execute(
         """SELECT id,audio_observation_id,vision_observation_id,
                   time_delta_seconds,status,evidence_json,created_at

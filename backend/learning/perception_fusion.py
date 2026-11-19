@@ -105,7 +105,7 @@ def link_temporally_cooccurring_observation(
             "audio_excerpt": (current["content"] if current["modality"] == "audio" else other["content"])[:500],
             "vision_excerpt": (current["content"] if current["modality"] == "vision" else other["content"])[:500],
         }
-        db.execute(
+        cursor = db.execute(
             """INSERT OR IGNORE INTO perception_fusion_candidates
                (user_id,audio_observation_id,vision_observation_id,
                 time_delta_seconds,status,evidence_json,created_at)
@@ -113,12 +113,25 @@ def link_temporally_cooccurring_observation(
             (user_id, audio_id, vision_id, delta,
              json.dumps(evidence, ensure_ascii=False), _now().isoformat()),
         )
+        persisted = db.execute(
+            """SELECT id, status
+               FROM perception_fusion_candidates
+               WHERE user_id=? AND audio_observation_id=?
+                 AND vision_observation_id=?""",
+            (user_id, audio_id, vision_id),
+        ).fetchone()
+        if persisted is None:
+            # Defensive fail-closed path: never report a candidate that was
+            # not actually persisted.
+            continue
         created.append({
+            "id": persisted["id"],
             "audio_observation_id": audio_id,
             "vision_observation_id": vision_id,
             "time_delta_seconds": round(delta, 3),
-            "status": "candidate",
-            "requires_validation": True,
+            "status": persisted["status"],
+            "created": cursor.rowcount == 1,
+            "requires_validation": persisted["status"] == "candidate",
         })
     return created
 

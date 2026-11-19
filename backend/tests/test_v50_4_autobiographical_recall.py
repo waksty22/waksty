@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from memory.autobiographical import (
     init_autobiographical_tables,
+    sync_autobiographical_events,
     search_autobiographical_events,
 )
 
@@ -104,4 +105,58 @@ def test_autobiographical_search_empty_or_stopword_only_query_is_safe():
 
     assert search_autobiographical_events(db, "creator", "") == []
     assert search_autobiographical_events(db, "creator", "et ou le") == []
+    db.close()
+
+
+def test_autobiographical_links_pair_consecutive_messages_not_shared_timestamps():
+    db = make_db()
+    timestamp = "2026-11-19T10:00:00+00:00"
+    db.executemany(
+        "INSERT INTO conversations(id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+        [
+            (1, "creator", "user", "Premier message", timestamp),
+            (2, "creator", "assistant", "Première réponse", timestamp),
+            (3, "creator", "user", "Deuxième message", timestamp),
+            (4, "creator", "assistant", "Deuxième réponse", timestamp),
+        ],
+    )
+
+    result = sync_autobiographical_events(db, "creator")
+
+    links = db.execute(
+        """
+        SELECT u.source_conversation_id AS user_source,
+               a.source_conversation_id AS assistant_source
+        FROM autobiographical_links l
+        JOIN autobiographical_events u ON u.id=l.source_event_id
+        JOIN autobiographical_events a ON a.id=l.target_event_id
+        WHERE l.user_id='creator'
+        ORDER BY u.source_conversation_id
+        """
+    ).fetchall()
+
+    assert result["inserted"] == 4
+    assert [(row["user_source"], row["assistant_source"]) for row in links] == [
+        (1, 2), (3, 4)
+    ]
+    db.close()
+
+
+def test_autobiographical_link_does_not_pair_nonconsecutive_messages():
+    db = make_db()
+    timestamp = "2026-11-19T10:00:00+00:00"
+    db.executemany(
+        "INSERT INTO conversations(id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+        [
+            (1, "creator", "user", "Question", timestamp),
+            (2, "creator", "user", "Autre question", timestamp),
+            (3, "creator", "assistant", "Réponse", timestamp),
+        ],
+    )
+
+    sync_autobiographical_events(db, "creator")
+
+    assert db.execute(
+        "SELECT COUNT(*) FROM autobiographical_links WHERE user_id='creator'"
+    ).fetchone()[0] == 0
     db.close()

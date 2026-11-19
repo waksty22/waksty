@@ -35,6 +35,28 @@ def test_new_word_is_only_repeatable_after_it_is_heard(language_db):
     assert gate_spoken_text("montre coq", get_repeatable_words(language_db, "creator")) == "montre"
 
 
+def test_repeated_exposure_does_not_overwrite_learning_evidence(language_db):
+    record_heard_word(
+        language_db, "creator", "coq", "Première exposition"
+    )
+    advance_word(
+        language_db, "creator", "coq", "imitated",
+        evidence="Imitation validée par le créateur",
+    )
+    advance_word(
+        language_db, "creator", "coq", "recognized",
+        evidence="Association visuelle validée avec une photo",
+    )
+
+    updated = record_heard_word(
+        language_db, "creator", "coq", "Nouvelle exposition dans une phrase"
+    )
+
+    assert updated["state"] == "recognized"
+    assert updated["evidence"] == "Association visuelle validée avec une photo"
+    assert updated["exposure_count"] == 2
+
+
 def test_word_requires_stepwise_learning(language_db):
     record_heard_word(language_db, "creator", "coq")
 

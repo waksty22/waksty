@@ -76,7 +76,13 @@ def record_heard_word(
                  THEN personal_vocabulary.exposure_count+1
                  ELSE personal_vocabulary.exposure_count
              END,
-             evidence=excluded.evidence,
+             -- Repeated exposure must not erase evidence supporting a
+             -- definition or a later validated learning state.
+             evidence=CASE
+                 WHEN personal_vocabulary.evidence=''
+                 THEN excluded.evidence
+                 ELSE personal_vocabulary.evidence
+             END,
              updated_at=excluded.updated_at""",
         (user_id, clean, evidence[:500], now, now),
     )

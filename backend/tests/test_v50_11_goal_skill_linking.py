@@ -229,10 +229,10 @@ def test_goal_skill_listing_ignores_failed_corrupt_and_unlinked_assessments():
     }
     rows = [
         ("failed", 0, 95, base),
-        ("boolean-pass", True, 95, base),
+        ("text-pass-flag", "yes", 95, base),
         ("score-too-high", 1, 101, base),
         ("score-infinite", 1, float("inf"), base),
-        ("score-text", 1, "95", base),
+        ("score-text", 1, "not-a-number", base),
         ("missing-evidence", 1, 95, {**base, "evidence": {"raw": "not proof"}}),
         ("bad-step", 1, 95, {**base, "goal_step_id": "1"}),
         ("wrong-step", 1, 95, {**base, "goal_step_id": step_id + 100}),

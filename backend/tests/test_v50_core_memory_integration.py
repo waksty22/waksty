@@ -370,3 +370,13 @@ def test_shared_brain_memory_survives_local_libsql_reconnect(tmp_path):
         assert snapshot["statistics"]["totals"]["sensory_observations"] == 1
     finally:
         second.close()
+
+
+
+def test_live_policy_refreshes_shared_brain_when_session_context_may_be_stale():
+    import server
+
+    policy = server.IDENTITY_SYSTEM_INSTRUCTION
+    assert "contexte initial d'une session Live" in policy
+    assert "get_shared_brain_state" in policy
+    assert "avant de répondre" in policy

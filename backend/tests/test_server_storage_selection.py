@@ -1389,3 +1389,35 @@ def test_server_db_connection_closes_sqlite_handle_after_context_exit(
 
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
         connection.execute("SELECT 1")
+
+
+
+def test_perception_review_endpoint_rejects_invalid_json_before_database_access(
+    monkeypatch,
+):
+    import asyncio
+    import server
+
+    class JsonRequest:
+        def __init__(self, value=None, error=None):
+            self.value = value
+            self.error = error
+
+        async def json(self):
+            if self.error is not None:
+                raise self.error
+            return self.value
+
+    monkeypatch.setattr(server, "_authenticated_user", lambda auth: "creator")
+    monkeypatch.setattr(
+        server, "db_connection",
+        lambda: pytest.fail("La base ne doit pas être ouverte pour un corps invalide."),
+    )
+
+    for request in (
+        JsonRequest(value=["confirm", "evidence"]),
+        JsonRequest(error=ValueError("JSON invalide")),
+    ):
+        with pytest.raises(server.HTTPException) as exc:
+            asyncio.run(server.api_review_perception_fusion(1, request, "creator"))
+        assert exc.value.status_code == 422

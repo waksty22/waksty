@@ -216,3 +216,34 @@ def test_assessment_duplicate_guard_ignores_non_object_historical_details():
     assert 'old_evidence = old_details.get("evidence")' in route
     assert 'isinstance(old_evidence, str)' in route
     assert 'normalize_evidence_text(old_evidence) == normalize_evidence_text(evidence)' in route
+
+def test_goal_skill_listing_ignores_failed_corrupt_and_unlinked_assessments():
+    db = make_db()
+    goal_id, step_id = seed_goal(db)
+    base = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Preuve documentée et vérifiable sur plusieurs essais.",
+        "goal_id": goal_id,
+        "goal_step_id": step_id,
+    }
+    rows = [
+        ("failed", 0, 95, base),
+        ("boolean-pass", True, 95, base),
+        ("score-too-high", 1, 101, base),
+        ("score-nan", 1, float("nan"), base),
+        ("score-text", 1, "95", base),
+        ("missing-evidence", 1, 95, {**base, "evidence": {"raw": "not proof"}}),
+        ("bad-step", 1, 95, {**base, "goal_step_id": "1"}),
+        ("wrong-step", 1, 95, {**base, "goal_step_id": step_id + 100}),
+    ]
+    for index, (name, passed, score, details) in enumerate(rows, start=1):
+        db.execute(
+            """INSERT INTO competency_tests
+               (user_id,test_name,passed,score,details,tested_at)
+               VALUES('creator',?,?,?,?,?)""",
+            (name, passed, score, json.dumps(details, allow_nan=True), f"2026-11-09T10:0{index}:00Z"),
+        )
+    db.commit()
+    assert list_goal_skill_assessments(db, "creator", goal_id) == []
+    db.close()

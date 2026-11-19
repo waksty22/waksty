@@ -6,6 +6,7 @@ explicitly adopts it through the authenticated goals API.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from typing import Any
 
@@ -220,12 +221,45 @@ def list_goal_skill_assessments(
             continue
         if details.get("source") != "supervised_assessment" or details.get("supervisor_approved") is not True:
             continue
+        test_name = row["test_name"]
+        passed = row["passed"]
+        raw_score = row["score"]
+        if not isinstance(test_name, str) or not test_name.strip():
+            continue
+        if isinstance(passed, bool) or not isinstance(passed, int) or passed != 1:
+            continue
+        if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
+            continue
+        try:
+            score = float(raw_score)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if not math.isfinite(score) or not 70 <= score <= 100:
+            continue
+        raw_evidence = details.get("evidence")
+        if not isinstance(raw_evidence, str) or not raw_evidence.strip():
+            continue
+        goal_step_id = details.get("goal_step_id")
+        if (
+            isinstance(goal_step_id, bool)
+            or not isinstance(goal_step_id, int)
+            or goal_step_id < 1
+        ):
+            continue
+        step = db.execute(
+            """SELECT 1 FROM goal_steps
+               WHERE id=? AND goal_id=? AND status='completed'
+                 AND length(trim(evidence))>0""",
+            (goal_step_id, goal_id),
+        ).fetchone()
+        if step is None:
+            continue
         linked.append({
-            "test_name": str(row["test_name"]),
-            "passed": bool(row["passed"]),
-            "score": float(row["score"]),
+            "test_name": test_name.strip(),
+            "passed": True,
+            "score": score,
             "tested_at": str(row["tested_at"]),
-            "goal_step_id": details.get("goal_step_id"),
-            "evidence": str(details.get("evidence") or "")[:500],
+            "goal_step_id": goal_step_id,
+            "evidence": raw_evidence.strip()[:500],
         })
     return linked

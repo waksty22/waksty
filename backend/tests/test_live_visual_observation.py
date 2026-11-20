@@ -1,5 +1,7 @@
+import sqlite3
 import unittest
 
+from learning.sensory import init_sensory_tables, list_observations, record_observation
 from learning.live_visual_observation import (
     LIVE_VISUAL_OBSERVATION_INTERVAL_SECONDS,
     build_live_visual_observation,
@@ -51,6 +53,30 @@ class LiveVisualObservationTests(unittest.TestCase):
                     frame_sequence=sequence,
                 )
             )
+
+
+    def test_session_provenance_survives_sensory_database_round_trip(self):
+        observation = build_live_visual_observation(
+            "YWJj", "image/jpeg", session_id="session-round-trip", frame_sequence=9
+        )
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        init_sensory_tables(db)
+        record_observation(
+            db,
+            "creator",
+            observation["modality"],
+            observation["content"],
+            observation["source"],
+            confidence=observation["confidence"],
+            metadata=observation["metadata"],
+        )
+        db.commit()
+        saved = list_observations(db, "creator")[0]
+        self.assertEqual(saved["metadata"]["session_id"], "session-round-trip")
+        self.assertEqual(saved["metadata"]["frame_sequence"], 9)
+        self.assertFalse(saved["metadata"]["image_bytes_persisted"])
+        db.close()
 
     def test_invalid_or_backwards_monotonic_values_are_rejected(self):
         self.assertFalse(live_visual_observation_due(True, 0.0))

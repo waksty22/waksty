@@ -150,6 +150,12 @@ class LibSQLConnectionAdapter:
         self._closed = False
         self._close_on_context_exit = close_on_context_exit
 
+    @property
+    def in_transaction(self) -> bool:
+        """Expose the native driver's transaction state without guessing."""
+        self._ensure_open()
+        return bool(getattr(self._connection, "in_transaction", False))
+
     def _ensure_open(self) -> None:
         if self._closed:
             raise sqlite3.ProgrammingError("Cannot operate on a closed database.")

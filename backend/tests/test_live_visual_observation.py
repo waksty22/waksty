@@ -14,10 +14,12 @@ class LiveVisualObservationTests(unittest.TestCase):
         observation = build_live_visual_observation("YWJj", "image/jpeg")
         self.assertIsNotNone(observation)
         self.assertEqual(observation["modality"], "vision")
+        self.assertEqual(observation["source"], "live_camera_frame_received_by_server")
         self.assertEqual(observation["confidence"], 0.0)
         self.assertFalse(observation["metadata"]["image_bytes_persisted"])
         self.assertFalse(observation["metadata"]["semantic_analysis_performed"])
         self.assertIn("ne décrit pas le contenu", observation["content"])
+        self.assertIn("ne confirme ni sa transmission au modèle", observation["content"])
 
     def test_rejects_empty_payload_and_unsupported_mime_type(self):
         self.assertIsNone(build_live_visual_observation("", "image/jpeg"))

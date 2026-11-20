@@ -94,6 +94,10 @@ from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,
     associate_word_with_observation,
 )
+from learning.live_visual_observation import (
+    build_live_visual_observation,
+    live_visual_observation_due,
+)
 from learning.object_learning import (
     init_object_learning_tables, teach_object_property,
     list_known_objects, compare_known_objects, record_object_experience,
@@ -5979,7 +5983,13 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
-    live_turn_state = {"user": "", "assistant": "", "audio": [], "audio_chars": 0}
+    live_turn_state = {
+        "user": "",
+        "assistant": "",
+        "audio": [],
+        "audio_chars": 0,
+        "last_visual_observation_at": 0.0,
+    }
 
     try:
         log.info("[GEMINI LIVE] Ouverture session modèle=%s", GEMINI_LIVE_MODEL)
@@ -6134,6 +6144,35 @@ async def websocket_endpoint(
                                 }
                             }
                         }
+                        # Persist a low-frequency receipt, not the image itself.
+                        # This records camera activity without claiming that the
+                        # frame was semantically interpreted by Gemini.
+                        visual_now = time.monotonic()
+                        if live_visual_observation_due(
+                            visual_now,
+                            live_turn_state["last_visual_observation_at"],
+                        ):
+                            visual_observation = build_live_visual_observation(
+                                image_data, mime_type
+                            )
+                            if visual_observation is not None:
+                                try:
+                                    with db_connection() as visual_db:
+                                        record_observation(
+                                            visual_db,
+                                            user_id,
+                                            visual_observation["modality"],
+                                            visual_observation["content"],
+                                            visual_observation["source"],
+                                            confidence=visual_observation["confidence"],
+                                            metadata=visual_observation["metadata"],
+                                        )
+                                        visual_db.commit()
+                                    live_turn_state["last_visual_observation_at"] = visual_now
+                                except Exception:
+                                    log.exception(
+                                        "[GEMINI LIVE] Échec mémorisation réception image"
+                                    )
                     elif action == "text":
                         raw_text_value = payload.get("text", "")
                         if not isinstance(raw_text_value, str):

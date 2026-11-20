@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "backend/server.py"
+      - "backend/learning/live_visual_observation.py"
+      - "backend/tests/test_live_visual_observation.py"
       - "backend/storage/**"
       - "backend/scripts/backup_turso.py"
       - "backend/tests/test_server_storage_selection.py"
@@ -32,6 +34,8 @@ on:
     branches: [main]
     paths:
       - "backend/server.py"
+      - "backend/learning/live_visual_observation.py"
+      - "backend/tests/test_live_visual_observation.py"
       - "backend/storage/**"
       - "backend/scripts/backup_turso.py"
       - "backend/tests/test_server_storage_selection.py"

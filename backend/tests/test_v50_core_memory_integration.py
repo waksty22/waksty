@@ -208,14 +208,13 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
     # Both entrypoints must feed confirmed user text into the same durable
     # vocabulary table, while keeping lexical exposure distinct from mastery.
     chat_brain_source = inspect.getsource(server.run_brain)
-    assert "record_heard_text(" in chat_brain_source
+    assert "record_confirmed_turn_learning(" in chat_brain_source
     assert "Message écrit reçu par le chat classique" in chat_brain_source
     assert "record_confirmed_turn_learning(" in live_source
-    live_learning_source = inspect.getsource(server.record_confirmed_turn_learning)
-    assert "record_heard_text(" in live_learning_source
-    assert "Transcription complète confirmée par Gemini Live" in live_learning_source
-    assert "record_explicit_word_teaching(" in chat_brain_source
-    assert "record_explicit_word_teaching(" in live_learning_source
+    shared_learning_source = inspect.getsource(server.record_confirmed_turn_learning)
+    assert "record_heard_text(" in shared_learning_source
+    assert "Transcription complète confirmée par Gemini Live" in shared_learning_source
+    assert "record_explicit_word_teaching(" in shared_learning_source
 
 
 

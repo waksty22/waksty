@@ -141,8 +141,8 @@ def test_explicit_close_closes_underlying_connection():
     assert raw.closed is True
 
 
-def test_real_libsql_shared_snapshot_preserves_active_outer_transaction():
-    """An existing libSQL transaction remains caller-owned across snapshots."""
+def test_real_libsql_shared_snapshot_owns_only_its_transaction():
+    """Shared snapshots use a read transaction without committing caller work."""
     import pytest
 
     libsql = pytest.importorskip("libsql")
@@ -154,38 +154,44 @@ def test_real_libsql_shared_snapshot_preserves_active_outer_transaction():
             "CREATE TABLE snapshot_probe "
             "(id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
         )
+        db.execute("INSERT INTO snapshot_probe(label) VALUES (?)", ("base",))
         db.commit()
 
-        # A standalone snapshot can open and release its own savepoint.
+        # A standalone snapshot owns a read transaction and closes it.
         with _consistent_read_snapshot(db):
-            db.execute(
-                "INSERT INTO snapshot_probe(label) VALUES (?)", ("standalone",)
-            )
+            assert db.in_transaction is True
             assert db.execute(
                 "SELECT COUNT(*) FROM snapshot_probe"
             ).fetchone()[0] == 1
+        assert db.in_transaction is False
+
+        # A caller-owned transaction must remain active across the snapshot.
+        db.execute("BEGIN")
+        db.execute(
+            "INSERT INTO snapshot_probe(label) VALUES (?)", ("outer",)
+        )
+        with _consistent_read_snapshot(db):
+            assert db.in_transaction is True
+            assert db.execute(
+                "SELECT COUNT(*) FROM snapshot_probe"
+            ).fetchone()[0] == 2
+        assert db.in_transaction is True
+        db.rollback()
         assert db.execute(
             "SELECT COUNT(*) FROM snapshot_probe"
         ).fetchone()[0] == 1
-        db.rollback()
 
-        # When the caller owns a transaction, the snapshot must not nest a
-        # savepoint: the caller must retain control of commit/rollback.
-        db.execute("BEGIN")
-        assert db.in_transaction is True
-        with _consistent_read_snapshot(db):
-            assert db.in_transaction is True
-            db.execute(
-                "INSERT INTO snapshot_probe(label) VALUES (?)", ("outer",)
-            )
-            assert db.execute(
-                "SELECT COUNT(*) FROM snapshot_probe"
-            ).fetchone()[0] == 1
-        assert db.in_transaction is True
-        db.rollback()
+        # An exception rolls back only a transaction created by the snapshot.
+        with pytest.raises(RuntimeError, match="snapshot failure"):
+            with _consistent_read_snapshot(db):
+                db.execute(
+                    "INSERT INTO snapshot_probe(label) VALUES (?)", ("temporary",)
+                )
+                raise RuntimeError("snapshot failure")
+        assert db.in_transaction is False
         assert db.execute(
             "SELECT COUNT(*) FROM snapshot_probe"
-        ).fetchone()[0] == 0
+        ).fetchone()[0] == 1
     finally:
         db.close()
 

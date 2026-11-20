@@ -5989,6 +5989,8 @@ async def websocket_endpoint(
         "audio": [],
         "audio_chars": 0,
         "last_visual_observation_at": 0.0,
+        "live_session_id": secrets.token_urlsafe(12),
+        "visual_frame_sequence": 0,
     }
 
     try:
@@ -6145,16 +6147,19 @@ async def websocket_endpoint(
                                 }
                             }
                         }
-                        # Persist a low-frequency receipt, not the image itself.
-                        # This records camera activity without claiming that the
-                        # frame was semantically interpreted by Gemini.
+                        # Keep session/frame provenance for each persisted receipt.
+                        # The image itself is never written to the memory database.
+                        live_turn_state["visual_frame_sequence"] += 1
                         visual_now = time.monotonic()
                         if live_visual_observation_due(
                             visual_now,
                             live_turn_state["last_visual_observation_at"],
                         ):
                             visual_observation = build_live_visual_observation(
-                                image_data, mime_type
+                                image_data,
+                                mime_type,
+                                session_id=live_turn_state["live_session_id"],
+                                frame_sequence=live_turn_state["visual_frame_sequence"],
                             )
                             if visual_observation is not None:
                                 # Advance the throttle even on a transient storage

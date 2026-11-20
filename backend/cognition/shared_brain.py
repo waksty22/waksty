@@ -166,6 +166,13 @@ def _consistent_read_snapshot(db: sqlite3.Connection) -> Iterator[None]:
     SAVEPOINT is supported by SQLite and libSQL. It also nests safely when the
     caller already owns a transaction, unlike an unconditional BEGIN/COMMIT.
     """
+    # An already-active caller transaction is itself the stable snapshot.
+    # Avoid nesting a SAVEPOINT on libSQL: its Python driver can release the
+    # outer transaction when a savepoint is released in this usage pattern.
+    if getattr(db, "in_transaction", False):
+        yield
+        return
+
     savepoint = "chappie_shared_brain_snapshot"
     db.execute(f"SAVEPOINT {savepoint}")
     try:

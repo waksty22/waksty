@@ -61,11 +61,11 @@ def build_live_visual_observation(
     return {
         "modality": "vision",
         "content": (
-            "Une image de la caméra a été reçue pendant une session Gemini Live. "
-            "Cette trace technique ne décrit pas le contenu de l'image et ne prouve "
-            "pas qu'il a été analysé ou compris."
+            "Le serveur a reçu une trame caméra du client pendant une session Gemini Live. "
+            "Cette trace ne confirme ni sa transmission au modèle, ni son analyse, "
+            "ni sa compréhension ; elle ne décrit pas le contenu de l'image."
         ),
-        "source": "gemini_live_video_frame_receipt",
+        "source": "live_camera_frame_received_by_server",
         "confidence": 0.0,
         "metadata": metadata,
     }

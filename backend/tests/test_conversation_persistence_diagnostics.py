@@ -137,9 +137,26 @@ def test_chat_and_live_turns_enter_same_autobiographical_store_after_restart(
 def test_interrupted_live_turn_persists_confirmed_transcripts_only(
     monkeypatch,
 ):
+    from contextlib import nullcontext
     import server
 
     captured = []
+    learning_calls = []
+    commits = []
+
+    class LearningDb:
+        def commit(self):
+            commits.append(True)
+
+    learning_db = LearningDb()
+    monkeypatch.setattr(server, "db_connection", lambda: nullcontext(learning_db))
+    monkeypatch.setattr(
+        server,
+        "record_confirmed_turn_learning",
+        lambda db, user_id, text, **kwargs:
+            learning_calls.append((db, user_id, text, kwargs))
+            or {"heard": [{"word": "confirmée"}], "taught": []},
+    )
     monkeypatch.setattr(
         server,
         "save_conversation_turn",
@@ -159,6 +176,13 @@ def test_interrupted_live_turn_persists_confirmed_transcripts_only(
         "Réponse déjà transcrite.",
         "gemini_live_interrupted",
     )]
+    assert learning_calls == [(
+        learning_db,
+        "creator",
+        "Transcription utilisateur confirmée.",
+        {"evidence": "Transcription utilisateur confirmée avant interruption Live"},
+    )]
+    assert commits == [True]
     assert state == {"user": "", "assistant": "", "audio": [], "audio_chars": 0}
 
     # Empty or audio-only partial turns are not persisted as conversations.

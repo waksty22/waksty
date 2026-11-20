@@ -261,11 +261,12 @@ def test_live_initial_history_rejects_non_user_or_malformed_context():
 def test_identity_context_truncation_preserves_complete_sections():
     import server
 
+    newline = chr(10)
     large_json_section = (
-        "Section initiale conservée.\\n\\n"
-        "SECTION JSON :\\n[\\n"
-        + '{"content":"' + ("x" * 30000) + '"}\\n'
-        + "]\\n\\n"
+        "Section initiale conservée." + newline * 2
+        + "SECTION JSON :" + newline + "[" + newline
+        + '{"content":"' + ("x" * 30000) + '"}' + newline
+        + "]" + newline * 2
         + "Section finale."
     )
 

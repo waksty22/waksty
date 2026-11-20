@@ -1,5 +1,9 @@
 """Safety tests for autobiographical backfill and transaction ownership."""
 import sqlite3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from memory.autobiographical import (
     init_autobiographical_tables,

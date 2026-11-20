@@ -68,9 +68,20 @@ def _clean(value: Any, label: str, maximum: int) -> str:
     return value
 
 
+def _clean_optional_evidence(evidence: str) -> str:
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve doit être du texte.")
+    evidence = evidence.strip()
+    if len(evidence) > MAX_EVIDENCE_LENGTH:
+        raise ValueError("La preuve est trop longue.")
+    return evidence
+
+
 def _require_known_object(
     db: sqlite3.Connection, user_id: str, word: str
 ) -> tuple[str, str]:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
     word = _clean(word, "Mot", 80).casefold()
     vocab = db.execute(
         """SELECT state FROM personal_vocabulary
@@ -84,6 +95,20 @@ def _require_known_object(
             "Chappie doit d'abord avoir imité puis reconnu ce mot."
         )
     object_id = "object:" + word
+    association = db.execute(
+        """SELECT 1
+           FROM word_visual_associations a
+           JOIN sensory_observations o
+             ON o.observation_id = a.observation_id
+           WHERE a.user_id=? AND a.word=?
+             AND o.user_id=a.user_id AND o.modality='vision'
+           LIMIT 1""",
+        (user_id, word),
+    ).fetchone()
+    if association is None:
+        raise ValueError(
+            "Montre d'abord cet objet à Chappie et valide son association visuelle."
+        )
     entity = db.execute(
         """SELECT id FROM world_entities
            WHERE id=? AND user_id=? AND entity_type='object'""",
@@ -111,9 +136,11 @@ def teach_object_property(
     if key not in ALLOWED_PROPERTY_KEYS:
         raise ValueError("Type de propriété non autorisé.")
     value = _clean(property_value, "Valeur", MAX_VALUE_LENGTH)
-    evidence = str(evidence or "").strip()[:MAX_EVIDENCE_LENGTH]
-    if source_type not in {"taught", "observed", "confirmed"}:
+    evidence = _clean_optional_evidence(evidence)
+    if not isinstance(source_type, str) or source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
+    if isinstance(confidence, bool):
+        raise ValueError("Confiance invalide.")
     try:
         confidence = float(confidence)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -127,9 +154,25 @@ def teach_object_property(
             confidence, evidence, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(user_id, object_id, property_key, property_value)
-           DO UPDATE SET source_type=excluded.source_type,
+           DO UPDATE SET
+             source_type=CASE
+               WHEN object_properties.source_type='confirmed'
+                    AND excluded.source_type<>'confirmed'
+               THEN object_properties.source_type
+               WHEN excluded.confidence >= object_properties.confidence
+               THEN excluded.source_type
+               ELSE object_properties.source_type
+             END,
              confidence=MAX(object_properties.confidence, excluded.confidence),
-             evidence=excluded.evidence, updated_at=excluded.updated_at""",
+             evidence=CASE
+               WHEN object_properties.source_type='confirmed'
+                    AND excluded.source_type<>'confirmed'
+               THEN object_properties.evidence
+               WHEN excluded.confidence >= object_properties.confidence
+               THEN excluded.evidence
+               ELSE object_properties.evidence
+             END,
+             updated_at=excluded.updated_at""",
         (user_id, object_id, key, value, source_type, confidence, evidence, now, now),
     )
     row = db.execute(
@@ -143,6 +186,8 @@ def teach_object_property(
 
 
 def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
     objects = db.execute(
         """SELECT e.id, e.properties_json
            FROM world_entities e
@@ -187,21 +232,35 @@ def compare_known_objects(
     second_word, second_id = _require_known_object(db, user_id, second_word)
     if first_id == second_id:
         raise ValueError("Choisis deux objets différents.")
-    def load(object_id: str) -> dict[str, set[str]]:
+    def load(object_id: str) -> dict[str, list[dict[str, Any]]]:
         rows = db.execute(
-            """SELECT property_key, property_value FROM object_properties
-               WHERE user_id=? AND object_id=?""",
+            """SELECT property_key, property_value, source_type, confidence, evidence
+               FROM object_properties
+               WHERE user_id=? AND object_id=?
+               ORDER BY property_key, property_value""",
             (user_id, object_id),
         ).fetchall()
-        result: dict[str, set[str]] = {}
+        result: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            result.setdefault(row["property_key"], set()).add(row["property_value"])
+            result.setdefault(row["property_key"], []).append({
+                "value": row["property_value"],
+                "source_type": row["source_type"],
+                "confidence": row["confidence"],
+                "evidence": row["evidence"],
+            })
         return result
     first, second = load(first_id), load(second_id)
+    first_values = {key: {item["value"] for item in items} for key, items in first.items()}
+    second_values = {key: {item["value"] for item in items} for key, items in second.items()}
     shared = {}
     differences = {}
+    property_details = {}
     for key in sorted(set(first) | set(second)):
-        a, b = first.get(key, set()), second.get(key, set())
+        a, b = first_values.get(key, set()), second_values.get(key, set())
+        property_details[key] = {
+            first_word: first.get(key, []),
+            second_word: second.get(key, []),
+        }
         common = sorted(a & b)
         only_a, only_b = sorted(a - b), sorted(b - a)
         if common:
@@ -216,7 +275,8 @@ def compare_known_objects(
         "second": second_word,
         "shared_properties": shared,
         "differences": differences,
-        "compared_property_count": len(set(first) | set(second)),
+        "property_details": property_details,
+        "compared_property_count": len(set(first_values) | set(second_values)),
         "warning": "Une propriété absente signifie inconnue, pas opposée.",
     }
 
@@ -234,10 +294,15 @@ def record_object_experience(
     word, object_id = _require_known_object(db, user_id, word)
     action = _clean(action, "Action", 300)
     outcome = _clean(outcome, "Résultat", 1000)
-    evidence = str(evidence or "").strip()[:MAX_EVIDENCE_LENGTH]
-    if source_type not in {"taught", "observed", "confirmed"}:
+    evidence = _clean_optional_evidence(evidence)
+    if not isinstance(source_type, str) or source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
-    confidence = float(confidence)
+    if isinstance(confidence, bool):
+        raise ValueError("Confiance invalide.")
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Confiance invalide.") from exc
     if not 0 <= confidence <= 1:
         raise ValueError("La confiance doit être comprise entre 0 et 1.")
     now = utc_now()

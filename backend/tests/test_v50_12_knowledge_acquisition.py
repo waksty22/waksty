@@ -180,3 +180,104 @@ def test_server_exposes_retrieval_to_shared_chat_and_live_tools():
     assert 'if name == "retrieve_acquired_knowledge"' in server
     assert "{acquired_knowledge_context}" in server
     assert "get_identity_prompt(user_id)" in server
+
+
+
+def test_corrupt_memory_rows_are_skipped_without_inventing_provenance():
+    db = make_db()
+    seed(db)
+    db.execute("INSERT INTO memories_v19 VALUES (10,'creator','objets','Provenance absente',NULL,0.8,3,'t0','t1')")
+    db.execute("INSERT INTO memories_v19 VALUES (11,'creator','objets','Provenance inconnue','fabricated',0.8,3,'t0','t1')")
+    db.execute("INSERT INTO memories_v19 VALUES (12,'creator','objets','Contenu binaire', 'confirmed',0.8,3,'t0','t1')")
+    db.execute("UPDATE memories_v19 SET content=? WHERE id=12", (b"contenu binaire",))
+    db.execute("INSERT INTO memories_v19 VALUES (13,'creator','objets','Confiance invalide','confirmed',?,3,'t0','t1')", (b"confiance invalide",))
+    db.execute("INSERT INTO memories_v19 VALUES (14,'creator',NULL,'Categorie absente','confirmed',0.9,3,'t0','t1')")
+    result = retrieve_acquired_knowledge(db, "creator")
+    contents = [item["content"] for item in result["items"]]
+    assert "Provenance absente" not in contents
+    assert "Provenance inconnue" not in contents
+    assert "Contenu binaire" not in contents
+    assert "Confiance invalide" in contents
+    invalid_confidence = next(
+        item for item in result["items"]
+        if item["content"] == "Confiance invalide"
+    )
+    assert invalid_confidence["confidence"] == 0.0
+    assert "Categorie absente" not in contents
+    assert "Une montre possède un cadran rond" in contents
+    db.close()
+
+
+
+def test_corrupt_experience_reference_does_not_abort_knowledge_retrieval():
+    db = make_db()
+    seed(db)
+    db.execute(
+        "UPDATE autobiographical_events SET source_conversation_id=? WHERE id=1",
+        ("not-an-integer",),
+    )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "montre")
+    experience = next(
+        item for item in result["items"] if item["kind"] == "experience"
+    )
+    assert experience["status"] == "experience_only_not_proof_of_learning"
+    assert experience["source_conversation_id"] is None
+    db.close()
+
+
+
+def test_malformed_assessment_labels_and_evidence_are_not_stringified():
+    db = make_db()
+    seed(db)
+    db.execute(
+        """INSERT INTO competency_tests VALUES
+           (2, 'creator', ?, 1, 99, ?, '2026-11-05')""",
+        (b"binary-skill-name", json.dumps({
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": 123456,
+        })),
+    )
+    db.execute(
+        """INSERT INTO competency_tests VALUES
+           (3, 'creator', 'tete:vision', 1, 99, ?, '2026-11-06')""",
+        (json.dumps({
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": {"raw": "not human proof"},
+        }),),
+    )
+    db.commit()
+
+    items = [
+        item for item in retrieve_acquired_knowledge(db, "creator")["items"]
+        if item["kind"] == "skill_assessment"
+    ]
+    assert all(item.get("skill") != "b'binary-skill-name'" for item in items)
+    vision = next(item for item in items if item.get("skill") == "tete:vision")
+    assert vision["status"] == "supervised_skill_validated"
+    assert "123456" not in vision["content"]
+    assert "not human proof" not in vision["content"]
+    assert vision["content"] == "Compétence évaluée : tete:vision"
+    db.close()
+
+def test_supervised_skill_score_above_100_is_not_validated():
+    db = make_db()
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Score corrompu hors barème.",
+    }
+    db.execute(
+        """INSERT INTO competency_tests VALUES
+           (20, 'creator', 'tete:score_corrompu', 1, 101, ?, '2026-11-07')""",
+        (json.dumps(details),),
+    )
+    db.commit()
+    items = retrieve_acquired_knowledge(db, "creator")["items"]
+    item = next(row for row in items if row.get("skill") == "tete:score_corrompu")
+    assert item["status"] == "supervised_assessment_not_validated"
+    assert item["score"] == 101.0
+    db.close()

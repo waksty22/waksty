@@ -144,3 +144,61 @@ def test_dashboard_requires_click_to_adopt_and_evidence_to_progress():
     assert 'apiCall("/api/goals"' in app
     assert 'apiCall("/api/learning/goals/steps"' in app
     assert 'evidence: evidence.value.trim()' in app
+
+
+
+def test_personal_goal_suggestions_reject_invalid_user_and_limit():
+    db = make_db()
+    for bad_user in (None, "", "   ", 7, True, {}, []):
+        try:
+            suggest_personal_learning_goals(db, bad_user)
+            assert False, "Identité invalide acceptée"
+        except ValueError:
+            pass
+    for bad_limit in (0, -1, True, 1.5, "5", None):
+        try:
+            suggest_personal_learning_goals(db, "creator", limit=bad_limit)
+            assert False, "Limite invalide acceptée"
+        except ValueError:
+            pass
+    db.close()
+
+
+def test_personal_goal_listing_rejects_invalid_user_and_limit():
+    db = make_db()
+    for bad_user in (None, "", "   ", 7, True, {}, []):
+        try:
+            list_personal_learning_goals(db, bad_user)
+            assert False, "Identité invalide acceptée"
+        except ValueError:
+            pass
+    for bad_limit in (0, -1, True, 1.5, "30", None):
+        try:
+            list_personal_learning_goals(db, "creator", limit=bad_limit)
+            assert False, "Limite invalide acceptée"
+        except ValueError:
+            pass
+    db.close()
+
+
+def test_personal_goal_step_rejects_invalid_identifiers_without_writing():
+    db = make_db()
+    db.execute("INSERT INTO goals(user_id,title) VALUES('creator','Objectif')")
+    goal_id = db.execute("SELECT id FROM goals").fetchone()["id"]
+    db.execute("INSERT INTO goal_steps(goal_id,description) VALUES(?, 'Étape')", (goal_id,))
+    step_id = db.execute("SELECT id FROM goal_steps").fetchone()["id"]
+    db.commit()
+    for bad_goal in (0, -1, True, 1.5, "1", None):
+        try:
+            record_personal_goal_step(db, "creator", bad_goal, step_id, "preuve")
+            assert False, "Identifiant d'objectif invalide accepté"
+        except ValueError:
+            pass
+    for bad_step in (0, -1, True, 1.5, "1", None):
+        try:
+            record_personal_goal_step(db, "creator", goal_id, bad_step, "preuve")
+            assert False, "Identifiant d'étape invalide accepté"
+        except ValueError:
+            pass
+    assert db.execute("SELECT status FROM goal_steps").fetchone()["status"] == "pending"
+    db.close()

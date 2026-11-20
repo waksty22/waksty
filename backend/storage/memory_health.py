@@ -60,3 +60,14 @@ def inspect_memory_persistence(connection: Any, user_id: str, backend: str) -> d
             "actif, pas à eux seuls leur restauration après redémarrage."
         ),
     }
+
+def count_active_episodic_memories(connection: Any, user_id: str) -> int:
+    """Count only the active V19 episodic-memory records for one user."""
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        raise ValueError("user_id est obligatoire.")
+    row = connection.execute(
+        "SELECT COUNT(*) FROM memories_v19 WHERE user_id=?",
+        (user_id,),
+    ).fetchone()
+    return int(row[0] if row else 0)

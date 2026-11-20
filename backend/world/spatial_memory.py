@@ -237,14 +237,20 @@ def record_place_observation(
     if (lat is None) != (lon is None):
         raise ValueError("Latitude et longitude doivent être fournies ensemble.")
     session_id = _text(session_id, "Session", 80)
-    if lat is not None:
+    if session_id:
         active = db.execute(
             """SELECT session_id FROM spatial_sessions
                WHERE session_id=? AND user_id=? AND consented=1 AND ended_at IS NULL""",
             (session_id, user_id),
         ).fetchone()
         if active is None:
-            raise ValueError("Une session de localisation active et autorisée est nécessaire pour géolocaliser un lieu.")
+            raise ValueError(
+                "La session associée doit être active, autorisée et appartenir à cet utilisateur."
+            )
+    elif lat is not None:
+        raise ValueError(
+            "Une session de localisation active et autorisée est nécessaire pour géolocaliser un lieu."
+        )
     best_match = None
     for candidate in db.execute(
         """SELECT place_id,visual_signature,latitude,longitude,description,

@@ -58,6 +58,7 @@ def sync_autobiographical_events(
     db: sqlite3.Connection,
     user_id: str,
     limit: int = 500,
+    commit: bool = True,
 ) -> dict[str, int]:
     """Indexe idempotemment les conversations absentes du journal autobiographique."""
     limit = max(1, min(int(limit), 2000))
@@ -95,8 +96,9 @@ def sync_autobiographical_events(
         )
         inserted += max(0, cursor.rowcount)
 
-    # Relie uniquement les deux messages qui partagent exactement l'horodatage
-    # créé par save_conversation_turn : c'est un lien de dialogue, pas de sens.
+    # Relie uniquement les messages user/assistant consécutifs du même tour.
+    # L'horodatage seul ne suffit pas : deux tours distincts peuvent partager
+    # le même timestamp (résolution de l'horloge ou écritures rapprochées).
     db.execute(
         """
         INSERT OR IGNORE INTO autobiographical_links
@@ -105,13 +107,22 @@ def sync_autobiographical_events(
         FROM autobiographical_events u
         JOIN autobiographical_events a
           ON a.user_id=u.user_id
+         AND a.source_conversation_id=u.source_conversation_id + 1
          AND a.happened_at=u.happened_at
          AND a.actor='assistant'
         WHERE u.user_id=? AND u.actor='user'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM conversations previous
+              WHERE previous.user_id=u.user_id
+                AND previous.id=u.source_conversation_id - 1
+                AND previous.role='user'
+          )
         """,
         (user_id,),
     )
-    db.commit()
+    if commit:
+        db.commit()
     total = db.execute(
         "SELECT COUNT(*) FROM autobiographical_events WHERE user_id=?",
         (user_id,),
@@ -210,9 +221,13 @@ def search_autobiographical_events(
     for row in rows:
         item = dict(row)
         normalized_content = _normalize_search_text(item.get("content", ""))
-        if not normalized_content:
+        content_tokens = set(normalized_content.split())
+        if not content_tokens:
             continue
-        present = sum(1 for token in set(tokens) if token in normalized_content)
+        # Match complete normalized tokens only: substring matches can create
+        # false autobiographical recalls (e.g. "art" inside "partage").
+        matched_tokens = set(tokens) & content_tokens
+        present = len(matched_tokens)
         if not present:
             continue
         coverage = present / max(1, len(set(tokens)))
@@ -222,7 +237,7 @@ def search_autobiographical_events(
         score = coverage * 4.0 + phrase_bonus + importance * 0.04
         item["relevance_score"] = round(score, 4)
         item["matched_terms"] = [
-            token for token in dict.fromkeys(tokens) if token in normalized_content
+            token for token in dict.fromkeys(tokens) if token in content_tokens
         ]
         item["dialogue_context"] = False
         ranked.append((score, item))

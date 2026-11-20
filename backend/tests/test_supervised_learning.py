@@ -98,6 +98,28 @@ def test_validated_imitation_needs_practice_and_approval(db):
     assert state["examples"][0]["supervisor_approved"] == 1
 
 
+def test_rejected_imitation_cannot_be_rejected_or_rewritten_again(db):
+    item = demonstration(db)
+    first = reject_imitation(
+        db, "creator", item["id"], "Démonstration incorrecte"
+    )
+    before = db.execute(
+        "SELECT status,evidence,updated_at FROM imitation_examples WHERE id=?",
+        (item["id"],),
+    ).fetchone()
+    with pytest.raises(ValueError, match="clôturée"):
+        reject_imitation(
+            db, "creator", item["id"], "Deuxième motif qui ne doit pas s'ajouter"
+        )
+    after = db.execute(
+        "SELECT status,evidence,updated_at FROM imitation_examples WHERE id=?",
+        (item["id"],),
+    ).fetchone()
+    assert first["status"] == "rejected"
+    assert tuple(after) == tuple(before)
+    assert after["evidence"].count("Rejet :") == 1
+
+
 def test_rejected_imitation_cannot_be_practiced(db):
     item = demonstration(db)
     reject_imitation(db, "creator", item["id"], "Démonstration incorrecte")
@@ -113,3 +135,63 @@ def test_dashboard_is_scoped_to_user(db):
     state = list_imitation_learning(db, "bob")
     assert state["examples"] == []
     assert state["total"] == 0
+
+
+
+@pytest.mark.parametrize("bad", [None, "", "   ", 7, True, {}, []])
+def test_demonstration_rejects_invalid_user_id_without_writing(db, bad):
+    with pytest.raises(ValueError):
+        record_demonstration(db, bad, "saluer", "preuve")
+    assert db.execute("SELECT COUNT(*) FROM imitation_examples").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [None, 7, True, {}, []])
+def test_demonstration_rejects_non_text_context_without_writing(db, bad):
+    with pytest.raises(ValueError):
+        record_demonstration(db, "creator", "saluer", "preuve", context=bad)
+    assert db.execute("SELECT COUNT(*) FROM imitation_examples").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "1", None])
+def test_practice_rejects_invalid_example_id(db, bad):
+    with pytest.raises(ValueError):
+        record_practice(db, "creator", bad, "résultat", "preuve", True)
+    assert db.execute("SELECT COUNT(*) FROM imitation_attempts").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "10", None])
+def test_imitation_listing_rejects_invalid_limit(db, bad):
+    with pytest.raises(ValueError):
+        list_imitation_learning(db, "creator", limit=bad)
+
+def test_rejected_imitation_cannot_be_reopened_by_practice_or_validation(db):
+    item = demonstration(db)
+    record_practice(
+        db, "creator", item["id"], "geste reproduit",
+        "Une pratique réussie est documentée.", True,
+    )
+    reject_imitation(db, "creator", item["id"], "Rejet du superviseur")
+    attempts_before = db.execute(
+        "SELECT COUNT(*) FROM imitation_attempts WHERE example_id=?",
+        (item["id"],),
+    ).fetchone()[0]
+    with pytest.raises(ValueError):
+        record_practice(
+            db, "creator", item["id"], "nouvelle tentative",
+            "Ne doit pas être enregistrée.", True,
+        )
+    with pytest.raises(ValueError):
+        validate_imitation(
+            db, "creator", item["id"], True, "Ne doit pas valider le rejet"
+        )
+    row = db.execute(
+        "SELECT status,supervisor_approved,evidence FROM imitation_examples WHERE id=?",
+        (item["id"],),
+    ).fetchone()
+    assert row["status"] == "rejected"
+    assert row["supervisor_approved"] == 0
+    assert row["evidence"].count("Rejet :") == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM imitation_attempts WHERE example_id=?",
+        (item["id"],),
+    ).fetchone()[0] == attempts_before

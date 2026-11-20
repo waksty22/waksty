@@ -6,6 +6,7 @@ explicitly adopts it through the authenticated goals API.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from typing import Any
 
@@ -24,6 +25,22 @@ def _clean_text(value: Any, field: str, limit: int) -> str:
     return value
 
 
+def _user_id(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    return value.strip()
+
+
+def _positive_id(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{field} invalide.")
+    return value
+
+
+def _limit(value: Any, maximum: int) -> int:
+    return min(_positive_id(value, "Limite"), maximum)
+
+
 def _normalize(value: str) -> str:
     return " ".join(value.casefold().split())
 
@@ -32,7 +49,8 @@ def suggest_personal_learning_goals(
     db: sqlite3.Connection, user_id: str, limit: int = 5
 ) -> dict[str, Any]:
     """Derive measurable goal proposals without writing any database row."""
-    limit = max(1, min(int(limit), MAX_GOALS))
+    user_id = _user_id(user_id)
+    limit = _limit(limit, MAX_GOALS)
     agenda = suggest_supervised_learning_agenda(db, user_id, limit=limit)
     existing = db.execute(
         "SELECT title FROM goals WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 100",
@@ -91,7 +109,8 @@ def suggest_personal_learning_goals(
 def list_personal_learning_goals(
     db: sqlite3.Connection, user_id: str, limit: int = 30
 ) -> dict[str, Any]:
-    limit = max(1, min(int(limit), 100))
+    user_id = _user_id(user_id)
+    limit = _limit(limit, 100)
     rows = db.execute(
         """SELECT id, title, status, progress, created_at, updated_at
            FROM goals WHERE user_id=? ORDER BY id DESC LIMIT ?""",
@@ -123,6 +142,9 @@ def record_personal_goal_step(
     completed: bool = True,
 ) -> dict[str, Any]:
     """Record evidence for one step, verifying ownership through the parent goal."""
+    user_id = _user_id(user_id)
+    goal_id = _positive_id(goal_id, "Identifiant d’objectif")
+    step_id = _positive_id(step_id, "Identifiant d’étape")
     if not isinstance(completed, bool):
         raise ValueError("completed doit être un booléen.")
     evidence = _clean_text(evidence, "Preuve", MAX_EVIDENCE)
@@ -171,6 +193,8 @@ def list_goal_skill_assessments(
     db: sqlite3.Connection, user_id: str, goal_id: int
 ) -> list[dict[str, Any]]:
     """Return only supervisor-approved assessment records explicitly linked to this user's goal."""
+    user_id = _user_id(user_id)
+    goal_id = _positive_id(goal_id, "Identifiant d’objectif")
     owner = db.execute(
         "SELECT id FROM goals WHERE id=? AND user_id=?",
         (goal_id, user_id),
@@ -197,12 +221,45 @@ def list_goal_skill_assessments(
             continue
         if details.get("source") != "supervised_assessment" or details.get("supervisor_approved") is not True:
             continue
+        test_name = row["test_name"]
+        passed = row["passed"]
+        raw_score = row["score"]
+        if not isinstance(test_name, str) or not test_name.strip():
+            continue
+        if isinstance(passed, bool) or not isinstance(passed, int) or passed != 1:
+            continue
+        if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
+            continue
+        try:
+            score = float(raw_score)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if not math.isfinite(score) or not 70 <= score <= 100:
+            continue
+        raw_evidence = details.get("evidence")
+        if not isinstance(raw_evidence, str) or not raw_evidence.strip():
+            continue
+        goal_step_id = details.get("goal_step_id")
+        if (
+            isinstance(goal_step_id, bool)
+            or not isinstance(goal_step_id, int)
+            or goal_step_id < 1
+        ):
+            continue
+        step = db.execute(
+            """SELECT 1 FROM goal_steps
+               WHERE id=? AND goal_id=? AND status='completed'
+                 AND length(trim(evidence))>0""",
+            (goal_step_id, goal_id),
+        ).fetchone()
+        if step is None:
+            continue
         linked.append({
-            "test_name": str(row["test_name"]),
-            "passed": bool(row["passed"]),
-            "score": float(row["score"]),
+            "test_name": test_name.strip(),
+            "passed": True,
+            "score": score,
             "tested_at": str(row["tested_at"]),
-            "goal_step_id": details.get("goal_step_id"),
-            "evidence": str(details.get("evidence") or "")[:500],
+            "goal_step_id": goal_step_id,
+            "evidence": raw_evidence.strip()[:500],
         })
     return linked

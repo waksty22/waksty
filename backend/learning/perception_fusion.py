@@ -49,7 +49,15 @@ def link_temporally_cooccurring_observation(
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
 ) -> list[dict[str, Any]]:
     """Create cautious cross-modal candidates around one new observation."""
-    window = max(1, min(int(window_seconds), MAX_WINDOW_SECONDS))
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    if not isinstance(observation_id, str) or not observation_id.strip():
+        raise ValueError("Identifiant d’observation invalide.")
+    if isinstance(window_seconds, bool) or not isinstance(window_seconds, int):
+        raise ValueError("La fenêtre temporelle doit être un entier.")
+    if window_seconds < 1:
+        raise ValueError("La fenêtre temporelle doit être au moins égale à une seconde.")
+    window = min(window_seconds, MAX_WINDOW_SECONDS)
     current = db.execute(
         """SELECT observation_id, modality, content, created_at
            FROM sensory_observations
@@ -99,7 +107,7 @@ def link_temporally_cooccurring_observation(
             "audio_excerpt": (current["content"] if current["modality"] == "audio" else other["content"])[:500],
             "vision_excerpt": (current["content"] if current["modality"] == "vision" else other["content"])[:500],
         }
-        db.execute(
+        cursor = db.execute(
             """INSERT OR IGNORE INTO perception_fusion_candidates
                (user_id,audio_observation_id,vision_observation_id,
                 time_delta_seconds,status,evidence_json,created_at)
@@ -107,12 +115,27 @@ def link_temporally_cooccurring_observation(
             (user_id, audio_id, vision_id, delta,
              json.dumps(evidence, ensure_ascii=False), _now().isoformat()),
         )
+        persisted = db.execute(
+            """SELECT id, status, time_delta_seconds
+               FROM perception_fusion_candidates
+               WHERE user_id=? AND audio_observation_id=?
+                 AND vision_observation_id=?""",
+            (user_id, audio_id, vision_id),
+        ).fetchone()
+        if persisted is None:
+            # Defensive fail-closed path: never report a candidate that was
+            # not actually persisted.
+            continue
         created.append({
+            "id": persisted["id"],
             "audio_observation_id": audio_id,
             "vision_observation_id": vision_id,
-            "time_delta_seconds": round(delta, 3),
-            "status": "candidate",
-            "requires_validation": True,
+            # Replays must describe the persisted candidate, not a newly
+            # computed temporal delta that may differ from the original.
+            "time_delta_seconds": round(float(persisted["time_delta_seconds"]), 3),
+            "status": persisted["status"],
+            "created": cursor.rowcount == 1,
+            "requires_validation": persisted["status"] == "candidate",
         })
     return created
 
@@ -120,7 +143,13 @@ def link_temporally_cooccurring_observation(
 def list_perception_fusions(
     db: sqlite3.Connection, user_id: str, limit: int = 50
 ) -> list[dict[str, Any]]:
-    limit = max(1, min(int(limit), 100))
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
+    if limit < 1:
+        raise ValueError("La limite doit être un entier positif.")
+    limit = min(limit, 100)
     rows = db.execute(
         """SELECT id,audio_observation_id,vision_observation_id,
                   time_delta_seconds,status,evidence_json,created_at
@@ -137,3 +166,83 @@ def list_perception_fusions(
             item["evidence"] = {}
         result.append(item)
     return result
+
+
+
+def review_perception_fusion(
+    db: sqlite3.Connection,
+    user_id: str,
+    candidate_id: int,
+    decision: str,
+    evidence: str,
+) -> dict[str, Any]:
+    """Record an explicit human review without promoting a candidate to world knowledge."""
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    if isinstance(candidate_id, bool):
+        raise ValueError("Identifiant de rapprochement invalide.")
+    try:
+        candidate_id = int(candidate_id)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Identifiant de rapprochement invalide.") from exc
+    if candidate_id < 1:
+        raise ValueError("Identifiant de rapprochement invalide.")
+
+    if not isinstance(decision, str):
+        raise ValueError("La décision doit être confirm ou reject.")
+    decision = decision.strip().casefold()
+    if decision not in {"confirm", "reject"}:
+        raise ValueError("La décision doit être confirm ou reject.")
+
+    if not isinstance(evidence, str):
+        raise ValueError("Une preuve de validation (1 à 1000 caractères) est obligatoire.")
+    evidence = evidence.strip()
+    if not evidence or len(evidence) > 1000:
+        raise ValueError("Une preuve de validation (1 à 1000 caractères) est obligatoire.")
+
+    row = db.execute(
+        """SELECT id, status, evidence_json
+           FROM perception_fusion_candidates
+           WHERE id=? AND user_id=?""",
+        (candidate_id, user_id),
+    ).fetchone()
+    if row is None:
+        raise ValueError("Candidat de rapprochement introuvable.")
+
+    if row["status"] != "candidate":
+        raise ValueError("Ce candidat a déjà été examiné et ne peut plus être modifié.")
+
+    try:
+        stored_evidence = json.loads(row["evidence_json"] or "{}")
+        if not isinstance(stored_evidence, dict):
+            stored_evidence = {}
+    except (TypeError, ValueError):
+        stored_evidence = {}
+
+    reviewed_at = _now().isoformat()
+    stored_evidence["human_review"] = {
+        "decision": decision,
+        "evidence": evidence,
+        "reviewed_at": reviewed_at,
+    }
+    status = "confirmed" if decision == "confirm" else "rejected"
+    cursor = db.execute(
+        """UPDATE perception_fusion_candidates
+           SET status=?, evidence_json=?
+           WHERE id=? AND user_id=? AND status='candidate'""",
+        (
+            status,
+            json.dumps(stored_evidence, ensure_ascii=False, allow_nan=False),
+            candidate_id,
+            user_id,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise ValueError("Le candidat a été examiné entre-temps.")
+
+    return {
+        "id": candidate_id,
+        "status": status,
+        "evidence": stored_evidence,
+        "world_knowledge_promoted": False,
+    }

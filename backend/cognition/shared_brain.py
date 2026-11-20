@@ -7,8 +7,10 @@ into learned knowledge. Both interfaces consume the same snapshot.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 SNAPSHOT_VERSION = "34.0"
 DEFAULT_LIMIT = 8
@@ -19,6 +21,8 @@ MAX_CONTEXT_CHARS = 18000
 TABLES = {
     "vocabulary": ("personal_vocabulary", "updated_at DESC, word ASC"),
     "sensory_observations": ("sensory_observations", "created_at DESC"),
+    "word_visual_associations": ("word_visual_associations", "created_at DESC"),
+    "perception_fusions": ("perception_fusion_candidates", "created_at DESC"),
     "world_entities": ("world_entities", "last_observed_at DESC"),
     "world_relations": ("world_relations", "updated_at DESC"),
     "object_properties": ("object_properties", "updated_at DESC"),
@@ -55,6 +59,11 @@ def _decode_json_fields(item: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def _is_missing_table_error(error: sqlite3.OperationalError, table: str) -> bool:
+    message = str(error).casefold()
+    return "no such table" in message and table.casefold() in message
+
+
 def _rows(
     db: sqlite3.Connection,
     table: str,
@@ -67,20 +76,67 @@ def _rows(
             f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
             (user_id, limit),
         ).fetchall()
-    except sqlite3.OperationalError:
-        # Read legacy rows until startup migration copies them into memories_v19.
-        if table == "memories_v19":
+    except sqlite3.OperationalError as exc:
+        # Missing optional tables are expected during legacy migrations.
+        # Missing columns, locks, and other operational failures must surface:
+        # silently returning [] would make Chappie appear to have forgotten data.
+        if table == "memories_v19" and _is_missing_table_error(exc, table):
             try:
                 rows = db.execute(
                     "SELECT * FROM memories WHERE user_id=? "
                     "ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ?",
                     (user_id, limit),
                 ).fetchall()
-            except sqlite3.OperationalError:
-                return []
-        else:
+            except sqlite3.OperationalError as legacy_exc:
+                if _is_missing_table_error(legacy_exc, "memories"):
+                    return []
+                raise
+        elif _is_missing_table_error(exc, table):
             return []
-    return [_decode_json_fields(dict(row)) for row in rows]
+        else:
+            raise
+    decoded_rows: list[dict[str, Any]] = []
+    for raw_row in rows:
+        item = _decode_json_fields(dict(raw_row))
+        if table == "memories_v19":
+            # Legacy fallback schemas may omit newer provenance columns, but
+            # present fields must still have trustworthy primitive types.
+            if not isinstance(item.get("user_id"), str):
+                continue
+            if not isinstance(item.get("content"), str) or not item["content"].strip():
+                continue
+            if not isinstance(item.get("category"), str):
+                continue
+            if "source_type" in item:
+                source_type = item.get("source_type")
+                if not isinstance(source_type, str) or source_type not in {
+                    "observed", "taught", "inferred", "confirmed"
+                }:
+                    continue
+            importance = item.get("importance")
+            if isinstance(importance, bool) or not isinstance(importance, int):
+                continue
+            if "confidence" in item:
+                confidence = item.get("confidence")
+                if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                    continue
+                try:
+                    confidence = float(confidence)
+                except (OverflowError, TypeError, ValueError):
+                    continue
+                if not 0.0 <= confidence <= 1.0 or not math.isfinite(confidence):
+                    continue
+            tags = item.get("tags", [])
+            if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                continue
+            timestamps_valid = all(
+                timestamp_key not in item or isinstance(item[timestamp_key], str)
+                for timestamp_key in ("created_at", "updated_at")
+            )
+            if not timestamps_valid:
+                continue
+        decoded_rows.append(item)
+    return decoded_rows
 
 
 def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
@@ -88,15 +144,46 @@ def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
         return int(db.execute(
             f"SELECT COUNT(*) FROM {table} WHERE user_id=?", (user_id,)
         ).fetchone()[0])
-    except sqlite3.OperationalError:
-        if table == "memories_v19":
+    except sqlite3.OperationalError as exc:
+        if table == "memories_v19" and _is_missing_table_error(exc, table):
             try:
                 return int(db.execute(
                     "SELECT COUNT(*) FROM memories WHERE user_id=?", (user_id,)
                 ).fetchone()[0])
-            except sqlite3.OperationalError:
-                return 0
-        return 0
+            except sqlite3.OperationalError as legacy_exc:
+                if _is_missing_table_error(legacy_exc, "memories"):
+                    return 0
+                raise
+        if _is_missing_table_error(exc, table):
+            return 0
+        raise
+
+
+@contextmanager
+def _consistent_read_snapshot(db: sqlite3.Connection) -> Iterator[None]:
+    """Keep all snapshot SELECTs on one transaction without stealing ownership.
+
+    A standalone call opens and closes its own read transaction. If the caller
+    already owns a transaction, it is reused unchanged. This avoids relying on
+    nested SAVEPOINT behavior that is not safe in the current libSQL Python
+    driver.
+    """
+    owns_transaction = not bool(getattr(db, "in_transaction", False))
+    if owns_transaction:
+        db.execute("BEGIN")
+    try:
+        yield
+    except BaseException:
+        if owns_transaction:
+            try:
+                db.rollback()
+            except Exception:
+                # Preserve the original read/formatting failure.
+                pass
+        raise
+    else:
+        if owns_transaction:
+            db.commit()
 
 
 def get_shared_brain_snapshot(
@@ -105,15 +192,26 @@ def get_shared_brain_snapshot(
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     """Return one compact snapshot of all persisted cognitive systems."""
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("Un identifiant utilisateur est obligatoire.")
-    limit = max(1, min(int(limit), MAX_LIMIT))
+    if not isinstance(user_id, str):
+        raise ValueError("L'identifiant utilisateur doit être du texte.")
+    user_id = user_id.strip()
+    if not user_id or len(user_id) > 80:
+        raise ValueError("Identifiant utilisateur invalide.")
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
+    if limit < 1:
+        raise ValueError("La limite doit être un entier positif.")
+    limit = min(limit, MAX_LIMIT)
 
     data: dict[str, Any] = {}
     totals: dict[str, int] = {}
-    for key, (table, order_by) in TABLES.items():
-        data[key] = _rows(db, table, order_by, user_id, limit)
-        totals[key] = _count(db, table, user_id)
+    # Rows and aggregate counts must describe the same committed database
+    # state. Without an explicit read transaction, SQLite's legacy transaction
+    # mode can give each SELECT a different snapshot while another writer runs.
+    with _consistent_read_snapshot(db):
+        for key, (table, order_by) in TABLES.items():
+            data[key] = _rows(db, table, order_by, user_id, limit)
+            totals[key] = _count(db, table, user_id)
 
     vocabulary_states = {
         state: sum(1 for word in data["vocabulary"] if word.get("state") == state)
@@ -151,6 +249,8 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
     labels = (
         ("vocabulary", "VOCABULAIRE PERSONNEL — état d'acquisition"),
         ("sensory_observations", "OBSERVATIONS SENSORIELLES — non promues en faits"),
+        ("word_visual_associations", "ASSOCIATIONS MOT-IMAGE — validation explicite et preuve"),
+        ("perception_fusions", "RAPPROCHEMENTS AUDIO/VISION — coïncidences temporelles, non confirmées"),
         ("world_entities", "ENTITÉS DU MODÈLE DU MONDE — conserver provenance/confiance"),
         ("world_relations", "RELATIONS DU MONDE — conserver provenance/confiance"),
         ("object_properties", "PROPRIÉTÉS D'OBJETS — enseignées/observées/confirmées"),
@@ -225,20 +325,36 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
 
 def merge_live_transcript(existing: str, incoming: str) -> str:
     """Merge repeated or incremental transcription chunks without obvious duplication."""
-    old = str(existing or "").strip()
-    new = str(incoming or "").strip()
+    old = existing.strip() if isinstance(existing, str) else ""
+    new = incoming.strip() if isinstance(incoming, str) else ""
     if not new:
         return old
     if not old:
         return new
-    if new == old or old.endswith(new):
+    old_folded = old.casefold()
+    new_folded = new.casefold()
+    if new_folded == old_folded or old_folded.endswith(new_folded):
         return old
-    if new.startswith(old):
+    # Some speech providers resend a shorter prefix of the accumulated
+    # transcript. Treat it as a duplicate instead of appending it again.
+    if old_folded.startswith(new_folded):
+        return old
+    if new_folded.startswith(old_folded):
         return new
 
     # Provider chunks may repeat the tail of the previous chunk.
     max_overlap = min(len(old), len(new), 500)
+    # Only remove overlaps that cover whole word boundaries on both sides.
+    # Partial-word matches can silently eat the start of a genuinely new word.
     for size in range(max_overlap, 0, -1):
-        if old[-size:].casefold() == new[:size].casefold():
+        if old[-size:].casefold() != new[:size].casefold():
+            continue
+        left_boundary = (
+            size == len(old) or not old[-size - 1].isalnum()
+        )
+        right_boundary = (
+            size == len(new) or not new[size].isalnum()
+        )
+        if left_boundary and right_boundary:
             return " ".join((old + " " + new[size:]).split())
     return (old + " " + new).strip()

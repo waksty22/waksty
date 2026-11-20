@@ -2,9 +2,9 @@
 
 ## État vérifié dans le dépôt (branche main au 8 novembre 2026)
 
-- Le stockage réellement utilisé par l'application reste SQLite : `backend/server.py` définit `db_connection()` avec `sqlite3.connect(DB_PATH)`.
-- `backend/storage/connection_factory.py` sait ouvrir SQLite ou Turso selon `CHAPPIE_STORAGE_BACKEND`, mais son en-tête précise qu'il n'est pas encore raccordé à `server.db_connection()`.
-- `backend/storage/libsql_adapter.py` fournit une compatibilité DB-API partielle et des tests isolés ; cela ne prouve pas encore la compatibilité de tout le backend.
+- `server.db_connection()` est raccordé à `open_storage_connection()` : SQLite reste le choix par défaut et Turso est sélectionnable explicitement via `CHAPPIE_STORAGE_BACKEND=turso`.
+- Le mode Turso reste protégé par les contrôles de démarrage (`CHAPPIE_TURSO_CUTOVER_READY`, marqueurs de migration/bootstrap/adoption) ; aucun basculement n'est automatique.
+- `backend/storage/libsql_adapter.py` fournit une compatibilité DB-API partielle et des tests isolés ; cela ne prouve pas encore la compatibilité réelle de tout le backend ni la persistance sur Render.
 - `backend/storage/schema_migration.py` prépare/applique des changements de schéma. Il ne copie aucune ligne métier.
 - `backend/storage/logical_backup.py` sait exporter une base Turso en archive logique chiffrée et vérifier l'intégrité de la restauration temporaire.
 - Les diagnostics de schéma/inventaire sont conçus pour exposer des métadonnées et des volumes, pas le contenu des souvenirs.
@@ -20,6 +20,18 @@
 5. Pas de double écriture SQLite/Turso improvisée : elle pourrait créer des divergences silencieuses.
 6. Le retour arrière doit être préparé et testé avant le cutover.
 7. Les secrets restent dans les variables d'environnement Render ; ne jamais les placer dans Git, les journaux ou les réponses d'API.
+
+
+## Garde-fou de démarrage SQLite après commit Turso
+
+Lorsque le backend SQLite possède encore son fichier local et qu'au moins une des variables `TURSO_DATABASE_URL` ou `TURSO_AUTH_TOKEN` est configurée, le démarrage vérifie désormais le marqueur distant même si `CHAPPIE_ALLOW_TURSO_MIGRATION` est désactivé.
+
+- Si le marqueur distant confirme une migration terminée, le démarrage suspend les écritures SQLite jusqu'à une bascule contrôlée.
+- Si un seul des deux paramètres de connexion est configuré, le démarrage échoue volontairement : une configuration Turso partielle ne doit pas autoriser silencieusement la reprise des écritures locales.
+- Si les deux paramètres sont configurés mais que Turso est temporairement inaccessible, le contrôle distant échoue et le démarrage SQLite est bloqué. C'est un choix *fail-closed* : la disponibilité est sacrifiée pour éviter d'écrire dans une mémoire locale potentiellement obsolète.
+- Si aucun paramètre Turso n'est configuré, ou si le marqueur distant est absent alors que le fichier SQLite local existe, le démarrage SQLite normal reste possible (sous réserve des autres garde-fous).
+
+En exploitation, vérifier la disponibilité de Turso et la paire de paramètres avant un redémarrage Render. Ne jamais supprimer le marqueur distant ni désactiver ce contrôle pour contourner un incident sans avoir établi quelle base contient la mémoire faisant autorité.
 
 ## Phase A — Audit en lecture seule
 
@@ -102,7 +114,7 @@ Revenir à SQLite si le démarrage échoue, si une table manque, si une écritur
 
 - [x] Sauvegarde logique Turso chiffrée avec vérification locale.
 - [x] Outil de comparaison de schéma et de plan de migration non destructif présent.
-- [x] Fabrique de connexions et adaptateur libsql présents, isolés du stockage actif.
+- [x] Fabrique de connexions raccordée à `server.db_connection()` ; SQLite par défaut, sélection Turso explicite et protégée par les garde-fous de démarrage.
 - [x] Diagnostic en lecture seule du chemin SQLite réellement ouvert (V50.20, code/tests prêts ; exécution sur Render à faire après déploiement approuvé).
 - [ ] Audit réel des deux bases et rapport de compatibilité.
 - [ ] Compatibilité complète du backend avec libsql.
@@ -158,14 +170,17 @@ Le migrateur :
 
 ## Complément V50.55.1 — Verrou persistant entre transfert et bascule
 
-Après la validation de la copie vers Turso, le serveur écrit un marqueur local `chappie_storage_migration_state` avec l'état `pending_cutover`, puis installe des déclencheurs SQLite qui refusent INSERT / UPDATE / DELETE sur les tables applicatives.
+Avant toute écriture distante, le serveur effectue un aperçu en lecture seule, puis persiste dans SQLite un marqueur local `chappie_storage_migration_state` avec l'état `migration_in_progress` et installe des déclencheurs qui refusent INSERT / UPDATE / DELETE sur les tables applicatives. Ce verrou est validé avant l'ouverture de la transaction de copie Turso. Après confirmation du commit distant, le marqueur passe à `pending_cutover`.
 
 Pendant cette période :
+- les états `migration_in_progress` et `pending_cutover` sont relus au démarrage et gardent SQLite bloquée, même si les identifiants Turso ont été retirés après un incident ; une erreur de lecture du marqueur local bloque également le démarrage ;
 - les requêtes applicatives d'écriture sont bloquées par le middleware ;
 - les sessions WebSocket Gemini Live sont refusées ;
 - la maintenance autonome s'arrête ;
 - les contrôles de diagnostic, l'aperçu et les sauvegardes restent accessibles ;
 - le marqueur local est relu au redémarrage ; si le fichier SQLite éphémère a disparu mais que `CHAPPIE_ALLOW_TURSO_MIGRATION=1` est encore actif, le serveur vérifie aussi le marqueur durable Turso et refuse de recréer une mémoire SQLite vide.
+
+Si le processus s'arrête après le commit Turso mais avant le passage local à `pending_cutover`, le marqueur `migration_in_progress` et les déclencheurs déjà validés restent présents : le prochain démarrage bloque SQLite sans dépendre des identifiants distants. Si l'accusé de réception du commit est perdu, le résultat distant est considéré comme indéterminé ; aucun rollback client n'est pris comme preuve d'annulation. Il faut vérifier le marqueur distant en lecture seule avant toute reprise ou annulation explicite.
 
 Les tables de garde locales et leurs déclencheurs sont exclus du transfert vers Turso. Les tables virtuelles FTS ne sont pas copiées comme des tables ordinaires : si une table FTS3/4/5 est détectée dans la source ou la cible, l'aperçu bloque la migration. Il faut définir et tester une reconstruction FTS dédiée sur Turso avant de relancer l'aperçu ; aucune table d'ombre FTS n'est transférée.
 
@@ -176,6 +191,6 @@ Les tables de garde locales et leurs déclencheurs sont exclus du transfert vers
 4. Après confirmation du bon fonctionnement, retirer `CHAPPIE_ALLOW_TURSO_MIGRATION`.
 
 ### Annulation avant bascule
-Si Turso n'est pas activé et que l'on souhaite revenir à SQLite, définir temporairement `CHAPPIE_ALLOW_SQLITE_ROLLBACK=1`, puis appeler `POST /api/storage/migration/cancel` avec la phrase exacte `ANNULER LA BASCULE TURSO`. Cette opération retire le marqueur de migration Turso, enlève les déclencheurs locaux et réactive SQLite ; elle ne supprime aucune donnée applicative dans Turso. Redémarrer Render pour relancer la maintenance autonome.
+Si Turso n'est pas activé et que l'on souhaite revenir à SQLite, définir temporairement `CHAPPIE_ALLOW_SQLITE_ROLLBACK=1`, puis appeler `POST /api/storage/migration/cancel` avec la phrase exacte `ANNULER LA BASCULE TURSO`. Cette opération retire le marqueur de migration Turso, enlève les déclencheurs locaux et réactive SQLite ; elle ne supprime aucune donnée applicative dans Turso. Redémarrer Render pour relancer la maintenance autonome. Avant de lever les verrous locaux, l'endpoint vérifie le statut distant : seul un marqueur `completed` peut être retiré ; tout statut incomplet ou inconnu bloque l'annulation et conserve les protections SQLite. Si le marqueur est absent, aucune suppression distante n'est supposée : le transfert et son marqueur sont validés dans la même transaction, et les données Turso ne sont jamais considérées comme annulées par un rollback client.
 
 Cette annulation n'est pas un retour arrière après activation de Turso : après le cutover, SQLite peut être obsolète et doit être restauré/synchronisé depuis une sauvegarde avant tout retour.

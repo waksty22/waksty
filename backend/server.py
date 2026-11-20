@@ -2503,6 +2503,23 @@ def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> b
         turn_state["audio"] = []
         turn_state["audio_chars"] = 0
         return False
+    if user_text:
+        try:
+            with db_connection() as learning_db:
+                learning = record_confirmed_turn_learning(
+                    learning_db,
+                    user_id,
+                    user_text,
+                    evidence="Transcription utilisateur confirmée avant interruption Live",
+                )
+                if learning["heard"] or learning["taught"]:
+                    learning_db.commit()
+        except Exception:
+            log.exception(
+                "[APPRENTISSAGE PARTAGÉ] Échec de l'enregistrement lexical "
+                "d'un tour Live interrompu"
+            )
+
     save_conversation_turn(
         user_id, user_text, assistant_text, source="gemini_live_interrupted"
     )

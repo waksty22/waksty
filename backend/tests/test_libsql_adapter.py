@@ -141,6 +141,51 @@ def test_explicit_close_closes_underlying_connection():
     assert raw.closed is True
 
 
+def test_real_libsql_supports_shared_brain_nested_read_savepoint():
+    """The shared-brain snapshot savepoint must work on the actual libsql driver."""
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    from cognition.shared_brain import _consistent_read_snapshot
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        db.execute(
+            "CREATE TABLE snapshot_probe "
+            "(id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
+        )
+        db.commit()
+
+        # A standalone snapshot can open and release its own savepoint.
+        with _consistent_read_snapshot(db):
+            db.execute(
+                "INSERT INTO snapshot_probe(label) VALUES (?)", ("standalone",)
+            )
+            assert db.execute(
+                "SELECT COUNT(*) FROM snapshot_probe"
+            ).fetchone()[0] == 1
+        assert db.execute(
+            "SELECT COUNT(*) FROM snapshot_probe"
+        ).fetchone()[0] == 1
+        db.rollback()
+
+        # A nested snapshot must not commit the caller's outer transaction.
+        db.execute("BEGIN")
+        with _consistent_read_snapshot(db):
+            db.execute(
+                "INSERT INTO snapshot_probe(label) VALUES (?)", ("nested",)
+            )
+            assert db.execute(
+                "SELECT COUNT(*) FROM snapshot_probe"
+            ).fetchone()[0] == 2
+        db.rollback()
+        assert db.execute(
+            "SELECT COUNT(*) FROM snapshot_probe"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
 def test_real_libsql_in_memory_driver_contract():
     """Exercise the actual installed libsql binding without touching Turso."""
     import pytest

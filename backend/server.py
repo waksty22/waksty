@@ -87,8 +87,8 @@ from learning.curriculum import (
 from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
     get_usable_words, get_repeatable_words, gate_spoken_text,
-    record_heard_word, record_heard_text, record_explicit_word_teaching,
-    record_confirmed_turn_learning, text_uses_only_allowed_words,
+    record_heard_word, record_confirmed_turn_learning,
+    text_uses_only_allowed_words,
 )
 from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,

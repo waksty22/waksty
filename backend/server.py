@@ -6133,6 +6133,7 @@ async def websocket_endpoint(
                             not isinstance(image_data, str)
                             or not image_data
                             or len(image_data) > max_encoded_image_chars
+                            or not isinstance(mime_type, str)
                             or mime_type not in {"image/jpeg", "image/png"}
                         ):
                             continue

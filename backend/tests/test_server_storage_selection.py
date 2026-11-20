@@ -1570,17 +1570,18 @@ def test_explicit_sqlite_path_is_respected_by_server_configuration(
 def test_truncate_context_uses_real_newline_section_boundaries():
     import server
 
-    first_section = "SECTION A\n" + ("a" * 40)
-    second_section = "SECTION B\n" + ("b" * 40)
-    third_section = "SECTION C\n" + ("c" * 40)
-    context = first_section + "\n\n" + second_section + "\n\n" + third_section
+    newline = chr(10)
+    first_section = "SECTION A" + newline + ("a" * 90)
+    second_section = "SECTION B" + newline + ("b" * 90)
+    third_section = "SECTION C" + newline + ("c" * 90)
+    context = first_section + newline * 2 + second_section + newline * 2 + third_section
 
-    truncated = server._truncate_context_at_section_boundary(context, 180)
+    truncated = server._truncate_context_at_section_boundary(context, 256)
 
-    assert len(truncated) <= 180
+    assert len(truncated) <= 256
     assert truncated.startswith(first_section)
-    assert "\\n" not in truncated
-    assert "\n\n" in truncated
+    assert "SECTION B" not in truncated
+    assert newline * 2 in truncated
     assert "[Contexte historique partiellement omis" in truncated
     assert "\\n" not in truncated
 

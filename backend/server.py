@@ -3275,15 +3275,14 @@ async def run_brain(
     # This lets newborn Chappie repeat words he has actually heard in chat.
     try:
         with db_connection() as teaching_db:
-            heard = record_heard_text(
-                teaching_db, user_id, message,
+            learning = record_confirmed_turn_learning(
+                teaching_db,
+                user_id,
+                message,
                 evidence="Message écrit reçu par le chat classique",
-                max_tokens=30,
             )
-            taught = record_explicit_word_teaching(
-                teaching_db, user_id, message,
-                evidence="Enseignement explicite via le chat classique",
-            )
+            heard = learning["heard"]
+            taught = learning["taught"]
             if heard or taught:
                 teaching_db.commit()
             if heard:

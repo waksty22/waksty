@@ -161,35 +161,29 @@ def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
 
 @contextmanager
 def _consistent_read_snapshot(db: sqlite3.Connection) -> Iterator[None]:
-    """Keep all snapshot SELECTs on one database read snapshot.
+    """Keep all snapshot SELECTs on one transaction without stealing ownership.
 
-    SAVEPOINT is supported by SQLite and libSQL. It also nests safely when the
-    caller already owns a transaction, unlike an unconditional BEGIN/COMMIT.
+    A standalone call opens and closes its own read transaction. If the caller
+    already owns a transaction, it is reused unchanged. This avoids relying on
+    nested SAVEPOINT behavior that is not safe in the current libSQL Python
+    driver.
     """
-    # An already-active caller transaction is itself the stable snapshot.
-    # Avoid nesting a SAVEPOINT on libSQL: its Python driver can release the
-    # outer transaction when a savepoint is released in this usage pattern.
-    if getattr(db, "in_transaction", False):
-        yield
-        return
-
-    savepoint = "chappie_shared_brain_snapshot"
-    db.execute(f"SAVEPOINT {savepoint}")
+    owns_transaction = not bool(getattr(db, "in_transaction", False))
+    if owns_transaction:
+        db.execute("BEGIN")
     try:
         yield
     except BaseException:
-        try:
-            db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-        except Exception:
-            # Preserve the original read/formatting failure.
-            pass
-        try:
-            db.execute(f"RELEASE SAVEPOINT {savepoint}")
-        except Exception:
-            pass
+        if owns_transaction:
+            try:
+                db.rollback()
+            except Exception:
+                # Preserve the original read/formatting failure.
+                pass
         raise
     else:
-        db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        if owns_transaction:
+            db.commit()
 
 
 def get_shared_brain_snapshot(

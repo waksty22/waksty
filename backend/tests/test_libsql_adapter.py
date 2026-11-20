@@ -141,8 +141,8 @@ def test_explicit_close_closes_underlying_connection():
     assert raw.closed is True
 
 
-def test_real_libsql_supports_shared_brain_nested_read_savepoint():
-    """The shared-brain snapshot savepoint must work on the actual libsql driver."""
+def test_real_libsql_shared_snapshot_preserves_active_outer_transaction():
+    """An existing libSQL transaction remains caller-owned across snapshots."""
     import pytest
 
     libsql = pytest.importorskip("libsql")
@@ -169,22 +169,25 @@ def test_real_libsql_supports_shared_brain_nested_read_savepoint():
         ).fetchone()[0] == 1
         db.rollback()
 
-        # A nested snapshot must not commit the caller's outer transaction.
+        # When the caller owns a transaction, the snapshot must not nest a
+        # savepoint: the caller must retain control of commit/rollback.
         db.execute("BEGIN")
+        assert db.in_transaction is True
         with _consistent_read_snapshot(db):
+            assert db.in_transaction is True
             db.execute(
-                "INSERT INTO snapshot_probe(label) VALUES (?)", ("nested",)
+                "INSERT INTO snapshot_probe(label) VALUES (?)", ("outer",)
             )
             assert db.execute(
                 "SELECT COUNT(*) FROM snapshot_probe"
-            ).fetchone()[0] == 2
+            ).fetchone()[0] == 1
+        assert db.in_transaction is True
         db.rollback()
         assert db.execute(
             "SELECT COUNT(*) FROM snapshot_probe"
         ).fetchone()[0] == 0
     finally:
         db.close()
-
 
 def test_real_libsql_in_memory_driver_contract():
     """Exercise the actual installed libsql binding without touching Turso."""

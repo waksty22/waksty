@@ -6156,6 +6156,9 @@ async def websocket_endpoint(
                                 image_data, mime_type
                             )
                             if visual_observation is not None:
+                                # Advance the throttle even on a transient storage
+                                # failure so a high-rate camera cannot flood logs.
+                                live_turn_state["last_visual_observation_at"] = visual_now
                                 try:
                                     with db_connection() as visual_db:
                                         record_observation(
@@ -6168,7 +6171,6 @@ async def websocket_endpoint(
                                             metadata=visual_observation["metadata"],
                                         )
                                         visual_db.commit()
-                                    live_turn_state["last_visual_observation_at"] = visual_now
                                 except Exception:
                                     log.exception(
                                         "[GEMINI LIVE] Échec mémorisation réception image"

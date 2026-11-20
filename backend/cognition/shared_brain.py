@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 SNAPSHOT_VERSION = "34.0"
 DEFAULT_LIMIT = 8
@@ -158,6 +159,32 @@ def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
         raise
 
 
+@contextmanager
+def _consistent_read_snapshot(db: sqlite3.Connection) -> Iterator[None]:
+    """Keep all snapshot SELECTs on one database read snapshot.
+
+    SAVEPOINT is supported by SQLite and libSQL. It also nests safely when the
+    caller already owns a transaction, unlike an unconditional BEGIN/COMMIT.
+    """
+    savepoint = "chappie_shared_brain_snapshot"
+    db.execute(f"SAVEPOINT {savepoint}")
+    try:
+        yield
+    except BaseException:
+        try:
+            db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+        except Exception:
+            # Preserve the original read/formatting failure.
+            pass
+        try:
+            db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        except Exception:
+            pass
+        raise
+    else:
+        db.execute(f"RELEASE SAVEPOINT {savepoint}")
+
+
 def get_shared_brain_snapshot(
     db: sqlite3.Connection,
     user_id: str,
@@ -177,9 +204,13 @@ def get_shared_brain_snapshot(
 
     data: dict[str, Any] = {}
     totals: dict[str, int] = {}
-    for key, (table, order_by) in TABLES.items():
-        data[key] = _rows(db, table, order_by, user_id, limit)
-        totals[key] = _count(db, table, user_id)
+    # Rows and aggregate counts must describe the same committed database
+    # state. Without an explicit read transaction, SQLite's legacy transaction
+    # mode can give each SELECT a different snapshot while another writer runs.
+    with _consistent_read_snapshot(db):
+        for key, (table, order_by) in TABLES.items():
+            data[key] = _rows(db, table, order_by, user_id, limit)
+            totals[key] = _count(db, table, user_id)
 
     vocabulary_states = {
         state: sum(1 for word in data["vocabulary"] if word.get("state") == state)

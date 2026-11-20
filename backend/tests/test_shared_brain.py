@@ -47,6 +47,10 @@ class _TransactionCheckingConnection:
     def __init__(self, connection):
         self.connection = connection
 
+    @property
+    def in_transaction(self):
+        return self.connection.in_transaction
+
     def execute(self, sql, parameters=()):
         if sql.lstrip().upper().startswith("SELECT"):
             assert self.connection.in_transaction, (
@@ -54,8 +58,14 @@ class _TransactionCheckingConnection:
             )
         return self.connection.execute(sql, parameters)
 
+    def commit(self):
+        return self.connection.commit()
 
-def test_snapshot_reads_are_consistent_and_nested_transactions_are_preserved():
+    def rollback(self):
+        return self.connection.rollback()
+
+
+def test_snapshot_reads_are_consistent_and_caller_transactions_are_preserved():
     db = make_db()
     checked = _TransactionCheckingConnection(db)
 
@@ -63,8 +73,8 @@ def test_snapshot_reads_are_consistent_and_nested_transactions_are_preserved():
     get_shared_brain_snapshot(checked, "creator")
     assert not db.in_transaction
 
-    # When called inside a caller-owned transaction, the snapshot uses a
-    # nested savepoint and must not commit or end the caller's transaction.
+    # When called inside a caller-owned transaction, the snapshot must not
+    # commit or end the caller's transaction.
     db.execute(
         "INSERT INTO personal_vocabulary VALUES "
         "(1,'creator','bonjour','','heard',1,'','t0','t1')"

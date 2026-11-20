@@ -43,6 +43,40 @@ def make_db():
     return db
 
 
+class _TransactionCheckingConnection:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, sql, parameters=()):
+        if sql.lstrip().upper().startswith("SELECT"):
+            assert self.connection.in_transaction, (
+                "every snapshot SELECT must share an explicit read transaction"
+            )
+        return self.connection.execute(sql, parameters)
+
+
+def test_snapshot_reads_are_consistent_and_nested_transactions_are_preserved():
+    db = make_db()
+    checked = _TransactionCheckingConnection(db)
+
+    # A standalone snapshot must open and release its own read transaction.
+    get_shared_brain_snapshot(checked, "creator")
+    assert not db.in_transaction
+
+    # When called inside a caller-owned transaction, the snapshot uses a
+    # nested savepoint and must not commit or end the caller's transaction.
+    db.execute(
+        "INSERT INTO personal_vocabulary VALUES "
+        "(1,'creator','bonjour','','heard',1,'','t0','t1')"
+    )
+    assert db.in_transaction
+    snapshot = get_shared_brain_snapshot(checked, "creator")
+    assert snapshot["vocabulary"][0]["word"] == "bonjour"
+    assert db.in_transaction
+    db.rollback()
+    db.close()
+
+
 def test_snapshot_unifies_persisted_modules_without_promoting_observations():
     db = make_db()
     db.execute(

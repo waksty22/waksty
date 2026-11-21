@@ -69,7 +69,7 @@ def _prepare_legacy_skills_database(path: Path) -> None:
         connection.close()
 
 
-def test_get_emotions_supports_existing_skills_schema_without_xp(
+def test_explicit_initialization_supports_existing_skills_schema_without_xp(
     monkeypatch, tmp_path
 ):
     database_path = tmp_path / "chappie.sqlite3"
@@ -78,6 +78,7 @@ def test_get_emotions_supports_existing_skills_schema_without_xp(
     monkeypatch.setattr(server, "DB_PATH", database_path)
 
     emotions = server.get_emotions("creator")
+    server.ensure_user_state_initialized("creator")
 
     assert emotions["user_id"] == "creator"
     with sqlite3.connect(database_path) as connection:

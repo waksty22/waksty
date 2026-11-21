@@ -1491,23 +1491,23 @@ def ensure_user_state_initialized(user_id: str) -> None:
     with db_connection() as db:
         required_defaults = [
             ("emotional_state",
-             """INSERT INTO emotional_state
+             """INSERT OR IGNORE INTO emotional_state
                 (user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
              (user_id, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, now)),
             ("relationships",
-             """INSERT INTO relationships
+             """INSERT OR IGNORE INTO relationships
                 (user_id, trust, affection, dependence, updated_at)
                 VALUES (?, ?, ?, ?, ?)""",
              (user_id, 0.0, 0.0, 0.0, now)),
             ("user_intentions",
-             """INSERT INTO user_intentions
+             """INSERT OR IGNORE INTO user_intentions
                 (user_id, current_intent, confidence, details, updated_at)
                 VALUES (?, ?, ?, ?, ?)""",
              (user_id, "éveil sensoriel", 0.1,
               "Aucune connaissance personnelle validée.", now)),
             ("maintenance_state",
-             """INSERT INTO maintenance_state
+             """INSERT OR IGNORE INTO maintenance_state
                 (user_id, last_active_at, last_dream_at, updated_at)
                 VALUES (?, ?, ?, ?)""",
              (user_id, now, "", now)),
@@ -1532,11 +1532,11 @@ def ensure_user_state_initialized(user_id: str) -> None:
         if missing_skills:
             skill_columns = _skill_table_columns(db)
             if "xp" in skill_columns:
-                skill_insert_sql = """INSERT INTO skills
+                skill_insert_sql = """INSERT OR IGNORE INTO skills
                     (user_id, skill_name, level, xp, evidence, updated_at)
                     VALUES (?, ?, 0.0, 0.0, ?, ?)"""
             else:
-                skill_insert_sql = """INSERT INTO skills
+                skill_insert_sql = """INSERT OR IGNORE INTO skills
                     (user_id, skill_name, level, evidence, updated_at)
                     VALUES (?, ?, 0.0, ?, ?)"""
             for skill_id, label in missing_skills:

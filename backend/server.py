@@ -1560,6 +1560,7 @@ def get_emotions(user_id: str) -> dict[str, Any]:
     }
 
 def get_relationship(user_id: str) -> dict[str, Any]:
+    user_id = valid_user(user_id)
 
     with db_connection() as db:  
         row = db.execute(  
@@ -1579,6 +1580,7 @@ def get_relationship(user_id: str) -> dict[str, Any]:
     }
 
 def get_user_intention(user_id: str) -> dict[str, Any]:
+    user_id = valid_user(user_id)
 
     with db_connection() as db:  
         row = db.execute(  
@@ -1599,6 +1601,7 @@ def get_user_intention(user_id: str) -> dict[str, Any]:
 
 def get_skills_summary(user_id: str) -> dict[str, Any]:
     """Build maturity only from branch-level assessments approved by the supervisor."""
+    user_id = valid_user(user_id)
     with db_connection() as db:
         skill_columns = _skill_table_columns(db)
         xp_expression = "xp" if "xp" in skill_columns else "0.0 AS xp"

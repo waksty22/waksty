@@ -280,7 +280,7 @@ def main():
                         sequence_probe and int(sequence_probe[0][0]) == 9001,
                         "Restored Turso AUTOINCREMENT sequence was not preserved.",
                     )
-                    check.execute_write(
+                    check.execute(
                         "DELETE FROM memories_v19 WHERE user_id=? AND content=?",
                         ("creator", "remote-sequence-probe"),
                     )

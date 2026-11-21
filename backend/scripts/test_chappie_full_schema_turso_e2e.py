@@ -263,7 +263,7 @@ def main():
                     # Verify that restoring the encrypted backup preserved
                     # the remote AUTOINCREMENT high-water mark, even though the
                     # largest currently stored row ID is much smaller.
-                    check.execute_write(
+                    check.execute(
                         """INSERT INTO memories_v19
                            (user_id,category,content,importance,source_type,
                             confidence,tags,access_count,created_at,updated_at)

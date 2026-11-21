@@ -156,6 +156,7 @@ from cognition.shared_brain import (
     format_shared_brain_context,
     merge_live_transcript,
 )
+from learning.live_turn import confirmed_live_transcript
 from storage.turso_compat import inspect_turso_driver
 from storage.connection_factory import (
     ClosingConnection, StorageSettings, open_storage_connection,
@@ -2503,22 +2504,8 @@ def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> b
         turn_state["audio"] = []
         turn_state["audio_chars"] = 0
         return False
-    if user_text:
-        try:
-            with db_connection() as learning_db:
-                learning = record_confirmed_turn_learning(
-                    learning_db,
-                    user_id,
-                    user_text,
-                    evidence="Transcription utilisateur confirmée avant interruption Live",
-                )
-                if learning["heard"] or learning["taught"]:
-                    learning_db.commit()
-        except Exception:
-            log.exception(
-                "[APPRENTISSAGE PARTAGÉ] Échec de l'enregistrement lexical "
-                "d'un tour Live interrompu"
-            )
+    # Preserve an interrupted transcript as conversation history only.
+    # Without turnComplete it is not promoted to lexical, emotional or sensory learning.
 
     save_conversation_turn(
         user_id, user_text, assistant_text, source="gemini_live_interrupted"
@@ -6311,31 +6298,9 @@ async def websocket_endpoint(
                             )
                             live_turn_state["user"] = merged_user_text
                             if new_heard_text:
-                                try:
-                                    with db_connection() as sensory_db:
-                                        live_emotions = update_emotions_once(
-                                            user_id, new_heard_text
-                                        )
-                                        record_affective_snapshot(
-                                            sensory_db, user_id, live_emotions,
-                                            source="gemini_live",
-                                            event_label="transcription utilisateur",
-                                        )
-                                        audio_observation = record_observation(
-                                            sensory_db, user_id, "audio", new_heard_text,
-                                            "gemini_live_transcription",
-                                            confidence=0.8,
-                                            metadata={"language": "fr"},
-                                        )
-                                        link_temporally_cooccurring_observation(
-                                            sensory_db, user_id,
-                                            audio_observation["observation_id"],
-                                        )
-                                        sensory_db.commit()
-                                except Exception:
-                                    log.exception(
-                                        "[GEMINI LIVE] Échec mémorisation transcription"
-                                    )
+                                # Stream the transcript to the UI, but defer all
+                                # cognitive/sensory writes until the provider confirms
+                                # the complete turn. Partial chunks are not experiences.
                                 await websocket.send_json({
                                     "type": "user_text", "text": new_heard_text
                                 })
@@ -6398,6 +6363,38 @@ async def websocket_endpoint(
                                     live_turn_state["assistant"] = merged_assistant_text
 
                     if server_content.get("turnComplete"):
+                        confirmed_user_text = confirmed_live_transcript(
+                            live_turn_state.get("user"),
+                            turn_complete=True,
+                        )
+                        live_turn_state["user"] = confirmed_user_text
+                        if confirmed_user_text:
+                            try:
+                                with db_connection() as sensory_db:
+                                    live_emotions = update_emotions_once(
+                                        user_id, confirmed_user_text
+                                    )
+                                    record_affective_snapshot(
+                                        sensory_db, user_id, live_emotions,
+                                        source="gemini_live",
+                                        event_label="transcription utilisateur",
+                                    )
+                                    audio_observation = record_observation(
+                                        sensory_db, user_id, "audio",
+                                        confirmed_user_text,
+                                        "gemini_live_transcription",
+                                        confidence=0.8,
+                                        metadata={"language": "fr"},
+                                    )
+                                    link_temporally_cooccurring_observation(
+                                        sensory_db, user_id,
+                                        audio_observation["observation_id"],
+                                    )
+                                    sensory_db.commit()
+                            except Exception:
+                                log.exception(
+                                    "[GEMINI LIVE] Échec mémorisation tour confirmé"
+                                )
                         assistant_text = live_turn_state["assistant"].strip()
                         with db_connection() as language_db:
                             repeatable_words = get_repeatable_words(language_db, user_id)

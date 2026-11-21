@@ -1489,42 +1489,58 @@ def ensure_user_state_initialized(user_id: str) -> None:
         ("sens", "👀 Les Sens (Caméra & Voix)"),
     ]
     with db_connection() as db:
-        db.execute(
-            """INSERT OR IGNORE INTO emotional_state
-               (user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, now),
-        )
-        db.execute(
-            """INSERT OR IGNORE INTO relationships
-               (user_id, trust, affection, dependence, updated_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (user_id, 0.0, 0.0, 0.0, now),
-        )
-        db.execute(
-            """INSERT OR IGNORE INTO user_intentions
-               (user_id, current_intent, confidence, details, updated_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (user_id, "éveil sensoriel", 0.1,
-             "Aucune connaissance personnelle validée.", now),
-        )
-        skill_columns = _skill_table_columns(db)
-        if "xp" in skill_columns:
-            skill_insert_sql = """INSERT OR IGNORE INTO skills
-                (user_id, skill_name, level, xp, evidence, updated_at)
-                VALUES (?, ?, 0.0, 0.0, ?, ?)"""
-        else:
-            skill_insert_sql = """INSERT OR IGNORE INTO skills
-                (user_id, skill_name, level, evidence, updated_at)
-                VALUES (?, ?, 0.0, ?, ?)"""
-        for skill_id, label in default_skills:
-            db.execute(skill_insert_sql, (user_id, skill_id, label, now))
-        db.execute(
-            """INSERT OR IGNORE INTO maintenance_state
-               (user_id, last_active_at, last_dream_at, updated_at)
-               VALUES (?, ?, ?, ?)""",
-            (user_id, now, "", now),
-        )
+        required_defaults = [
+            ("emotional_state",
+             """INSERT INTO emotional_state
+                (user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+             (user_id, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, now)),
+            ("relationships",
+             """INSERT INTO relationships
+                (user_id, trust, affection, dependence, updated_at)
+                VALUES (?, ?, ?, ?, ?)""",
+             (user_id, 0.0, 0.0, 0.0, now)),
+            ("user_intentions",
+             """INSERT INTO user_intentions
+                (user_id, current_intent, confidence, details, updated_at)
+                VALUES (?, ?, ?, ?, ?)""",
+             (user_id, "éveil sensoriel", 0.1,
+              "Aucune connaissance personnelle validée.", now)),
+            ("maintenance_state",
+             """INSERT INTO maintenance_state
+                (user_id, last_active_at, last_dream_at, updated_at)
+                VALUES (?, ?, ?, ?)""",
+             (user_id, now, "", now)),
+        ]
+        for table, insert_sql, values in required_defaults:
+            exists = db.execute(
+                f"SELECT 1 FROM {table} WHERE user_id=? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if not exists:
+                db.execute(insert_sql, values)
+
+        existing_skills = {
+            str(row[0]) for row in db.execute(
+                "SELECT skill_name FROM skills WHERE user_id=?", (user_id,)
+            ).fetchall()
+        }
+        missing_skills = [
+            (skill_id, label) for skill_id, label in default_skills
+            if skill_id not in existing_skills
+        ]
+        if missing_skills:
+            skill_columns = _skill_table_columns(db)
+            if "xp" in skill_columns:
+                skill_insert_sql = """INSERT INTO skills
+                    (user_id, skill_name, level, xp, evidence, updated_at)
+                    VALUES (?, ?, 0.0, 0.0, ?, ?)"""
+            else:
+                skill_insert_sql = """INSERT INTO skills
+                    (user_id, skill_name, level, evidence, updated_at)
+                    VALUES (?, ?, 0.0, ?, ?)"""
+            for skill_id, label in missing_skills:
+                db.execute(skill_insert_sql, (user_id, skill_id, label, now))
 
 
 def get_emotions(user_id: str) -> dict[str, Any]:

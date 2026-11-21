@@ -4291,7 +4291,6 @@ async def api_cognitive_skill_catalog(auth=Depends(require_auth)):
 @app.post("/api/cognition/skills/assessments")
 async def api_record_skill_assessment(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    ensure_user_state_initialized(user_id)
     data = await request.json()
     system_value = data.get("system", "")
     branch_value = data.get("branch", "")
@@ -4345,6 +4344,8 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
             ).fetchone()
         if linked_step is None:
             raise HTTPException(status_code=403, detail="L'étape doit appartenir à ton objectif et comporter une preuve déjà enregistrée.")
+    # Invalid requests must not create or mutate per-user cognitive state.
+    ensure_user_state_initialized(user_id)
     details = {
         "source": "supervised_assessment",
         "supervisor_approved": True,

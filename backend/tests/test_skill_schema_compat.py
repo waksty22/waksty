@@ -110,3 +110,63 @@ def test_get_skills_summary_exposes_legacy_xp_as_zero_without_schema_change(
             row[1] for row in connection.execute("PRAGMA table_info(skills)")
         }
     assert "xp" not in columns
+
+
+def test_emotion_and_relationship_getters_are_read_only(monkeypatch, tmp_path):
+    database_path = tmp_path / "read-only.sqlite3"
+    _prepare_legacy_skills_database(database_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    emotions = server.get_emotions("creator")
+    relationship = server.get_relationship("creator")
+    intention = server.get_user_intention("creator")
+
+    assert emotions["energy"] == 100.0
+    assert relationship["trust"] == 50.0
+    assert intention["current_intent"] == "discussion libre"
+    with sqlite3.connect(database_path) as connection:
+        for table in (
+            "emotional_state", "relationships", "user_intentions",
+            "skills", "maintenance_state",
+        ):
+            count = connection.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE user_id=?",
+                ("creator",),
+            ).fetchone()[0]
+            assert count == 0, f"{table} was unexpectedly initialized by a getter"
+
+
+def test_state_initialization_is_explicit_idempotent_and_preserves_progress(
+    monkeypatch, tmp_path
+):
+    database_path = tmp_path / "explicit-init.sqlite3"
+    _prepare_legacy_skills_database(database_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    server.ensure_user_state_initialized("creator")
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE emotional_state SET joy=42 WHERE user_id='creator'"
+        )
+        connection.execute(
+            "UPDATE relationships SET trust=73 WHERE user_id='creator'"
+        )
+        connection.commit()
+
+    server.ensure_user_state_initialized("creator")
+    with sqlite3.connect(database_path) as connection:
+        joy = connection.execute(
+            "SELECT joy FROM emotional_state WHERE user_id='creator'"
+        ).fetchone()[0]
+        trust = connection.execute(
+            "SELECT trust FROM relationships WHERE user_id='creator'"
+        ).fetchone()[0]
+        skill_count = connection.execute(
+            "SELECT COUNT(*) FROM skills WHERE user_id='creator'"
+        ).fetchone()[0]
+
+    assert joy == 42
+    assert trust == 73
+    assert skill_count == 6

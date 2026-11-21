@@ -146,6 +146,19 @@ def test_state_initialization_is_explicit_idempotent_and_preserves_progress(
     monkeypatch.setattr(server, "DB_PATH", database_path)
 
     server.ensure_user_state_initialized("creator")
+    from contextlib import contextmanager
+
+    original_db_connection = server.db_connection
+    write_deltas = []
+
+    @contextmanager
+    def tracked_db_connection():
+        with original_db_connection() as db:
+            before = db.total_changes
+            yield db
+            write_deltas.append(db.total_changes - before)
+
+    monkeypatch.setattr(server, "db_connection", tracked_db_connection)
     with sqlite3.connect(database_path) as connection:
         connection.execute(
             "UPDATE emotional_state SET joy=42 WHERE user_id='creator'"
@@ -156,6 +169,7 @@ def test_state_initialization_is_explicit_idempotent_and_preserves_progress(
         connection.commit()
 
     server.ensure_user_state_initialized("creator")
+    assert write_deltas[-1] == 0, "repeat initialization must not write rows"
     with sqlite3.connect(database_path) as connection:
         joy = connection.execute(
             "SELECT joy FROM emotional_state WHERE user_id='creator'"

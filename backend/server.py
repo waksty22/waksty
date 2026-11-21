@@ -4254,6 +4254,7 @@ async def api_autobiography_stats(auth=Depends(require_auth)):
 @app.get("/api/skills")
 async def api_skills(auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
+    ensure_user_state_initialized(user_id)
 
     skills = get_skills_summary(user_id)  
 
@@ -4287,6 +4288,7 @@ async def api_cognitive_skill_catalog(auth=Depends(require_auth)):
 @app.post("/api/cognition/skills/assessments")
 async def api_record_skill_assessment(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
+    ensure_user_state_initialized(user_id)
     data = await request.json()
     system_value = data.get("system", "")
     branch_value = data.get("branch", "")

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/safe-logical-restore-core
+      - test/verify-remote-autoincrement-restore
     paths:
       - ".github/workflows/chappie-full-schema-isolated-e2e.yml"
       - "backend/**"
@@ -27,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: feat/safe-logical-restore-core
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-python@v7
         with:

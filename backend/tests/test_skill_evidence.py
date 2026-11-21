@@ -310,7 +310,8 @@ def test_skill_assessment_route_rejects_overflowing_score_with_422(monkeypatch):
                 "score": 10 ** 10000,
             }
 
-    monkeypatch.setattr(server, "_authenticated_user", lambda auth: "owner")
+    monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", "owner")
+    monkeypatch.setattr(server, "_authenticated_user", lambda auth: server.valid_user("owner"))
     with pytest.raises(HTTPException) as error:
         asyncio.run(server.api_record_skill_assessment(FakeRequest(), auth="creator"))
     assert error.value.status_code == 422

@@ -275,7 +275,7 @@ def main():
                     sequence_probe = check.execute(
                         "SELECT id FROM memories_v19 WHERE user_id=? AND content=?",
                         ("creator", "remote-sequence-probe"),
-                    ).rows
+                    ).fetchall()
                     need(
                         sequence_probe and int(sequence_probe[0][0]) == 9001,
                         "Restored Turso AUTOINCREMENT sequence was not preserved.",
@@ -309,7 +309,7 @@ def main():
                         )
                     sequence_after_reconnect = reconnect_check.execute(
                         "SELECT seq FROM sqlite_sequence WHERE name='memories_v19'"
-                    ).rows
+                    ).fetchall()
                     need(
                         sequence_after_reconnect
                         and int(sequence_after_reconnect[0][0]) == 9001,

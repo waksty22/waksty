@@ -114,7 +114,7 @@ def test_get_skills_summary_exposes_legacy_xp_as_zero_without_schema_change(
     assert "xp" not in columns
 
 
-def test_emotion_and_relationship_getters_are_read_only(monkeypatch, tmp_path):
+def test_all_cognitive_read_helpers_are_read_only(monkeypatch, tmp_path):
     database_path = tmp_path / "read-only.sqlite3"
     _prepare_legacy_skills_database(database_path)
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
@@ -123,10 +123,13 @@ def test_emotion_and_relationship_getters_are_read_only(monkeypatch, tmp_path):
     emotions = server.get_emotions("creator")
     relationship = server.get_relationship("creator")
     intention = server.get_user_intention("creator")
+    skills = server.get_skills_summary("creator")
 
     assert emotions["energy"] == 100.0
     assert relationship["trust"] == 50.0
     assert intention["current_intent"] == "discussion libre"
+    assert skills["skills"] == []
+    assert skills["validated_branch_assessments"] == 0
     with sqlite3.connect(database_path) as connection:
         for table in (
             "emotional_state", "relationships", "user_intentions",

@@ -101,6 +101,7 @@ def test_get_skills_summary_exposes_legacy_xp_as_zero_without_schema_change(
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
     monkeypatch.setattr(server, "DB_PATH", database_path)
 
+    server.ensure_user_state_initialized("creator")
     summary = server.get_skills_summary("creator")
 
     assert len(summary["skills"]) == 6

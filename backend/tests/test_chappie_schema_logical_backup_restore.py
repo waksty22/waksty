@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import sqlite3
 import zipfile
+
+import pytest
 from pathlib import Path
 
 from scripts.backup_turso import create_backup_archive
@@ -449,3 +451,80 @@ def test_full_chappie_schema_encrypted_backup_restore_roundtrip(
 
     target.close()
     source.close()
+
+
+def _create_small_encrypted_backup(tmp_path: Path) -> tuple[Path, str]:
+    source = sqlite3.connect(":memory:")
+    source.executescript(
+        """
+        CREATE TABLE restore_probe (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            value TEXT NOT NULL
+        );
+        INSERT INTO restore_probe(value) VALUES ('preserved');
+        CREATE INDEX restore_probe_value_idx ON restore_probe(value);
+        """
+    )
+    archive_path = tmp_path / "restore-probe.zip"
+    key = "isolated-restore-failure-test-key"
+    create_backup_archive(source, archive_path, key)
+    source.close()
+    unpacked = tmp_path / "restore-probe-unpacked"
+    unpacked.mkdir()
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        expected = {
+            "chappie-turso-backup.json.enc",
+            "chappie-turso-backup.json.enc.sha256",
+        }
+        assert set(archive.namelist()) == expected
+        for name in expected:
+            (unpacked / name).write_bytes(archive.read(name))
+    return unpacked / "chappie-turso-backup.json.enc", key
+
+
+def test_restore_rolls_back_all_ddl_and_rows_after_mid_restore_failure(tmp_path: Path) -> None:
+    encrypted_path, key = _create_small_encrypted_backup(tmp_path)
+
+    class FailingRestoreConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=(), /):
+            if sql.lstrip().upper().startswith("CREATE INDEX"):
+                raise RuntimeError("simulated restore interruption")
+            return super().execute(sql, parameters)
+
+    target = sqlite3.connect(
+        ":memory:", factory=FailingRestoreConnection
+    )
+    with pytest.raises(RuntimeError, match="simulated restore interruption"):
+        restore_encrypted_logical_backup(
+            target,
+            encrypted_path,
+            key,
+            target_identity="isolated-restore.invalid",
+            expected_target_identity="isolated-restore.invalid",
+            production_identity="production.invalid",
+        )
+
+    assert target.in_transaction is False
+    assert target.execute(
+        "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+    ).fetchall() == []
+    target.close()
+
+
+def test_restore_refuses_production_identity_before_mutating_target(tmp_path: Path) -> None:
+    encrypted_path, key = _create_small_encrypted_backup(tmp_path)
+    target = sqlite3.connect(":memory:")
+    with pytest.raises(PermissionError, match="production"):
+        restore_encrypted_logical_backup(
+            target,
+            encrypted_path,
+            key,
+            target_identity="production.invalid",
+            expected_target_identity="production.invalid",
+            production_identity="production.invalid",
+        )
+    assert target.in_transaction is False
+    assert target.execute(
+        "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+    ).fetchall() == []
+    target.close()

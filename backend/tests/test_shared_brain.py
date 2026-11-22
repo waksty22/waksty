@@ -363,3 +363,15 @@ def test_live_system_policy_requires_refresh_before_relying_on_session_snapshot(
     assert "instantané qui peut devenir obsolète" in policy
     assert "appelle l'outil get_shared_brain_state avant de répondre" in policy
     assert "n'affirme jamais un apprentissage absent de cet état" in policy
+    declarations = server_tool_declarations()
+    refresh_tool = next(
+        tool for tool in declarations
+        if tool.get("name") == "get_shared_brain_state"
+    )
+    assert "OBLIGATOIRE avant toute réponse" in refresh_tool["description"]
+
+
+def server_tool_declarations():
+    import server
+
+    return server.TOOLS[0]["functionDeclarations"]

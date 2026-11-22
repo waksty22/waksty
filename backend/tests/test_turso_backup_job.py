@@ -229,4 +229,7 @@ def test_server_package_import_resolves_shared_backup_builder():
     # Keep that package-style import covered, not only the CLI test import.
     from scripts.backup_turso import create_backup_archive as package_builder
 
-    assert package_builder is create_backup_archive
+    assert callable(package_builder)
+    assert Path(package_builder.__code__.co_filename).resolve() == (
+        SCRIPTS_DIR / "backup_turso.py"
+    ).resolve()

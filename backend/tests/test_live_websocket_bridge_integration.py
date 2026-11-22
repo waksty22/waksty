@@ -349,3 +349,62 @@ def test_websocket_bridge_keeps_concurrent_session_transcripts_isolated(
     ]
     assert client_a_text == ["Session Alpha"]
     assert client_b_text == ["Session Beta"]
+
+
+def test_websocket_bridge_reconnect_starts_with_fresh_turn_state(live_bridge, monkeypatch):
+    _run, calls, first_client = live_bridge
+    second_client = FakeClientWebSocket()
+
+    class InterruptedProvider:
+        async def send(self, _payload):
+            return None
+
+        async def recv(self):
+            return json.dumps({"setupComplete": {}})
+
+        def __aiter__(self):
+            async def iterate():
+                try:
+                    yield json.dumps({
+                        "serverContent": {
+                            "inputTranscription": {"text": "Ancien tour incomplet"}
+                        }
+                    })
+                    raise RuntimeError("simulated connection loss")
+                finally:
+                    first_client.provider_finished.set()
+
+            return iterate()
+
+    second_provider = FakeGeminiWebSocket([
+        {"serverContent": {"inputTranscription": {"text": "Nouveau tour propre"}}},
+        {"serverContent": {"turnComplete": True}},
+    ], second_client)
+    providers = {
+        id(first_client): InterruptedProvider(),
+        id(second_client): second_provider,
+    }
+
+    @asynccontextmanager
+    async def reconnecting_provider_connection(websocket):
+        yield providers[id(websocket)]
+
+    monkeypatch.setattr(
+        server, "supervised_gemini_connection", reconnecting_provider_connection
+    )
+
+    async def execute_reconnect():
+        await server.websocket_endpoint(first_client, ticket="first-ticket")
+        await server.websocket_endpoint(second_client, ticket="second-ticket")
+
+    asyncio.run(execute_reconnect())
+
+    assert calls["learning"] == [("creator", "Nouveau tour propre")]
+    assert calls["emotions"] == [("creator", "Nouveau tour propre")]
+    assert {
+        (user_text, source.get("source"))
+        for _user, user_text, _assistant, source in calls["conversations"]
+    } == {
+        ("Ancien tour incomplet", "gemini_live_interrupted"),
+        ("Nouveau tour propre", "gemini_live"),
+    }

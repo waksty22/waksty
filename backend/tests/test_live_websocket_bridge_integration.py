@@ -133,6 +133,8 @@ def test_websocket_bridge_commits_cognitive_learning_once_after_merged_turn(live
         {"serverContent": {"inputTranscription": {"text": "Bonjour tout"}}},
         {"serverContent": {"inputTranscription": {"text": "tout le monde"}}},
         {"serverContent": {"outputTranscription": {"text": "Bonjour"}, "turnComplete": True}},
+        # A duplicate completion event must not replay writes after state reset.
+        {"serverContent": {"turnComplete": True}},
     ])
 
     assert calls["emotions"] == [("creator", "Bonjour tout le monde")]
@@ -166,3 +168,33 @@ def test_websocket_bridge_never_promotes_disconnected_partial_transcript(live_br
     assert calls["conversations"] == [
         ("creator", "Je voudrais apprendre le mot bonjour", "", {"source": "gemini_live_interrupted"})
     ]
+
+
+
+def test_websocket_bridge_does_not_retry_or_duplicate_learning_after_storage_error(
+    live_bridge, monkeypatch, caplog
+):
+    run, calls, _client = live_bridge
+    observation_attempts = []
+
+    def fail_observation(*_args, **_kwargs):
+        observation_attempts.append("attempt")
+        raise RuntimeError("simulated sensory storage failure")
+
+    monkeypatch.setattr(server, "record_observation", fail_observation)
+    run([
+        {"serverContent": {"inputTranscription": {"text": "Bonjour"}}},
+        {"serverContent": {"turnComplete": True}},
+        # A later completion event must not retry the failed sensory write.
+        {"serverContent": {"turnComplete": True}},
+    ])
+
+    assert observation_attempts == ["attempt"]
+    assert calls["emotions"] == [("creator", "Bonjour")]
+    assert len(calls["affective"]) == 1
+    assert calls["links"] == []
+    assert calls["learning"] == [("creator", "Bonjour")]
+    assert calls["conversations"] == [
+        ("creator", "Bonjour", "", {"source": "gemini_live"})
+    ]
+    assert "Échec mémorisation tour confirmé" in caplog.text

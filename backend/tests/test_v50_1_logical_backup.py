@@ -1019,3 +1019,51 @@ def test_restore_rejects_missing_or_regressed_autoincrement_metadata(tmp_path):
         finally:
             target.close()
 
+def test_encrypted_roundtrip_preserves_empty_autoincrement_high_water_marks(tmp_path):
+    from storage.logical_backup import (
+        export_encrypted_logical_backup,
+        restore_encrypted_logical_backup,
+    )
+
+    source = sqlite3.connect(":memory:")
+    source.executescript("""
+        CREATE TABLE used_then_emptied(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            value TEXT
+        );
+        CREATE TABLE never_used(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            value TEXT
+        );
+        INSERT INTO used_then_emptied(value) VALUES ('temporary');
+        DELETE FROM used_then_emptied;
+    """)
+    artifact = tmp_path / "empty-sequences.enc"
+    password = "isolated-test-password-not-production"
+    try:
+        export_encrypted_logical_backup(source, artifact, password)
+    finally:
+        source.close()
+
+    target = sqlite3.connect(":memory:")
+    try:
+        report = restore_encrypted_logical_backup(
+            target, artifact, password,
+            target_identity="isolated-encrypted-restore",
+            expected_target_identity="isolated-encrypted-restore",
+            production_identity="chappie-db",
+        )
+        assert report["artifact_authenticated"] is True
+        assert report["logical_integrity_verified"] is True
+        assert target.execute(
+            "SELECT name, seq FROM sqlite_sequence ORDER BY name"
+        ).fetchall() == [("never_used", 0), ("used_then_emptied", 1)]
+        assert target.execute(
+            "INSERT INTO used_then_emptied(value) VALUES ('after-restore')"
+        ).lastrowid == 2
+        assert target.execute(
+            "INSERT INTO never_used(value) VALUES ('first-use')"
+        ).lastrowid == 1
+    finally:
+        target.close()
+

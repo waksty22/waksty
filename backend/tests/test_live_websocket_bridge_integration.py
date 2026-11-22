@@ -103,6 +103,15 @@ def live_bridge(monkeypatch):
     monkeypatch.setattr(server, "build_live_initial_history", lambda *_args: {"role": "user", "parts": [{"text": "seed"}]})
     monkeypatch.setattr(server, "db_connection", fake_db_connection)
     monkeypatch.setattr(server, "get_repeatable_words", lambda _db, _user: ["bonjour"])
+    monkeypatch.setattr(
+        server,
+        "get_shared_brain_snapshot",
+        lambda _db, _user, limit=8: {
+            "snapshot_version": "34.0",
+            "statistics": {"totals": {}},
+            "vocabulary": [{"word": "bonjour", "state": "usable"}],
+        },
+    )
     monkeypatch.setattr(server, "get_skills_summary", lambda _user: {"average_level": 0})
     monkeypatch.setattr(server, "text_uses_only_allowed_words", lambda *_args: True)
     monkeypatch.setattr(server, "update_emotions_once", lambda user, text: calls["emotions"].append((user, text)) or {"joy": 50})
@@ -431,3 +440,105 @@ def test_websocket_bridge_rejects_non_boolean_turn_complete_flags(
         "",
         {"source": "gemini_live_interrupted"},
     )]
+
+
+def test_websocket_bridge_refreshes_persisted_brain_before_releasing_next_turn(
+    live_bridge, monkeypatch
+):
+    run, _calls, _client = live_bridge
+    snapshots = [
+        {
+            "snapshot_version": "34.0",
+            "statistics": {"totals": {"memories": 1}},
+            "vocabulary": [{"word": "bonjour", "state": "usable"}],
+        },
+        {
+            "snapshot_version": "34.0",
+            "statistics": {"totals": {"memories": 2}},
+            "vocabulary": [
+                {"word": "bonjour", "state": "usable"},
+                {"word": "merci", "state": "usable"},
+            ],
+        },
+    ]
+    snapshot_calls = []
+
+    def read_snapshot(_db, _user, limit=8):
+        snapshot_calls.append(limit)
+        return snapshots.pop(0)
+
+    word_reads = iter([
+        ["bonjour"],  # initial session vocabulary
+        ["bonjour"],  # speech gate for the completed assistant turn
+        ["bonjour", "merci"],  # refreshed persisted vocabulary
+    ])
+    monkeypatch.setattr(server, "get_shared_brain_snapshot", read_snapshot)
+    monkeypatch.setattr(
+        server, "get_repeatable_words", lambda _db, _user: next(word_reads)
+    )
+
+    provider = run([
+        {"serverContent": {"inputTranscription": {"text": "Merci"}}},
+        {"serverContent": {"turnComplete": True}},
+    ])
+
+    refresh_messages = [
+        message["clientContent"]
+        for message in provider.sent
+        if "clientContent" in message
+        and message["clientContent"].get("turnComplete") is False
+    ]
+    assert len(refresh_messages) == 1
+    refresh_text = refresh_messages[0]["turns"][0]["parts"][0]["text"]
+    assert "MISE À JOUR DU CERVEAU PARTAGÉ" in refresh_text
+    assert "merci" in refresh_text
+    assert snapshot_calls == [2, 2]
+    assert any(item.get("type") == "turn_complete" for item in _client.sent)
+
+
+def test_websocket_bridge_closes_instead_of_continuing_with_stale_brain_context(
+    live_bridge, monkeypatch
+):
+    run, calls, client = live_bridge
+    snapshot_reads = 0
+
+    def fail_refresh(_db, _user, limit=8):
+        nonlocal snapshot_reads
+        snapshot_reads += 1
+        if snapshot_reads == 1:
+            return {
+                "snapshot_version": "34.0",
+                "statistics": {"totals": {}},
+                "vocabulary": [],
+            }
+        raise RuntimeError("simulated shared brain read failure")
+
+    monkeypatch.setattr(server, "get_shared_brain_snapshot", fail_refresh)
+    run([
+        {"serverContent": {"inputTranscription": {"text": "Bonjour"}}},
+        {"serverContent": {"turnComplete": True}},
+    ])
+
+    assert calls["learning"] == [("creator", "Bonjour")]
+    assert calls["conversations"] == [
+        ("creator", "Bonjour", "", {"source": "gemini_live"})
+    ]
+    assert any(code == server.status.WS_1011_INTERNAL_ERROR for code, _ in client.closed)
+    assert not any(item.get("type") == "turn_complete" for item in client.sent)
+    assert any(item.get("type") == "error" for item in client.sent)
+
+
+def test_live_brain_refresh_message_is_incremental_and_does_not_start_a_model_turn():
+    message = server.build_live_brain_refresh_message(
+        {"snapshot_version": "34.0", "statistics": {"totals": {}}, "vocabulary": []},
+        ["merci"],
+        ["ancien"],
+        3,
+    )
+
+    assert message["clientContent"]["turnComplete"] is False
+    text = message["clientContent"]["turns"][0]["parts"][0]["text"]
+    assert "nouveaux mots validés" in text
+    assert "merci" in text
+    assert "ne plus les employer" in text
+    assert "ancien" in text

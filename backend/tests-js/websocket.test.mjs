@@ -38,6 +38,7 @@ function harness(urlFactory) {
     const client = initWebSocket(urlFactory, () => {}, (...args) => states.push(args));
     return {
         client, timers, states, sockets,
+        setRandom(value) { Math.random = () => value; },
         async flush() { await Promise.resolve(); await Promise.resolve(); },
         runNextTimer() {
             const timer = timers.find(item => !item.cleared && !item.ran);
@@ -116,5 +117,19 @@ test("resets retry backoff after a successful WebSocket open", async () => {
         h.sockets[0].open();
         h.sockets[0].close(1006);
         assert.equal(h.timers[1].delay, 1000);
+    } finally { h.restore(); }
+});
+
+test("never exceeds the 30-second retry ceiling, including positive jitter", async () => {
+    const h = harness(async () => { throw new Error("offline"); });
+    try {
+        h.setRandom(1);
+        await h.flush();
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+            h.runNextTimer();
+            await h.flush();
+        }
+        assert.ok(h.timers.every(timer => timer.delay <= 30000));
+        assert.equal(h.timers.at(-1).delay, 30000);
     } finally { h.restore(); }
 });

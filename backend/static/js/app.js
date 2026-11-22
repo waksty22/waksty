@@ -519,10 +519,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (liveStatus) liveStatus.textContent = "Erreur Gemini Live : " + (data.message || data.error);
             }
         }, (state, detail) => {
-            if (!liveStatus) return;
-            if (state === "open") liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
+            if (state === "open" && liveStatus) {
+                liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
+            }
             if (state === "error") {
-                liveStatus.textContent = "Connexion Live impossible : " + (detail?.message || "ticket indisponible");
+                if (liveStatus) {
+                    liveStatus.textContent = "Connexion Live impossible : " + (detail?.message || "ticket indisponible");
+                }
                 const status = Number(detail?.status);
                 const permanentClientError = status >= 400 && status < 500
                     && ![408, 425, 429].includes(status);
@@ -535,7 +538,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 liveSessionRejected = true;
                 releaseLiveMicrophone();
                 liveSocket = null;
-                liveStatus.textContent = "Session refusée ou expirée. Relance le mode Live.";
+                if (liveStatus) {
+                    liveStatus.textContent = "Session refusée ou expirée. Relance le mode Live.";
+                }
             }
         });
 

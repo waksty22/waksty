@@ -6362,7 +6362,7 @@ async def websocket_endpoint(
                                 if merged_assistant_text is not None:
                                     live_turn_state["assistant"] = merged_assistant_text
 
-                    if server_content.get("turnComplete"):
+                    if server_content.get("turnComplete") is True:
                         confirmed_user_text = confirmed_live_transcript(
                             live_turn_state.get("user"),
                             turn_complete=True,

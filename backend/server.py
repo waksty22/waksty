@@ -6536,6 +6536,7 @@ async def websocket_endpoint(
                         live_turn_state["audio"] = []
                         live_turn_state["audio_chars"] = 0
 
+                        refresh_succeeded = False
                         try:
                             with db_connection() as refresh_db:
                                 refreshed_snapshot = get_shared_brain_snapshot(
@@ -6580,6 +6581,7 @@ async def websocket_endpoint(
                                 )
                             live_turn_state["brain_snapshot_fingerprint"] = snapshot_fingerprint
                             live_turn_state["repeatable_words"] = refreshed_words
+                            refresh_succeeded = True
                         except Exception:
                             log.exception(
                                 "[GEMINI LIVE] Échec du rafraîchissement du cerveau partagé"
@@ -6600,7 +6602,7 @@ async def websocket_endpoint(
                         finally:
                             # On failure the bridge task exits and the supervisor
                             # cancels the client task; never release stale input.
-                            if live_turn_state["brain_snapshot_fingerprint"]:
+                            if refresh_succeeded:
                                 brain_context_ready.set()
                         await websocket.send_json({"type": "turn_complete"})
 

@@ -222,3 +222,11 @@ def test_backup_job_rejects_duplicate_archive_members(tmp_path, monkeypatch):
     finally:
         db.close()
 
+
+
+def test_server_package_import_resolves_shared_backup_builder():
+    # server.py imports this helper as scripts.backup_turso at request time.
+    # Keep that package-style import covered, not only the CLI test import.
+    from scripts.backup_turso import create_backup_archive as package_builder
+
+    assert package_builder is create_backup_archive

@@ -408,3 +408,26 @@ def test_websocket_bridge_reconnect_starts_with_fresh_turn_state(live_bridge, mo
         ("Ancien tour incomplet", "gemini_live_interrupted"),
         ("Nouveau tour propre", "gemini_live"),
     }
+
+
+@pytest.mark.parametrize("malformed_completion", ["false", 1, {"complete": True}])
+def test_websocket_bridge_rejects_non_boolean_turn_complete_flags(
+    live_bridge, malformed_completion
+):
+    run, calls, _client = live_bridge
+    run([
+        {"serverContent": {"inputTranscription": {"text": "Apprentissage partiel"}}},
+        {"serverContent": {"turnComplete": malformed_completion}},
+    ])
+
+    assert calls["emotions"] == []
+    assert calls["affective"] == []
+    assert calls["observations"] == []
+    assert calls["links"] == []
+    assert calls["learning"] == []
+    assert calls["conversations"] == [(
+        "creator",
+        "Apprentissage partiel",
+        "",
+        {"source": "gemini_live_interrupted"},
+    )]

@@ -27,8 +27,9 @@ export function initWebSocket(url, onMessageCallback, onStateCallback) {
             INITIAL_RECONNECT_DELAY_MS * (2 ** reconnectAttempts)
         );
         reconnectAttempts += 1;
-        const jitteredDelay = Math.round(
-            exponentialDelay * (1 - RECONNECT_JITTER + Math.random() * RECONNECT_JITTER * 2)
+        const jitteredDelay = Math.min(
+            MAX_RECONNECT_DELAY_MS,
+            Math.round(exponentialDelay * (1 - RECONNECT_JITTER + Math.random() * RECONNECT_JITTER * 2))
         );
         reconnectTimer = setTimeout(() => {
             reconnectTimer = null;

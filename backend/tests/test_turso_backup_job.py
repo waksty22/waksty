@@ -247,9 +247,14 @@ def test_turso_backup_http_endpoint_returns_verifiable_archive_and_headers(
     database = _database()
     lifecycle = {"committed": False, "closed": False}
 
+    class FakeHranaResult:
+        def __init__(self, cursor):
+            self.columns = [column[0] for column in cursor.description or []]
+            self.rows = cursor.fetchall()
+
     class FakeTransaction:
         def execute(self, sql):
-            return database.execute(sql)
+            return FakeHranaResult(database.execute(sql))
 
         def commit(self):
             database.commit()

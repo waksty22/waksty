@@ -327,3 +327,39 @@ def test_snapshot_includes_validated_word_links_and_unconfirmed_perception_candi
     assert "RAPPROCHEMENTS AUDIO/VISION" in context
     assert "coïncidences temporelles, non confirmées" in context
     db.close()
+
+
+def test_live_shared_brain_tool_reads_latest_persisted_snapshot_each_call(monkeypatch):
+    from contextlib import nullcontext
+    import server
+
+    db = make_db()
+    monkeypatch.setattr(server, "db_connection", lambda: nullcontext(db))
+
+    db.execute(
+        "INSERT INTO personal_vocabulary VALUES "
+        "(1,'creator','bonjour','','heard',1,'audio','t0','t1')"
+    )
+    first = server.execute_tool("get_shared_brain_state", {}, "creator")
+    assert [item["word"] for item in first["vocabulary"]] == ["bonjour"]
+
+    # Simulate a new learning event committed while the same Live session stays open.
+    db.execute(
+        "INSERT INTO personal_vocabulary VALUES "
+        "(2,'creator','merci','','heard',1,'audio','t1','t2')"
+    )
+    db.commit()
+
+    second = server.execute_tool("get_shared_brain_state", {}, "creator")
+    assert {item["word"] for item in second["vocabulary"]} == {"bonjour", "merci"}
+    assert second["statistics"]["totals"]["vocabulary"] == 2
+    db.close()
+
+
+def test_live_system_policy_requires_refresh_before_relying_on_session_snapshot():
+    from server import IDENTITY_SYSTEM_INSTRUCTION
+
+    policy = IDENTITY_SYSTEM_INSTRUCTION.casefold()
+    assert "instantané qui peut devenir obsolète" in policy
+    assert "appelle l'outil get_shared_brain_state avant de répondre" in policy
+    assert "n'affirme jamais un apprentissage absent de cet état" in policy

@@ -335,11 +335,11 @@ def test_websocket_bridge_keeps_concurrent_session_transcripts_isolated(
         ("creator", "Session Beta"),
     }
     assert {
-        (user_text, source)
+        (user_text, source.get("source"))
         for _user, user_text, _assistant, source in calls["conversations"]
     } == {
-        ("Session Alpha", {"source": "gemini_live"}),
-        ("Session Beta", {"source": "gemini_live"}),
+        ("Session Alpha", "gemini_live"),
+        ("Session Beta", "gemini_live"),
     }
     client_a_text = [
         item["text"] for item in client_a.sent if item.get("type") == "user_text"

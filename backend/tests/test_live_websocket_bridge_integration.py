@@ -292,3 +292,60 @@ def test_websocket_bridge_provider_failure_preserves_partial_history_without_lea
         "",
         {"source": "gemini_live_interrupted"},
     )]
+
+
+
+def test_websocket_bridge_keeps_concurrent_session_transcripts_isolated(
+    live_bridge, monkeypatch
+):
+    _run, calls, client_a = live_bridge
+    client_b = FakeClientWebSocket()
+    provider_a = FakeGeminiWebSocket([
+        {"serverContent": {"inputTranscription": {"text": "Session Alpha"}}},
+        {"serverContent": {"turnComplete": True}},
+    ], client_a)
+    provider_b = FakeGeminiWebSocket([
+        {"serverContent": {"inputTranscription": {"text": "Session Beta"}}},
+        {"serverContent": {"turnComplete": True}},
+    ], client_b)
+    providers = {id(client_a): provider_a, id(client_b): provider_b}
+
+    @asynccontextmanager
+    async def concurrent_provider_connection(websocket):
+        yield providers[id(websocket)]
+
+    monkeypatch.setattr(
+        server, "supervised_gemini_connection", concurrent_provider_connection
+    )
+
+    async def execute_both():
+        await asyncio.gather(
+            server.websocket_endpoint(client_a, ticket="ticket-alpha"),
+            server.websocket_endpoint(client_b, ticket="ticket-beta"),
+        )
+
+    asyncio.run(execute_both())
+
+    assert set(calls["emotions"]) == {
+        ("creator", "Session Alpha"),
+        ("creator", "Session Beta"),
+    }
+    assert set(calls["learning"]) == {
+        ("creator", "Session Alpha"),
+        ("creator", "Session Beta"),
+    }
+    assert {
+        (user_text, source)
+        for _user, user_text, _assistant, source in calls["conversations"]
+    } == {
+        ("Session Alpha", {"source": "gemini_live"}),
+        ("Session Beta", {"source": "gemini_live"}),
+    }
+    client_a_text = [
+        item["text"] for item in client_a.sent if item.get("type") == "user_text"
+    ]
+    client_b_text = [
+        item["text"] for item in client_b.sent if item.get("type") == "user_text"
+    ]
+    assert client_a_text == ["Session Alpha"]
+    assert client_b_text == ["Session Beta"]

@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - test/live-brain-refresh-per-tool-call
   pull_request:
     branches:
       - main
+      - feat/safe-logical-restore-core
 
 jobs:
   quality:

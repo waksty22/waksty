@@ -568,8 +568,18 @@ def test_live_brain_refresh_message_is_incremental_and_does_not_start_a_model_tu
     assert "ancien" in text
 
 
-def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(live_bridge):
+def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(
+    live_bridge, monkeypatch
+):
     run, _calls, client = live_bridge
+    snapshots = [
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 1}}, "vocabulary": []},
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 2}}, "vocabulary": []},
+    ]
+    monkeypatch.setattr(
+        server, "get_shared_brain_snapshot",
+        lambda _db, _user, limit=8: snapshots.pop(0),
+    )
     client.coordinate_refresh = True
     client.incoming_payloads = [
         {"action": "text", "text": "premier"},

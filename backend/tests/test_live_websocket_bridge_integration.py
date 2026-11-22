@@ -184,6 +184,10 @@ def test_websocket_bridge_commits_cognitive_learning_once_after_merged_turn(live
     assert relayed_text == ["Bonjour tout", "le monde"]
     assert any(item.get("type") == "turn_complete" for item in client.sent)
     assert provider.sent[0]["setup"]["tools"] == server.TOOLS
+    assert not any(
+        message.get("clientContent", {}).get("turnComplete") is False
+        for message in provider.sent
+    ), "Unchanged brain snapshots should not be resent."
 
 
 def test_websocket_bridge_never_promotes_disconnected_partial_transcript(live_bridge):

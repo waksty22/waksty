@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - fix/live-learning-on-turn-complete
+      - test/live-websocket-bridge-integration
   pull_request:
     branches:
       - main

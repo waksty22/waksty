@@ -55,7 +55,11 @@ export function initWebSocket(url, onMessageCallback, onStateCallback) {
             if (onStateCallback) onStateCallback("error", error);
 
             const status = Number(error?.status);
-            if (status === 401 || status === 403) {
+            // Retry network failures and explicitly transient HTTP responses only.
+            // Other 4xx responses indicate a permanent request/configuration problem.
+            const retryableStatus = [408, 425, 429].includes(status) || status >= 500;
+            const hasHttpStatus = Number.isInteger(status) && status > 0;
+            if (hasHttpStatus && !retryableStatus) {
                 stopReconnect();
                 return;
             }

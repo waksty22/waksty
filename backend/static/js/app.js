@@ -436,8 +436,17 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================
     let liveSocket = null;
     let liveRecorder = null;
+    let liveSessionRejected = false;
     const liveBtn = document.getElementById("liveBtn");
     const liveStatus = document.getElementById("liveStatus");
+
+    function releaseLiveMicrophone() {
+        if (liveRecorder && typeof liveRecorder.stop === "function") {
+            liveRecorder.stop();
+        }
+        liveRecorder = null;
+        if (liveBtn) liveBtn.textContent = "▶ Démarrer la conversation live";
+    }
 
     window.toggleLive = async function() {
         if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
@@ -452,6 +461,7 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
+        liveSessionRejected = false;
         if (liveStatus) liveStatus.textContent = "Connexion au flux Live en cours...";
 
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -511,12 +521,33 @@ document.addEventListener("DOMContentLoaded", () => {
         }, (state, detail) => {
             if (!liveStatus) return;
             if (state === "open") liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
-            if (state === "error") liveStatus.textContent = "Connexion Live impossible : " + (detail?.message || "ticket indisponible");
-            if (state === "close" && detail?.code === 1008) liveStatus.textContent = "Session refusée ou expirée. Relance le mode Live.";
+            if (state === "error") {
+                liveStatus.textContent = "Connexion Live impossible : " + (detail?.message || "ticket indisponible");
+                const status = Number(detail?.status);
+                const permanentClientError = status >= 400 && status < 500
+                    && ![408, 425, 429].includes(status);
+                if (permanentClientError) {
+                    liveSessionRejected = true;
+                    releaseLiveMicrophone();
+                }
+            }
+            if (state === "close" && detail?.code === 1008) {
+                liveSessionRejected = true;
+                releaseLiveMicrophone();
+                liveSocket = null;
+                liveStatus.textContent = "Session refusée ou expirée. Relance le mode Live.";
+            }
         });
 
         try {
-            liveRecorder = await initLiveAudioStream(liveSocket);
+            const recorder = await initLiveAudioStream(liveSocket);
+            // A permanent ticket rejection may arrive while the browser is still
+            // waiting for microphone permission. Never leave capture running then.
+            if (liveSessionRejected) {
+                if (recorder && typeof recorder.stop === "function") recorder.stop();
+                return;
+            }
+            liveRecorder = recorder;
             if (liveRecorder && liveBtn) {
                 liveBtn.textContent = "⏹ Arrêter la conversation live";
                 if (liveStatus) liveStatus.textContent = "Microphone prêt. Connexion à Chappie...";

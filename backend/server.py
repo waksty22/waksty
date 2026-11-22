@@ -2491,7 +2491,7 @@ def save_conversation_turn(
         )
 
 def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> bool:
-    """Persist only confirmed text transcripts when a Live session ends unexpectedly."""
+    """Preserve partial Live text as conversation history, never as learning evidence."""
     raw_user_text = turn_state.get("user")
     raw_assistant_text = turn_state.get("assistant")
     user_text = raw_user_text.strip() if isinstance(raw_user_text, str) else ""

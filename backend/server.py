@@ -2994,7 +2994,7 @@ TOOLS = [{
         },
         {
             "name": "get_shared_brain_state",
-            "description": "Consulter l'état récent du cerveau partagé : vocabulaire appris, observations, mémoire, objets, hypothèses, expériences, imitations validées, compétences et émotions simulées. Ne transforme jamais une observation en fait acquis.",
+            "description": "OBLIGATOIRE avant toute réponse qui dépend d'un souvenir, apprentissage, observation, mot, objet, lieu, objectif ou événement susceptible d'avoir changé depuis l'ouverture de la session : relire l'état persistant le plus récent du cerveau partagé. L'outil est en lecture seule et retourne un instantané à jour au moment de l'appel. Ne transforme jamais une observation en fait acquis ; si une donnée manque, reste explicite sur cette incertitude.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {},

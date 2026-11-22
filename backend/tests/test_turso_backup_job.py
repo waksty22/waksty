@@ -181,3 +181,44 @@ def test_backup_job_preserves_verification_error_when_temp_cleanup_fails(
         assert attempted[0].exists()
     finally:
         db.close()
+
+def test_backup_job_verification_never_calls_extractall(tmp_path, monkeypatch):
+    db = _database()
+    output = tmp_path / "no-extractall.zip"
+
+    def forbidden_extractall(*args, **kwargs):
+        raise AssertionError("extractall must not be used for backup verification")
+
+    monkeypatch.setattr(zipfile.ZipFile, "extractall", forbidden_extractall)
+    try:
+        result = create_backup_archive(
+            db, output, "test-only-backup-key-not-production"
+        )
+        assert result["verified_after_packaging"] is True
+        assert output.exists()
+    finally:
+        db.close()
+
+
+def test_backup_job_rejects_duplicate_archive_members(tmp_path, monkeypatch):
+    import backup_turso
+
+    db = _database()
+    output = tmp_path / "duplicate-members.zip"
+    original_namelist = zipfile.ZipFile.namelist
+
+    def duplicate_member(archive):
+        names = original_namelist(archive)
+        return names + names[:1]
+
+    monkeypatch.setattr(zipfile.ZipFile, "namelist", duplicate_member)
+    try:
+        with pytest.raises(ValueError, match="duplicate"):
+            create_backup_archive(
+                db, output, "test-only-backup-key-not-production"
+            )
+        assert not output.exists()
+        assert not list(tmp_path.glob("*.tmp"))
+    finally:
+        db.close()
+

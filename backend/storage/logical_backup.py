@@ -281,10 +281,13 @@ def verify_logical_backup(path: str | Path) -> dict[str, Any]:
         ):
             return {"valid": False, "reason": "incomplete_autoincrement_sequences", "sha256": digest}
         expected_sequences = {item["table"]: item["seq"] for item in sequences}
-        inserted_sequences = {
-            name: seq for name, seq in db.execute("SELECT name, seq FROM sqlite_sequence")
-            if name in autoincrement_tables
-        }
+        inserted_sequences = (
+            {
+                name: seq for name, seq in db.execute("SELECT name, seq FROM sqlite_sequence")
+                if name in autoincrement_tables
+            }
+            if autoincrement_tables else {}
+        )
         if any(expected_sequences[name] < seq for name, seq in inserted_sequences.items()):
             return {"valid": False, "reason": "autoincrement_high_water_regression", "sha256": digest}
         for sequence in sequences:
@@ -429,11 +432,14 @@ def restore_logical_backup_payload(
             restored_counts[name] = int(connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0])
 
         expected_sequences = {item["table"]: item["seq"] for item in sequences}
-        inserted_sequences = {
-            name: int(seq)
-            for name, seq in connection.execute("SELECT name, seq FROM sqlite_sequence")
-            if name in autoincrement_tables
-        }
+        inserted_sequences = (
+            {
+                name: int(seq)
+                for name, seq in connection.execute("SELECT name, seq FROM sqlite_sequence")
+                if name in autoincrement_tables
+            }
+            if autoincrement_tables else {}
+        )
         if any(expected_sequences[name] < seq for name, seq in inserted_sequences.items()):
             raise ValueError("Le compteur AUTOINCREMENT sauvegardé est inférieur à un identifiant restauré.")
         for sequence in sequences:

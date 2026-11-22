@@ -75,8 +75,8 @@ test("retries transient ticket errors with bounded backoff and obtains a fresh t
     } finally { h.restore(); }
 });
 
-test("does not retry definitive 401 or 403 ticket failures", async () => {
-    for (const status of [401, 403]) {
+test("does not retry permanent 4xx ticket failures", async () => {
+    for (const status of [400, 401, 403, 404]) {
         const error = Object.assign(new Error("forbidden"), { status });
         const h = harness(async () => { throw error; });
         try {
@@ -138,4 +138,24 @@ test("never exceeds the 30-second retry ceiling, including positive jitter", asy
         assert.ok(h.timers.every(timer => timer.delay <= 30000));
         assert.equal(h.timers.at(-1).delay, 30000);
     } finally { h.restore(); }
+});
+
+test("retries transient HTTP ticket failures but not permanent client errors", async () => {
+    for (const status of [408, 425, 429, 500, 503]) {
+        let calls = 0;
+        const error = Object.assign(new Error("temporary HTTP failure"), { status });
+        const h = harness(async () => {
+            calls += 1;
+            if (calls === 1) throw error;
+            return "wss://example.test/live?ticket=renewed";
+        });
+        try {
+            await h.flush();
+            assert.equal(h.timers.length, 1, `status ${status} should retry`);
+            h.runNextTimer();
+            await h.flush();
+            assert.equal(calls, 2);
+            assert.equal(h.sockets.length, 1);
+        } finally { h.restore(); }
+    }
 });

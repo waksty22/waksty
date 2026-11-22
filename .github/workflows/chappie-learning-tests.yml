@@ -8,6 +8,7 @@ on:
       - test/live-websocket-bridge-integration
       - fix/live-shared-brain-refresh-per-turn
       - test/live-provider-interruption-resets-output
+      - test/live-tool-refresh-ordering
   pull_request:
     branches:
       - main

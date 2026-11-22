@@ -22,6 +22,11 @@ class FakeClientWebSocket:
         self.sent = []
         self.closed = []
         self.provider_finished = asyncio.Event()
+        self.incoming_payloads = []
+        self.incoming_index = 0
+        self.coordinate_refresh = False
+        self.next_input_event = asyncio.Event()
+        self.second_input_received = asyncio.Event()
 
     async def accept(self):
         return None
@@ -33,6 +38,15 @@ class FakeClientWebSocket:
         self.closed.append((code, reason))
 
     async def receive_json(self):
+        if self.incoming_index < len(self.incoming_payloads):
+            index = self.incoming_index
+            if index == 1 and self.coordinate_refresh:
+                await self.next_input_event.wait()
+            payload = self.incoming_payloads[index]
+            self.incoming_index += 1
+            if index == 1 and self.coordinate_refresh:
+                self.second_input_received.set()
+            return payload
         await self.provider_finished.wait()
         raise WebSocketDisconnect(code=1000)
 
@@ -45,7 +59,17 @@ class FakeGeminiWebSocket:
         self._setup_read = False
 
     async def send(self, payload):
-        self.sent.append(json.loads(payload))
+        message = json.loads(payload)
+        if (
+            self.client.coordinate_refresh
+            and message.get("clientContent", {}).get("turnComplete") is False
+        ):
+            self.client.next_input_event.set()
+            await self.client.second_input_received.wait()
+            # Let the client task reach the provider-send gate while the brain
+            # refresh is still in flight.
+            await asyncio.sleep(0)
+        self.sent.append(message)
 
     async def recv(self):
         if self._setup_read:
@@ -542,3 +566,26 @@ def test_live_brain_refresh_message_is_incremental_and_does_not_start_a_model_tu
     assert "merci" in text
     assert "ne plus les employer" in text
     assert "ancien" in text
+
+
+def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(live_bridge):
+    run, _calls, client = live_bridge
+    client.coordinate_refresh = True
+    client.incoming_payloads = [
+        {"action": "text", "text": "premier"},
+        {"action": "text", "text": "suivant"},
+    ]
+
+    provider = run([
+        {"serverContent": {"turnComplete": True}},
+    ])
+
+    refresh_index = next(
+        index for index, message in enumerate(provider.sent)
+        if message.get("clientContent", {}).get("turnComplete") is False
+    )
+    next_input_index = next(
+        index for index, message in enumerate(provider.sent)
+        if "suivant" in json.dumps(message, ensure_ascii=False)
+    )
+    assert refresh_index < next_input_index

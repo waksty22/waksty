@@ -83,7 +83,9 @@ def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
         assert report["verified"] is True
         assert report["total_rows"] == 1
         assert verify_logical_backup(destination)["valid"] is True
-        assert len(transaction.statements) == 3
+        # manage_snapshot=False means the caller owns the transaction;
+        # the exporter performs only schema discovery and table-row reads.
+        assert len(transaction.statements) == 2
     finally:
         destination.unlink(missing_ok=True)
         destination.with_suffix(destination.suffix + ".sha256").unlink(missing_ok=True)

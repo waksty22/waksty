@@ -649,3 +649,69 @@ def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(
         if message.get("realtimeInput", {}).get("text") == "suivant"
     )
     assert refresh_index < next_input_index
+
+def test_live_tool_response_precedes_brain_refresh_and_next_user_input(
+    live_bridge, monkeypatch,
+):
+    run, _calls, client = live_bridge
+    snapshots = [
+        {
+            "snapshot_version": "34.0",
+            "statistics": {"totals": {"memories": 1}},
+            "vocabulary": [],
+        },
+        {
+            "snapshot_version": "34.0",
+            "statistics": {"totals": {"memories": 2}},
+            "vocabulary": [],
+        },
+    ]
+    monkeypatch.setattr(
+        server, "get_shared_brain_snapshot",
+        lambda _db, _user, limit=8: snapshots.pop(0),
+    )
+    monkeypatch.setattr(server, "get_repeatable_words", lambda _db, _user: [])
+    monkeypatch.setattr(
+        server, "execute_tool",
+        lambda name, args, user_id, **kwargs: {
+            "ok": True, "name": name, "user": user_id,
+        },
+    )
+
+    client.coordinate_refresh = True
+    client.incoming_payloads = [
+        {"action": "text", "text": "premier"},
+        {"action": "text", "text": "suivant"},
+    ]
+    provider = run([
+        {
+            "toolCall": {"functionCalls": [{
+                "id": "ordered-call",
+                "name": "get_shared_brain_state",
+                "args": {},
+            }]},
+            "serverContent": {
+                "inputTranscription": {"text": "Rappelle-toi"},
+                "turnComplete": True,
+            },
+        },
+    ])
+
+    tool_response_index = next(
+        index for index, message in enumerate(provider.sent)
+        if "toolResponse" in message
+    )
+    refresh_index = next(
+        index for index, message in enumerate(provider.sent)
+        if message.get("clientContent", {}).get("turnComplete") is False
+    )
+    next_input_index = next(
+        index for index, message in enumerate(provider.sent)
+        if message.get("realtimeInput", {}).get("text") == "suivant"
+    )
+
+    assert tool_response_index < refresh_index < next_input_index
+    assert provider.sent[tool_response_index]["toolResponse"]["functionResponses"][0]["id"] == "ordered-call"
+    assert client.second_input_received.is_set()
+    assert any(item.get("type") == "turn_complete" for item in client.sent)
+

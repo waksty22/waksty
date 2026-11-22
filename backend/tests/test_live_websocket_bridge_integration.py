@@ -208,6 +208,50 @@ def test_websocket_bridge_never_promotes_disconnected_partial_transcript(live_br
 
 
 
+def test_websocket_bridge_discards_interrupted_model_output_before_final_turn(
+    live_bridge,
+):
+    run, calls, client = live_bridge
+    provider = run([
+        {"serverContent": {
+            "inputTranscription": {"text": "Explique-moi"},
+            "outputTranscription": {"text": "Réponse interrompue"},
+            "modelTurn": {"parts": [{
+                "inlineData": {
+                    "data": "cGFydGlhbA==",
+                    "mimeType": "audio/pcm;rate=24000",
+                }
+            }]},
+        }},
+        {"serverContent": {"interrupted": True}},
+        {"serverContent": {
+            "outputTranscription": {"text": "Réponse finale"},
+            "modelTurn": {"parts": [{
+                "inlineData": {
+                    "data": "ZmluYWw=",
+                    "mimeType": "audio/pcm;rate=24000",
+                }
+            }]},
+            "turnComplete": True,
+        }},
+    ])
+
+    assert calls["conversations"] == [
+        ("creator", "Explique-moi", "Réponse finale", {"source": "gemini_live"})
+    ]
+    audio_streams = [
+        item for item in client.sent if item.get("type") == "audio_stream"
+    ]
+    assert audio_streams == [{
+        "type": "audio_stream",
+        "audio": "ZmluYWw=",
+        "sample_rate": 24000,
+    }]
+    assert any(item.get("type") == "interrupt" for item in client.sent)
+    assert calls["learning"] == [("creator", "Explique-moi")]
+    assert provider.sent[0]["setup"]["model"] == f"models/{server.GEMINI_LIVE_MODEL}"
+
+
 def test_websocket_bridge_does_not_retry_or_duplicate_learning_after_storage_error(
     live_bridge, monkeypatch, caplog
 ):

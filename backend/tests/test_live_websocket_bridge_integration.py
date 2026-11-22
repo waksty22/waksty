@@ -81,6 +81,7 @@ def live_bridge(monkeypatch):
         "conversations": [],
     }
     db = DummyDB()
+    provider = None
 
     @contextmanager
     def fake_db_connection():

@@ -68,9 +68,15 @@ def create_backup_archive(
                     encrypted_path.name,
                     checksum_path.name,
                 }
-                if set(archive.namelist()) != expected:
-                    raise ValueError("Backup archive contains unexpected files.")
-                archive.extractall(verify_dir)
+                members = archive.namelist()
+                if len(members) != len(expected) or set(members) != expected:
+                    raise ValueError(
+                        "Backup archive contains missing, duplicate, or unexpected files."
+                    )
+                # Avoid extractall: a future filename regression must not
+                # turn archive verification into a path traversal primitive.
+                for member in expected:
+                    (verify_dir / member).write_bytes(archive.read(member))
 
             packaged_backup = verify_dir / encrypted_path.name
             verification = verify_encrypted_logical_backup(

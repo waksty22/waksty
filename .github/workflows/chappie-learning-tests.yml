@@ -6,10 +6,12 @@ on:
       - main
       - fix/live-learning-on-turn-complete
       - test/live-websocket-bridge-integration
+      - fix/live-shared-brain-refresh-per-turn
   pull_request:
     branches:
       - main
       - feat/safe-logical-restore-core
+      - test/live-websocket-bridge-integration
 
 jobs:
   quality:

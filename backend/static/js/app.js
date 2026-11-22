@@ -437,6 +437,8 @@ document.addEventListener("DOMContentLoaded", () => {
     let liveSocket = null;
     let liveRecorder = null;
     let liveSessionRejected = false;
+    let liveStartGeneration = 0;
+    let liveStarting = false;
     const liveBtn = document.getElementById("liveBtn");
     const liveStatus = document.getElementById("liveStatus");
 
@@ -449,6 +451,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     window.toggleLive = async function() {
+        // A second tap while permission/ticket setup is pending cancels that
+        // generation. If getUserMedia resolves later, its stream is discarded.
+        if (liveStarting) {
+            stopLive();
+            return;
+        }
         if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
             stopLive();
             return;
@@ -461,6 +469,8 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
+        const sessionGeneration = ++liveStartGeneration;
+        liveStarting = true;
         liveSessionRejected = false;
         if (liveStatus) liveStatus.textContent = "Connexion au flux Live en cours...";
 
@@ -477,6 +487,7 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         liveSocket = initWebSocket(wsUrlFactory, (data) => {
+            if (sessionGeneration !== liveStartGeneration) return;
             console.log("Message Live reçu :", data);
 
             if (data.message && liveStatus) {
@@ -519,6 +530,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (liveStatus) liveStatus.textContent = "Erreur Gemini Live : " + (data.message || data.error);
             }
         }, (state, detail) => {
+            if (sessionGeneration !== liveStartGeneration) return;
             if (state === "open" && liveStatus) {
                 liveStatus.textContent = "Mode Live actif. Parle à Chappie.";
             }
@@ -548,16 +560,20 @@ document.addEventListener("DOMContentLoaded", () => {
             const recorder = await initLiveAudioStream(liveSocket);
             // A permanent ticket rejection may arrive while the browser is still
             // waiting for microphone permission. Never leave capture running then.
-            if (liveSessionRejected) {
+            if (sessionGeneration !== liveStartGeneration || liveSessionRejected) {
                 if (recorder && typeof recorder.stop === "function") recorder.stop();
+                if (sessionGeneration === liveStartGeneration) liveStarting = false;
                 return;
             }
             liveRecorder = recorder;
+            liveStarting = false;
             if (liveRecorder && liveBtn) {
                 liveBtn.textContent = "⏹ Arrêter la conversation live";
                 if (liveStatus) liveStatus.textContent = "Microphone prêt. Connexion à Chappie...";
             }
         } catch (e) {
+            if (sessionGeneration !== liveStartGeneration) return;
+            liveStarting = false;
             console.error("Erreur initialisation micro live :", e);
             if (liveStatus) liveStatus.textContent = "Erreur d'accès au microphone.";
             if (liveSocket) liveSocket.close();
@@ -565,10 +581,10 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     window.stopLive = function() {
-        if (liveRecorder && typeof liveRecorder.stop === 'function') {
-            liveRecorder.stop();
-        }
-        liveRecorder = null;
+        liveStartGeneration += 1;
+        liveStarting = false;
+        liveSessionRejected = true;
+        releaseLiveMicrophone();
 
         if (liveSocket) {
             liveSocket.close();

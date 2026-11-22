@@ -108,12 +108,18 @@ test("voluntary close cancels a pending reconnect timer", async () => {
 });
 
 test("resets retry backoff after a successful WebSocket open", async () => {
-    const h = harness(async () => { throw new Error("temporary network failure"); });
+    let calls = 0;
+    const h = harness(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("temporary network failure");
+        return "wss://example.test/live?ticket=second";
+    });
     try {
         await h.flush();
         assert.equal(h.timers[0].delay, 1000);
         h.runNextTimer();
         await h.flush();
+        assert.equal(h.sockets.length, 1);
         h.sockets[0].open();
         h.sockets[0].close(1006);
         assert.equal(h.timers[1].delay, 1000);

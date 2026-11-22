@@ -209,9 +209,11 @@ def test_websocket_bridge_never_promotes_disconnected_partial_transcript(live_br
 
 
 def test_websocket_bridge_discards_interrupted_model_output_before_final_turn(
-    live_bridge,
+    live_bridge, monkeypatch,
 ):
     run, calls, client = live_bridge
+    # This test targets interruption semantics, not the separate maturity gate.
+    monkeypatch.setattr(server, "get_skills_summary", lambda _user: {"average_level": 3})
     provider = run([
         {"serverContent": {
             "inputTranscription": {"text": "Explique-moi"},

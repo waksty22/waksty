@@ -7,11 +7,13 @@ on:
       - fix/live-learning-on-turn-complete
       - test/live-websocket-bridge-integration
       - fix/live-shared-brain-refresh-per-turn
+      - test/live-provider-interruption-resets-output
   pull_request:
     branches:
       - main
       - feat/safe-logical-restore-core
       - test/live-websocket-bridge-integration
+      - fix/live-shared-brain-refresh-per-turn
 
 jobs:
   quality:

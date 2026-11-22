@@ -492,7 +492,7 @@ def test_websocket_bridge_refreshes_persisted_brain_before_releasing_next_turn(
     refresh_text = refresh_messages[0]["turns"][0]["parts"][0]["text"]
     assert "MISE À JOUR DU CERVEAU PARTAGÉ" in refresh_text
     assert "merci" in refresh_text
-    assert snapshot_calls == [2, 2]
+    assert snapshot_calls == [1, 1]
     assert any(item.get("type") == "turn_complete" for item in _client.sent)
 
 

@@ -198,3 +198,97 @@ def test_websocket_bridge_does_not_retry_or_duplicate_learning_after_storage_err
         ("creator", "Bonjour", "", {"source": "gemini_live"})
     ]
     assert "Échec mémorisation tour confirmé" in caplog.text
+
+
+
+def test_websocket_bridge_executes_tool_calls_and_returns_matching_tool_response(
+    live_bridge, monkeypatch
+):
+    run, _calls, _client = live_bridge
+    executed = []
+
+    def fake_execute_tool(name, args, user_id, **kwargs):
+        executed.append((name, args, user_id, kwargs))
+        return {"ok": True, "value": "fresh brain snapshot"}
+
+    monkeypatch.setattr(server, "execute_tool", fake_execute_tool)
+    provider = run([
+        {"serverContent": {"inputTranscription": {"text": "Que sais-tu de moi ?"}}},
+        {"toolCall": {"functionCalls": [{
+            "id": "call-17",
+            "name": "get_shared_brain_state",
+            "args": {},
+        }]}},
+        {"serverContent": {"outputTranscription": {"text": "Bonjour"}, "turnComplete": True}},
+    ])
+
+    assert executed == [(
+        "get_shared_brain_state",
+        {},
+        "creator",
+        {"user_source_text": "Que sais-tu de moi ?"},
+    )]
+    tool_response_messages = [
+        message for message in provider.sent if "toolResponse" in message
+    ]
+    assert tool_response_messages == [{
+        "toolResponse": {
+            "functionResponses": [{
+                "name": "get_shared_brain_state",
+                "response": {"ok": True, "value": "fresh brain snapshot"},
+                "id": "call-17",
+            }]
+        }
+    }]
+
+
+def test_websocket_bridge_provider_failure_preserves_partial_history_without_learning(
+    live_bridge, monkeypatch
+):
+    _run, calls, client = live_bridge
+
+    class FailingGeminiWebSocket:
+        async def send(self, _payload):
+            return None
+
+        async def recv(self):
+            return json.dumps({"setupComplete": {}})
+
+        def __aiter__(self):
+            async def iterate():
+                try:
+                    yield json.dumps({
+                        "serverContent": {
+                            "inputTranscription": {"text": "Je veux apprendre"}
+                        }
+                    })
+                    raise RuntimeError("simulated provider stream failure")
+                finally:
+                    client.provider_finished.set()
+
+            return iterate()
+
+    @asynccontextmanager
+    async def failing_provider_connection(_websocket):
+        yield FailingGeminiWebSocket()
+
+    monkeypatch.setattr(
+        server, "supervised_gemini_connection", failing_provider_connection
+    )
+
+    async def execute():
+        await server.websocket_endpoint(client, ticket="single-use-test-ticket")
+
+    asyncio.run(execute())
+
+    assert calls["emotions"] == []
+    assert calls["affective"] == []
+    assert calls["observations"] == []
+    assert calls["links"] == []
+    assert calls["learning"] == []
+    assert calls["conversations"] == [(
+        "creator",
+        "Je veux apprendre",
+        "",
+        {"source": "gemini_live_interrupted"},
+    )]

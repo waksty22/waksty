@@ -7294,13 +7294,12 @@ async def api_turso_backup(auth=Depends(require_auth)):
     client = None
     transaction = None
     try:
-        import zipfile
         from storage.hrana_backup import HranaTransactionConnection
         from storage.hrana_http import HranaHttpClient
-        from storage.logical_backup import export_encrypted_logical_backup
+        from scripts.backup_turso import create_backup_archive
 
-        # Use the same serialized HTTP v2 stream as the migration backup path.
-        # The archived libsql WebSocket transport is intentionally not used.
+        # Reuse the CLI's tested pack-and-verify path so the HTTP endpoint
+        # validates the exact ZIP artifact before returning it.
         client = HranaHttpClient(database_url, auth_token)
         transaction = client.transaction()
 
@@ -7308,20 +7307,13 @@ async def api_turso_backup(auth=Depends(require_auth)):
             filename = "chappie-turso-backup-" + datetime.now(
                 timezone.utc
             ).strftime("%Y%m%d-%H%M%S") + ".zip"
-            backup_path = Path(temp_dir) / "chappie-turso-backup.json.enc"
-            result = export_encrypted_logical_backup(
+            archive_path = Path(temp_dir) / filename
+            result = create_backup_archive(
                 HranaTransactionConnection(transaction),
-                backup_path,
+                archive_path,
                 encryption_key,
                 manage_snapshot=False,
             )
-            archive_path = Path(temp_dir) / filename
-            checksum_path = backup_path.with_suffix(backup_path.suffix + ".sha256")
-            with zipfile.ZipFile(
-                archive_path, mode="w", compression=zipfile.ZIP_STORED
-            ) as archive:
-                archive.write(backup_path, arcname=backup_path.name)
-                archive.write(checksum_path, arcname=checksum_path.name)
             payload = archive_path.read_bytes()
 
         transaction.commit()

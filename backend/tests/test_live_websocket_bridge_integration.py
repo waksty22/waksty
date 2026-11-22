@@ -596,6 +596,6 @@ def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(
     )
     next_input_index = next(
         index for index, message in enumerate(provider.sent)
-        if "suivant" in json.dumps(message, ensure_ascii=False)
+        if message.get("realtimeInput", {}).get("text") == "suivant"
     )
     assert refresh_index < next_input_index

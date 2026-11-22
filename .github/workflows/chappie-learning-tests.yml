@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - fix/logical-backup-empty-sequence-integrity
   pull_request:
     branches:
       - main
+      - feat/safe-logical-restore-core
 
 jobs:
   quality:

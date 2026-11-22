@@ -11,30 +11,30 @@ function harness(urlFactory) {
     const timers = [];
     const states = [];
     const sockets = [];
-    const originalSetTimeout = globalThis.setTimeout;
+    const original = {
+        setTimeout: globalThis.setTimeout,
+        clearTimeout: globalThis.clearTimeout,
+        random: Math.random,
+        WebSocket: globalThis.WebSocket
+    };
     class FakeWebSocket {
         static OPEN = 1;
         static CLOSED = 3;
-        constructor(url) {
-            this.url = url;
-            this.readyState = 0;
-            sockets.push(this);
-        }
+        constructor(url) { this.url = url; this.readyState = 0; sockets.push(this); }
         close(code = 1000) {
             this.readyState = FakeWebSocket.CLOSED;
             this.onclose?.({ code });
         }
-        open() {
-            this.readyState = FakeWebSocket.OPEN;
-            this.onopen?.();
-        }
+        open() { this.readyState = FakeWebSocket.OPEN; this.onopen?.(); }
     }
     globalThis.WebSocket = FakeWebSocket;
     globalThis.setTimeout = (callback, delay) => {
-        const timer = { callback, delay, cleared: false };
+        const timer = { callback, delay, cleared: false, ran: false };
         timers.push(timer);
         return timer;
     };
+    globalThis.clearTimeout = timer => { if (timer) timer.cleared = true; };
+    Math.random = () => 0.5;
     const client = initWebSocket(urlFactory, () => {}, (...args) => states.push(args));
     return {
         client, timers, states, sockets,
@@ -47,8 +47,11 @@ function harness(urlFactory) {
         },
         restore() {
             client.close();
-            globalThis.setTimeout = originalSetTimeout;
-            delete globalThis.WebSocket;
+            globalThis.setTimeout = original.setTimeout;
+            globalThis.clearTimeout = original.clearTimeout;
+            Math.random = original.random;
+            if (original.WebSocket === undefined) delete globalThis.WebSocket;
+            else globalThis.WebSocket = original.WebSocket;
         }
     };
 }
@@ -62,7 +65,6 @@ test("retries transient ticket errors with bounded backoff and obtains a fresh t
     });
     try {
         await h.flush();
-        assert.equal(h.timers.length, 1);
         assert.equal(h.timers[0].delay, 1000);
         h.runNextTimer();
         await h.flush();

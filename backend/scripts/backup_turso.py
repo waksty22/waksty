@@ -43,7 +43,7 @@ def create_backup_archive(
     try:
         with tempfile.TemporaryDirectory(prefix="chappie-turso-job-") as work:
             root = Path(work)
-            encrypted_path = root / "chappie-turso.json.enc"
+            encrypted_path = root / "chappie-turso-backup.json.enc"
             report = export_encrypted_logical_backup(
                 connection,
                 encrypted_path,

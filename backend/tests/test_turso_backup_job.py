@@ -233,3 +233,90 @@ def test_server_package_import_resolves_shared_backup_builder():
     assert Path(package_builder.__code__.co_filename).resolve() == (
         SCRIPTS_DIR / "backup_turso.py"
     ).resolve()
+
+
+
+def test_turso_backup_http_endpoint_returns_verifiable_archive_and_headers(
+    monkeypatch,
+):
+    import asyncio
+    import hashlib
+    import server
+    import storage.hrana_http as hrana_http
+
+    database = _database()
+    lifecycle = {"committed": False, "closed": False}
+
+    class FakeTransaction:
+        def execute(self, sql):
+            return database.execute(sql)
+
+        def commit(self):
+            database.commit()
+            lifecycle["committed"] = True
+
+        def rollback(self):
+            database.rollback()
+
+    class FakeClient:
+        def __init__(self, database_url, auth_token):
+            assert database_url == "libsql://isolated-test.invalid"
+            assert auth_token == "isolated-test-token"
+
+        def transaction(self):
+            return FakeTransaction()
+
+        def close(self):
+            lifecycle["closed"] = True
+
+    monkeypatch.setattr(hrana_http, "HranaHttpClient", FakeClient)
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated-test.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "isolated-test-token")
+    monkeypatch.setenv(
+        "BACKUP_ENCRYPTION_KEY", "test-only-backup-key-not-production"
+    )
+
+    try:
+        response = asyncio.run(server.api_turso_backup(auth="creator"))
+        assert response.status_code == 200
+        assert lifecycle == {"committed": True, "closed": True}
+
+        import io
+
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            assert set(archive.namelist()) == {
+                "chappie-turso-backup.json.enc",
+                "chappie-turso-backup.json.enc.sha256",
+            }
+            encrypted = archive.read("chappie-turso-backup.json.enc")
+            sidecar = archive.read(
+                "chappie-turso-backup.json.enc.sha256"
+            ).decode("ascii").split()[0]
+
+        digest = hashlib.sha256(encrypted).hexdigest()
+        assert digest == sidecar
+        assert response.headers["x-backup-sha256"] == digest
+        assert response.headers["x-backup-verified"] == "true"
+        assert response.headers["x-backup-encrypted"] == "AES-256-GCM"
+        assert response.headers["x-backup-format"] == (
+            "ZIP: encrypted backup + SHA-256 sidecar"
+        )
+        assert response.headers["x-backup-table-count"] == "1"
+        assert response.headers["x-backup-row-count"] == "1"
+
+        # Independently decrypt and restore the exact member returned by HTTP.
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            encrypted_path = Path(directory) / "chappie-turso-backup.json.enc"
+            checksum_path = encrypted_path.with_suffix(
+                encrypted_path.suffix + ".sha256"
+            )
+            encrypted_path.write_bytes(encrypted)
+            checksum_path.write_text(digest + "  " + encrypted_path.name + "\n")
+            verification = verify_encrypted_logical_backup(
+                encrypted_path, "test-only-backup-key-not-production"
+            )
+        assert verification["valid"] is True
+    finally:
+        database.close()

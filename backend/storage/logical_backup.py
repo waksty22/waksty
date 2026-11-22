@@ -113,31 +113,30 @@ def export_logical_backup(
             and "AUTOINCREMENT" in obj["sql"].upper()
         }
         sequences = []
-        if autoincrement_tables:
-            has_sequence_table = bool(
-                _query_rows(
-                    connection,
-                    "SELECT 1 FROM sqlite_master WHERE type = 'table' "
-                    "AND name = 'sqlite_sequence' LIMIT 1",
-                )[1]
+        has_sequence_table = bool(
+            _query_rows(
+                connection,
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'sqlite_sequence' LIMIT 1",
+            )[1]
+        )
+        existing_sequences = {}
+        if autoincrement_tables and has_sequence_table:
+            _, sequence_rows = _query_rows(
+                connection, "SELECT name, seq FROM sqlite_sequence"
             )
-            existing_sequences = {}
-            if has_sequence_table:
-                _, sequence_rows = _query_rows(
-                    connection, "SELECT name, seq FROM sqlite_sequence"
-                )
-                existing_sequences = {
-                    str(name): int(seq)
-                    for name, seq in sequence_rows
-                    if name in autoincrement_tables
-                }
-            # Emit an explicit zero for never-used AUTOINCREMENT tables.
-            # This distinguishes them from a used-then-emptied table whose
-            # high-water mark must remain nonzero after restore.
-            sequences = [
-                {"table": name, "seq": existing_sequences.get(name, 0)}
-                for name in sorted(autoincrement_tables)
-            ]
+            existing_sequences = {
+                str(name): int(seq)
+                for name, seq in sequence_rows
+                if name in autoincrement_tables
+            }
+        # Emit an explicit zero for never-used AUTOINCREMENT tables.
+        # This distinguishes them from a used-then-emptied table whose
+        # high-water mark must remain nonzero after restore.
+        sequences = [
+            {"table": name, "seq": existing_sequences.get(name, 0)}
+            for name in sorted(autoincrement_tables)
+        ]
     except BaseException as exc:
         primary_exception = exc
         if manage_snapshot:

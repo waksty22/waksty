@@ -11,7 +11,7 @@ export async function apiCall(url, options = {}) {
     };
 
     const isBinary = options.body instanceof Blob || options.body instanceof FormData || options.body instanceof ArrayBuffer;
-    
+
     if (!isBinary && options.body && typeof options.body === 'object' && !headers['Content-Type']) {
         headers['Content-Type'] = 'application/json';
         options.body = JSON.stringify(options.body);
@@ -34,7 +34,9 @@ export async function apiCall(url, options = {}) {
 
         if (!response.ok) {
             const errorMsg = typeof data === 'object' ? (data.detail || data.message || data.error) : data;
-            throw new Error(errorMsg || `Erreur HTTP ${response.status}: ${response.statusText}`);
+            const error = new Error(errorMsg || `Erreur HTTP ${response.status}: ${response.statusText}`);
+            error.status = response.status;
+            throw error;
         }
 
         return data;

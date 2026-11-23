@@ -1220,9 +1220,21 @@ def test_live_audio_buffer_enforces_total_turn_limit_and_sample_rate():
 
 
 def test_interrupted_live_turn_persists_only_text_and_resets_audio_state(monkeypatch):
+    from contextlib import contextmanager
     import server
 
     saved = []
+    learning_calls = []
+
+    @contextmanager
+    def isolated_db_connection():
+        yield object()
+
+    monkeypatch.setattr(server, "db_connection", isolated_db_connection)
+    monkeypatch.setattr(
+        server, "record_confirmed_turn_learning",
+        lambda *args, **kwargs: learning_calls.append((args, kwargs)),
+    )
     monkeypatch.setattr(
         server, "save_conversation_turn",
         lambda *args, **kwargs: saved.append((args, kwargs)),
@@ -1239,6 +1251,7 @@ def test_interrupted_live_turn_persists_only_text_and_resets_audio_state(monkeyp
     assert saved == [
         (("creator", "Bonjour", "",), {"source": "gemini_live_interrupted"})
     ]
+    assert learning_calls == [], "an interrupted turn must never be promoted to lexical learning"
     assert state == {
         "user": "", "assistant": "", "audio": [], "audio_chars": 0
     }

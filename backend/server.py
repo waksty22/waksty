@@ -6294,31 +6294,9 @@ async def websocket_endpoint(
                             )
                             live_turn_state["user"] = merged_user_text
                             if new_heard_text:
-                                try:
-                                    with db_connection() as sensory_db:
-                                        live_emotions = update_emotions_once(
-                                            user_id, new_heard_text
-                                        )
-                                        record_affective_snapshot(
-                                            sensory_db, user_id, live_emotions,
-                                            source="gemini_live",
-                                            event_label="transcription utilisateur",
-                                        )
-                                        audio_observation = record_observation(
-                                            sensory_db, user_id, "audio", new_heard_text,
-                                            "gemini_live_transcription",
-                                            confidence=0.8,
-                                            metadata={"language": "fr"},
-                                        )
-                                        link_temporally_cooccurring_observation(
-                                            sensory_db, user_id,
-                                            audio_observation["observation_id"],
-                                        )
-                                        sensory_db.commit()
-                                except Exception:
-                                    log.exception(
-                                        "[GEMINI LIVE] Échec mémorisation transcription"
-                                    )
+                                # Stream the transcript to the UI immediately, but
+                                # keep all durable sensory/emotional writes buffered
+                                # until Gemini confirms the complete turn below.
                                 await websocket.send_json({
                                     "type": "user_text", "text": new_heard_text
                                 })
@@ -6407,6 +6385,35 @@ async def websocket_endpoint(
                                 "type": "speech_blocked",
                                 "message": "Chappie n'a pas encore acquis les mots nécessaires pour prononcer cette réponse.",
                             })
+
+                        confirmed_user_text = live_turn_state["user"].strip()
+                        if confirmed_user_text:
+                            try:
+                                live_emotions = update_emotions_once(
+                                    user_id, confirmed_user_text
+                                )
+                                with db_connection() as sensory_db:
+                                    record_affective_snapshot(
+                                        sensory_db, user_id, live_emotions,
+                                        source="gemini_live",
+                                        event_label="transcription utilisateur confirmée",
+                                    )
+                                    audio_observation = record_observation(
+                                        sensory_db, user_id, "audio",
+                                        confirmed_user_text,
+                                        "gemini_live_transcription",
+                                        confidence=0.8,
+                                        metadata={"language": "fr"},
+                                    )
+                                    link_temporally_cooccurring_observation(
+                                        sensory_db, user_id,
+                                        audio_observation["observation_id"],
+                                    )
+                                    sensory_db.commit()
+                            except Exception:
+                                log.exception(
+                                    "[GEMINI LIVE] Échec mémorisation du transcript confirmé"
+                                )
 
                         if live_turn_state["user"] or assistant_text:
                             try:

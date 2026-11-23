@@ -11,8 +11,28 @@ import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+class FakeClientWebSocket:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.sent: list[dict] = []
+        self.accepted = False
+        self.closed = False
+
+    async def accept(self):
+        self.accepted = True
+
+    async def send_json(self, payload):
+        self.sent.append(payload)
+
+    async def receive_json(self):
+        if self.payloads:
+            return self.payloads.pop(0)
+        await asyncio.Future()
+
+    async def close(self, code=1000, reason=""):
+        self.closed = True
+        self.close_code = code
+        self.close_reason = reason
 
 
 class FakeGeminiLiveSocket:
@@ -105,26 +125,16 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
         server, "supervised_gemini_connection", fake_supervised_gemini_connection
     )
 
-    client = TestClient(server.app)
-
-    def run_live_session(user_id: str, fake_socket: FakeGeminiLiveSocket, send_audio: bool):
+    def run_live_session(user_id: str, fake_socket: FakeGeminiLiveSocket):
         provider_sockets.append(fake_socket)
         ticket = server.live_ws_tickets.issue(user_id)
-        messages = []
-        with client.websocket_connect(f"/ws/live?ticket={ticket}") as websocket:
-            connected = websocket.receive_json()
-            assert connected["type"] == "connected"
-            if send_audio:
-                websocket.send_json({"action": "audio_chunk", "pcm_data": "AQID"})
-                try:
-                    while True:
-                        message = websocket.receive_json()
-                        messages.append(message)
-                        if message.get("type") == "turn_complete":
-                            break
-                except WebSocketDisconnect:
-                    pass
-        return messages, fake_socket.initial_history_text
+        fake_client = FakeClientWebSocket([
+            {"action": "audio_chunk", "pcm_data": "AQID"}
+        ])
+        asyncio.run(server.websocket_endpoint(fake_client, ticket=ticket))
+        assert fake_client.accepted
+        assert any(item.get("type") == "connected" for item in fake_client.sent)
+        return fake_client.sent, fake_socket.initial_history_text
 
     # Chat -> vocabulary: this exercises the real API handler and run_brain,
     # with only the external Gemini HTTP provider replaced by a deterministic fake.
@@ -143,7 +153,7 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
     # Chat -> Live: the real Live endpoint receives the same persisted word in
     # its initial context, then confirms and commits a new spoken word exactly once.
     live_socket = FakeGeminiLiveSocket("velociraptor", "zorbital")
-    live_messages, live_context = run_live_session("creator", live_socket, True)
+    live_messages, live_context = run_live_session("creator", live_socket)
     assert "zorbital" in live_context
     assert "velociraptor" not in live_context
     assert any(item.get("type") == "turn_complete" for item in live_messages)
@@ -217,7 +227,7 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
         "interrompuword", "zorbital", turn_complete=False
     )
     interrupted_messages, _ = run_live_session(
-        "creator", interrupted_socket, True
+        "creator", interrupted_socket
     )
     assert not any(item.get("type") == "turn_complete" for item in interrupted_messages)
 

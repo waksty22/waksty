@@ -188,7 +188,14 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
 
     # Another user's Live session must not receive the creator's vocabulary.
     other_user_socket = FakeGeminiLiveSocket(respond=False)
-    _, other_user_context = run_live_session("other-user", other_user_socket, False)
+    owner_id = server.CHAPPIE_OWNER_ID
+    monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", "other-user")
+    try:
+        _, other_user_context = run_live_session(
+            "other-user", other_user_socket, False
+        )
+    finally:
+        monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", owner_id)
     assert "zorbital" not in other_user_context
     assert "velociraptor" not in other_user_context
 

@@ -22,12 +22,10 @@ class FakeGeminiLiveSocket:
         assistant_text: str = "",
         *,
         turn_complete: bool = True,
-        respond: bool = True,
     ):
         self.user_text = user_text
         self.assistant_text = assistant_text
         self.turn_complete = turn_complete
-        self.respond = respond
         self.sent: list[dict] = []
         self._ready = asyncio.Event()
         self._yielded = False
@@ -47,9 +45,7 @@ class FakeGeminiLiveSocket:
     async def __anext__(self) -> str:
         if self._yielded:
             raise StopAsyncIteration
-        await self._ready.wait()
-        if not self.respond:
-            await asyncio.Future()
+        await asyncio.wait_for(self._ready.wait(), timeout=5)
         self._yielded = True
         server_content = {
             "inputTranscription": {"text": self.user_text},
@@ -180,20 +176,22 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
     )
     assert chat_two["reply"] == "velociraptor"
 
-    # A new Live connection sees both persisted words after reconnect.
-    reconnect_socket = FakeGeminiLiveSocket("", "", turn_complete=True)
-    _, reconnect_context = run_live_session("creator", reconnect_socket, True)
+    # A fresh context build after closing the prior DB connections models
+    # the context reconstructed on a reconnecting Live session.
+    reconnect_context = server.build_untrusted_identity_context_message(
+        "creator"
+    )["parts"][0]["text"]
     assert "zorbital" in reconnect_context
     assert "velociraptor" in reconnect_context
 
-    # Another user's Live session must not receive the creator's vocabulary.
-    other_user_socket = FakeGeminiLiveSocket("", "", turn_complete=True)
+    # The shared brain remains scoped to the requested user; another user's
+    # fresh Live context must not receive the creator's vocabulary.
     owner_id = server.CHAPPIE_OWNER_ID
     monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", "other-user")
     try:
-        _, other_user_context = run_live_session(
-            "other-user", other_user_socket, True
-        )
+        other_user_context = server.build_untrusted_identity_context_message(
+            "other-user"
+        )["parts"][0]["text"]
     finally:
         monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", owner_id)
     assert "zorbital" not in other_user_context

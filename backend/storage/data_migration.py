@@ -856,8 +856,14 @@ def migrate_sqlite_rows_to_turso(
             ),
         )
         target.commit()
-    except Exception:
-        target.rollback()
+    except BaseException:
+        # Cancellation and process-interrupt exceptions must not leave a
+        # partially applied target transaction open. Preserve the original
+        # failure if the best-effort rollback itself also fails.
+        try:
+            target.rollback()
+        except BaseException:
+            pass
         raise
 
     return {

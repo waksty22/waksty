@@ -129,9 +129,145 @@ document.addEventListener("DOMContentLoaded", () => {
             if (output) output.textContent = (data.observations || []).map(item =>
                 "[" + item.modality + "] " + item.content
             ).join("\n\n") || "Aucune expérience sensorielle enregistrée.";
+            if (window.loadPerceptionFusions) await window.loadPerceptionFusions();
         } catch (error) {
             const output = document.getElementById("sensoryHistory");
             if (output) output.textContent = "Erreur : " + error.message;
+        }
+    };
+
+    window.loadPerceptionFusions = async function() {
+        const token = getToken();
+        const container = document.getElementById("perceptionFusionList");
+        const status = document.getElementById("perceptionFusionStatus");
+        if (!container) return;
+        try {
+            const data = await apiCall("/api/perception/fusions", {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            container.replaceChildren();
+            const fusions = Array.isArray(data.fusions) ? data.fusions : [];
+            if (!fusions.length) {
+                container.textContent = "Aucun rapprochement audio/vision à examiner.";
+            } else {
+                fusions.forEach(item => {
+                    const card = document.createElement("div");
+                    card.className = "panel";
+                    card.style.marginTop = "10px";
+
+                    const evidence = item.evidence && typeof item.evidence === "object"
+                        ? item.evidence : {};
+                    const heading = document.createElement("h5");
+                    const delta = Number(item.time_delta_seconds);
+                    heading.textContent = "Candidat #" + String(item.id)
+                        + (Number.isFinite(delta) ? " · écart " + delta.toFixed(2) + " s" : "");
+                    card.appendChild(heading);
+
+                    const state = document.createElement("p");
+                    state.className = "status";
+                    state.textContent = "Statut : " + String(item.status || "inconnu");
+                    card.appendChild(state);
+
+                    const audio = document.createElement("p");
+                    audio.textContent = "Audio : " + (
+                        typeof evidence.audio_excerpt === "string" ? evidence.audio_excerpt : "—"
+                    );
+                    card.appendChild(audio);
+
+                    const vision = document.createElement("p");
+                    vision.textContent = "Vision : " + (
+                        typeof evidence.vision_excerpt === "string" ? evidence.vision_excerpt : "—"
+                    );
+                    card.appendChild(vision);
+
+                    const warning = document.createElement("p");
+                    warning.className = "muted small";
+                    warning.textContent = "Une proximité temporelle ne prouve pas que le son et l'image représentent la même chose.";
+                    card.appendChild(warning);
+
+                    if (item.status === "candidate") {
+                        const label = document.createElement("label");
+                        label.textContent = "Preuve ou observation justifiant la décision";
+                        card.appendChild(label);
+
+                        const proof = document.createElement("textarea");
+                        proof.rows = 2;
+                        proof.maxLength = 1000;
+                        proof.placeholder = "Décris ce qui permet de confirmer ou de rejeter ce rapprochement (1 à 1000 caractères).";
+                        card.appendChild(proof);
+
+                        const actions = document.createElement("div");
+                        actions.className = "row-btns";
+                        const confirm = document.createElement("button");
+                        confirm.type = "button";
+                        confirm.textContent = "Confirmer";
+                        const reject = document.createElement("button");
+                        reject.type = "button";
+                        reject.className = "secondary";
+                        reject.textContent = "Rejeter";
+
+                        const submit = async decision => {
+                            confirm.disabled = true;
+                            reject.disabled = true;
+                            const saved = await window.reviewPerceptionFusion(
+                                item.id, decision, proof.value
+                            );
+                            if (!saved) {
+                                confirm.disabled = false;
+                                reject.disabled = false;
+                            }
+                        };
+                        confirm.addEventListener("click", () => submit("confirm"));
+                        reject.addEventListener("click", () => submit("reject"));
+                        actions.append(confirm, reject);
+                        card.appendChild(actions);
+                    }
+
+                    container.appendChild(card);
+                });
+            }
+            if (status) {
+                status.textContent = data.semantic_validation_required
+                    ? "Les rapprochements restent des candidats tant qu'une validation humaine avec preuve n'a pas été enregistrée."
+                    : "Rapprochements actualisés.";
+            }
+        } catch (error) {
+            container.textContent = "Erreur : " + error.message;
+            if (status) status.textContent = "Impossible de charger les rapprochements.";
+        }
+    };
+
+    window.reviewPerceptionFusion = async function(candidateId, decision, evidence) {
+        const id = Number(candidateId);
+        const proof = typeof evidence === "string" ? evidence.trim() : "";
+        if (!Number.isSafeInteger(id) || id < 1 || !["confirm", "reject"].includes(decision)) {
+            alert("Décision de rapprochement invalide.");
+            return false;
+        }
+        if (!proof || proof.length > 1000) {
+            alert("Ajoute une preuve de validation entre 1 et 1000 caractères.");
+            return false;
+        }
+        try {
+            const result = await apiCall(
+                "/api/perception/fusions/" + id + "/review",
+                {
+                    method: "POST",
+                    headers: { "Authorization": "Bearer " + getToken() },
+                    body: { decision, evidence: proof }
+                }
+            );
+            const review = result.review || {};
+            const status = document.getElementById("perceptionFusionStatus");
+            if (status) {
+                status.textContent = "Candidat #" + id + " : " + String(review.status || decision)
+                    + ". Aucun fait du monde n'a été créé automatiquement.";
+            }
+            await window.loadPerceptionFusions();
+            return true;
+        } catch (error) {
+            alert(error.message);
+            return false;
         }
     };
 
@@ -219,13 +355,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: { first, second }
             });
             const comparison = data.comparison;
+            const detailsFor = (key, word, value) => {
+                const entries = (comparison.property_details?.[key]?.[word] || [])
+                    .filter(item => item.value === value);
+                return entries.map(item => item.source_type + ", confiance "
+                    + Math.round(item.confidence * 100) + "%").join(" ; ");
+            };
+            const describeValues = (key, word, values) => values.length
+                ? values.map(value => value + (detailsFor(key, word, value)
+                    ? " [" + detailsFor(key, word, value) + "]" : "")).join(", ")
+                : "inconnu";
             const shared = Object.entries(comparison.shared_properties || {})
-                .map(([key, values]) => key + " : " + values.join(", "));
+                .map(([key, values]) => key + " : " + values.map(value => {
+                    const firstMeta = detailsFor(key, first, value);
+                    const secondMeta = detailsFor(key, second, value);
+                    const meta = [firstMeta && first + " : " + firstMeta,
+                        secondMeta && second + " : " + secondMeta].filter(Boolean).join(" / ");
+                    return value + (meta ? " [" + meta + "]" : "");
+                }).join(", "));
             const differences = Object.entries(comparison.differences || {})
                 .map(([key, values]) => key + " — " + first + " : "
-                    + (values[first].join(", ") || "inconnu")
+                    + describeValues(key, first, values[first] || [])
                     + " / " + second + " : "
-                    + (values[second].join(", ") || "inconnu"));
+                    + describeValues(key, second, values[second] || []));
             if (output) output.textContent =
                 "Points communs\\n" + (shared.join("\\n") || "Aucun connu")
                 + "\\n\\nDifférences connues\\n"
@@ -467,8 +619,6 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         liveSocket = initWebSocket(wsUrlFactory, (data) => {
-            console.log("Message Live reçu :", data);
-
             if (data.message && liveStatus) {
                 liveStatus.textContent = data.message;
             }
@@ -505,7 +655,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             if (data.type === "error" || data.error) {
-                console.error("Erreur Gemini Live :", data.message || data.error);
+                console.error("Erreur Gemini Live (erreur serveur).");
                 if (liveStatus) liveStatus.textContent = "Erreur Gemini Live : " + (data.message || data.error);
             }
         }, (state, detail) => {

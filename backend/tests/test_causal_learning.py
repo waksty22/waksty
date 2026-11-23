@@ -13,6 +13,8 @@ from learning.causal_learning import (
     plan_experiment,
     evaluate_experiment,
     list_causal_learning,
+    review_causal_learning,
+    suggest_supervised_learning_agenda,
 )
 
 
@@ -129,9 +131,24 @@ def test_experiment_cannot_be_evaluated_twice(db):
         db, "creator", hypothesis["id"], "simulation",
         "test virtuel", "la balle tombe", True,
     )
-    evaluate_experiment(db, "creator", experiment["id"], "elle tombe", "supported")
+    first = evaluate_experiment(
+        db, "creator", experiment["id"], "elle tombe", "supported"
+    )
     with pytest.raises(ValueError):
         evaluate_experiment(db, "creator", experiment["id"], "elle tombe", "supported")
+
+    hypothesis_row = db.execute(
+        "SELECT confidence, evidence_count FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    experiment_row = db.execute(
+        "SELECT status, evaluation FROM causal_experiments WHERE id=?",
+        (experiment["id"],),
+    ).fetchone()
+    assert hypothesis_row["confidence"] == first["confidence"]
+    assert hypothesis_row["evidence_count"] == 1
+    assert experiment_row["status"] == "completed"
+    assert experiment_row["evaluation"] == "supported"
 
 
 def test_dashboard_is_scoped_to_user(db):
@@ -139,3 +156,109 @@ def test_dashboard_is_scoped_to_user(db):
     assert list_causal_learning(db, "bob") == {
         "observations": [], "hypotheses": [], "experiments": []
     }
+
+
+
+@pytest.mark.parametrize("bad", [None, 7, True, {}, []])
+def test_observation_rejects_non_text_evidence_without_writing(db, bad):
+    with pytest.raises(ValueError):
+        record_observation(db, "creator", "événement", "résultat", evidence=bad)
+    assert db.execute("SELECT COUNT(*) FROM causal_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [True, False])
+def test_causal_confidence_rejects_boolean_values(db, bad):
+    with pytest.raises(ValueError):
+        record_observation(db, "creator", "événement", "résultat", confidence=bad)
+    assert db.execute("SELECT COUNT(*) FROM causal_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [None, "", "   ", 7, True, {}, []])
+def test_causal_observation_rejects_invalid_user_identity(db, bad):
+    with pytest.raises(ValueError):
+        record_observation(db, bad, "événement", "résultat")
+    assert db.execute("SELECT COUNT(*) FROM causal_observations").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "5", None])
+def test_causal_review_rejects_invalid_limit(db, bad):
+    from learning.causal_learning import review_causal_learning
+    with pytest.raises(ValueError):
+        review_causal_learning(db, "creator", limit=bad)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), "nan", "inf"])
+def test_causal_confidence_rejects_non_finite_values_without_writing(db, bad):
+    with pytest.raises(ValueError, match="finie"):
+        record_observation(
+            db, "creator", "événement", "résultat", confidence=bad
+        )
+    assert db.execute("SELECT COUNT(*) FROM causal_observations").fetchone()[0] == 0
+
+
+
+def _insert_causal_experiment(db, user, hypothesis_id, status, evaluation, index):
+    created = f"2026-01-{(index % 28) + 1:02d}T00:00:00+00:00"
+    db.execute(
+        """
+        INSERT INTO causal_experiments
+            (user_id, hypothesis_id, environment, procedure, prediction,
+             supervisor_approved, status, result, evaluation, created_at, completed_at)
+        VALUES (?, ?, 'simulation', 'test', 'prediction', 1, ?, 'reported', ?, ?, ?)
+        """,
+        (
+            user,
+            hypothesis_id,
+            status,
+            evaluation,
+            created,
+            created if status == "completed" else None,
+        ),
+    )
+
+
+def test_causal_review_aggregates_full_history_beyond_detail_limit(db):
+    _, hypothesis = seed_hypothesis(db)
+    _insert_causal_experiment(
+        db, "creator", hypothesis["id"], "completed", "supported", 0
+    )
+    for index in range(1, 201):
+        _insert_causal_experiment(
+            db, "creator", hypothesis["id"], "completed", "contradicted", index
+        )
+
+    review = review_causal_learning(db, "creator")
+    item = review["hypotheses"][0]
+    assert item["total_experiments"] == 201
+    assert item["history_truncated"] is True
+    assert len(item["evaluation_history"]) == 200
+    assert item["evidence_counts"] == {
+        "supported": 1,
+        "contradicted": 200,
+        "inconclusive": 0,
+    }
+    assert item["evidence_assessment"] == "mixed_evidence"
+    assert item["evaluation_history"][0]["evaluation"] == "contradicted"
+
+
+def test_causal_agenda_sees_old_planned_experiment_outside_detail_window(db):
+    _, hypothesis = seed_hypothesis(db)
+    _insert_causal_experiment(
+        db, "creator", hypothesis["id"], "planned", "", 0
+    )
+    for index in range(1, 201):
+        _insert_causal_experiment(
+            db, "creator", hypothesis["id"], "completed", "supported", index
+        )
+
+    review = review_causal_learning(db, "creator")
+    item = review["hypotheses"][0]
+    assert item["planned_experiments_count"] == 1
+    assert item["history_truncated"] is True
+
+    agenda = suggest_supervised_learning_agenda(db, "creator")
+    assert all(
+        entry["source_id"] != hypothesis["id"]
+        for entry in agenda["agenda"]
+        if entry["kind"] == "review_hypothesis"
+    )

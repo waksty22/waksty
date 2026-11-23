@@ -29,6 +29,8 @@ def inspect_schema(connection: Any) -> dict[str, Any]:
         SELECT type, name, tbl_name, sql
         FROM sqlite_master
         WHERE name NOT LIKE 'sqlite_%'
+          AND name != 'chappie_storage_migration_state'
+          AND name NOT LIKE 'chappie_migration_guard_%'
           AND type IN ('table', 'index', 'view', 'trigger')
         ORDER BY type, name
         """

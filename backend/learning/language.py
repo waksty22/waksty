@@ -20,6 +20,12 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _require_user_id(user_id: str) -> str:
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    return user_id.strip()
+
+
 def normalize_word(value: str) -> str:
     if not isinstance(value, str):
         raise ValueError("Le mot doit être une chaîne de caractères.")
@@ -54,15 +60,29 @@ def init_language_tables(db: sqlite3.Connection) -> None:
 def record_heard_word(
     db: sqlite3.Connection, user_id: str, word: str, evidence: str = "Mot entendu"
 ) -> dict[str, Any]:
+    user_id = _require_user_id(user_id)
     clean = normalize_word(word)
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'exposition doit être du texte.")
     now = utc_now()
     db.execute(
         """INSERT INTO personal_vocabulary
            (user_id, word, state, exposure_count, evidence, created_at, updated_at)
            VALUES (?, ?, 'heard', 1, ?, ?, ?)
            ON CONFLICT(user_id, word) DO UPDATE SET
-             exposure_count=personal_vocabulary.exposure_count+1,
-             evidence=excluded.evidence,
+             exposure_count=CASE
+                 WHEN typeof(personal_vocabulary.exposure_count)='integer'
+                  AND personal_vocabulary.exposure_count < 9223372036854775807
+                 THEN personal_vocabulary.exposure_count+1
+                 ELSE personal_vocabulary.exposure_count
+             END,
+             -- Repeated exposure must not erase evidence supporting a
+             -- definition or a later validated learning state.
+             evidence=CASE
+                 WHEN personal_vocabulary.evidence=''
+                 THEN excluded.evidence
+                 ELSE personal_vocabulary.evidence
+             END,
              updated_at=excluded.updated_at""",
         (user_id, clean, evidence[:500], now, now),
     )
@@ -81,7 +101,14 @@ def record_heard_text(
     max_tokens: int = 30,
 ) -> list[dict[str, Any]]:
     """Record only lexical exposure, never comprehension or mastery."""
-    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", str(text), flags=re.UNICODE)
+    user_id = _require_user_id(user_id)
+    if not isinstance(text, str):
+        raise ValueError("Le texte entendu doit être une chaîne de caractères.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'exposition doit être du texte.")
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
+        raise ValueError("La limite de mots doit être un entier positif.")
+    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
     recorded: list[dict[str, Any]] = []
     seen: set[str] = set()
     for token in tokens[:max_tokens]:
@@ -102,6 +129,11 @@ def record_explicit_word_teaching(
     evidence: str = "Enseignement explicite de l'utilisateur",
 ) -> list[dict[str, Any]]:
     """Store explicit word definitions as heard, never as understood."""
+    user_id = _require_user_id(user_id)
+    if not isinstance(text, str):
+        raise ValueError("Le texte enseigné doit être une chaîne de caractères.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'enseignement doit être du texte.")
     pattern = re.compile(
         r"(?:(?:le\s+)?mot\s+)?"
         r"(?P<word>[A-Za-zÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ'-]{0,79})"
@@ -111,12 +143,68 @@ def record_explicit_word_teaching(
     )
     recorded: list[dict[str, Any]] = []
     now = utc_now()
-    for match in pattern.finditer(str(text or "")):
+    uncertainty_prefix = re.compile(
+        r"\b(?:je\s+(?:ne\s+)?sais\s+pas|"
+        r"je\s+me\s+demande|"
+        r"je\s+ne\s+suis\s+pas\s+(?:s[uû]r(?:e)?|certain(?:e)?)|"
+        r"je\s+doute|"
+        r"peut[- ]être|"
+        r"je\s+(?:crois|pense)\s+que|"
+        r"il\s+para[iî]t\s+que|"
+        r"on\s+m['’]a\s+dit\s+que|"
+        r"si\b|"
+        r"supposons\s+que|imaginons\s+que|admettons\s+que|"
+        r"dans\s+l['’]hypothèse\s+où|au\s+cas\s+où)\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    # Also inspect the whole sentence: uncertainty or disputed attribution
+    # can follow the definition connector ("coq signifie peut-être...").
+    uncertainty_sentence = re.compile(
+        r"\b(?:ce\s+n['’]est\s+pas\s+vrai\s+que|"
+        r"il\s+est\s+faux\s+que|c['’]est\s+faux\s+que|"
+        r"je\s+ne\s+(?:pense|crois|dis)\s+pas\s+que|"
+        r"je\s+ne\s+suis\s+pas\s+(?:s[uû]r(?:e)?|certain(?:e)?|convaincu(?:e)?)|"
+        r"(?:il|elle|on|quelqu['’]un)\s+(?:dit|a\s+dit|affirme|prétend)\s+que|"
+        r"\w+\s+(?:dit|a\s+dit|affirme|prétend)\s+que|"
+        r"on\s+(?:prétend|affirme|raconte)\s+que|"
+        r"selon\s+\w+|d['’]après\s+\w+|"
+        r"peut[- ]être|probablement|possiblement|éventuellement)\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    for match in pattern.finditer(text):
+        # A question or an explicitly uncertain statement is not a lesson.
+        # Evaluate only the sentence containing this candidate, so an
+        # unrelated question earlier in the same message does not suppress it.
+        sentence_start = max(
+            text.rfind(mark, 0, match.start()) for mark in ".!?;\n"
+        ) + 1
+        sentence_end_candidates = [
+            position for mark in ".!?;\n"
+            if (position := text.find(mark, match.end())) != -1
+        ]
+        sentence_end = min(sentence_end_candidates) if sentence_end_candidates else len(text)
+        sentence = text[sentence_start:sentence_end + 1]
+        prefix = text[sentence_start:match.start()]
+        if (
+            "?" in sentence
+            or uncertainty_prefix.search(prefix)
+            or uncertainty_sentence.search(sentence)
+        ):
+            continue
         try:
             word = normalize_word(match.group("word"))
         except ValueError:
             continue
         meaning = match.group("meaning").strip(" \t:—-")[:MAX_MEANING_LENGTH]
+        # A negated definition may otherwise be re-parsed from the negation
+        # particle itself (e.g. "coq ne signifie pas...") or accepted as
+        # a positive definition whose meaning starts with "pas".
+        if word in {"ne", "n'", "pas"} or re.match(
+            r"^(?:pas|plus|jamais|aucun(?:e)?|nul(?:le)?)\b",
+            meaning,
+            flags=re.IGNORECASE | re.UNICODE,
+        ):
+            continue
         if not meaning:
             continue
         db.execute(
@@ -124,10 +212,20 @@ def record_explicit_word_teaching(
                (user_id, word, meaning, state, exposure_count, evidence, created_at, updated_at)
                VALUES (?, ?, ?, 'heard', 1, ?, ?, ?)
                ON CONFLICT(user_id, word) DO UPDATE SET
-                 meaning=excluded.meaning,
-                 exposure_count=personal_vocabulary.exposure_count+1,
-                 evidence=excluded.evidence, updated_at=excluded.updated_at""",
-            (user_id, word, meaning, str(evidence)[:500], now, now),
+                 -- An explicit lesson may fill an empty meaning, but a later
+                 -- statement must not silently replace an existing definition.
+                 meaning=CASE
+                     WHEN personal_vocabulary.meaning=''
+                     THEN excluded.meaning
+                     ELSE personal_vocabulary.meaning
+                 END,
+                 evidence=CASE
+                     WHEN personal_vocabulary.meaning=''
+                     THEN excluded.evidence
+                     ELSE personal_vocabulary.evidence
+                 END,
+                 updated_at=excluded.updated_at""",
+            (user_id, word, meaning, evidence[:500], now, now),
         )
         row = db.execute(
             "SELECT * FROM personal_vocabulary WHERE user_id=? AND word=?",
@@ -137,6 +235,34 @@ def record_explicit_word_teaching(
             recorded.append(dict(row))
     return recorded
 
+
+def record_confirmed_turn_learning(
+    db: sqlite3.Connection,
+    user_id: str,
+    text: str,
+    *,
+    evidence: str = "Transcription complète confirmée par Gemini Live",
+) -> dict[str, list[dict[str, Any]]]:
+    """Record lexical exposure and explicit lessons once from a completed turn.
+
+    Incremental provider transcripts are deliberately not passed here: the
+    caller invokes this only after the turn has been merged and confirmed.
+    """
+    user_id = _require_user_id(user_id)
+    if not isinstance(text, str):
+        raise ValueError("Le texte confirmé doit être une chaîne de caractères.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve d'exposition doit être du texte.")
+    heard = record_heard_text(
+        db, user_id, text, evidence=evidence, max_tokens=30
+    )
+    taught = record_explicit_word_teaching(
+        db, user_id, text,
+        evidence="Enseignement explicite via le tour confirmé",
+    )
+    return {"heard": heard, "taught": taught}
+
+
 def advance_word(
     db: sqlite3.Connection,
     user_id: str,
@@ -145,10 +271,15 @@ def advance_word(
     meaning: str = "",
     evidence: str = "",
 ) -> dict[str, Any]:
+    user_id = _require_user_id(user_id)
     clean = normalize_word(word)
-    if target_state not in STATE_RANK:
+    if not isinstance(target_state, str) or target_state not in STATE_RANK:
         raise ValueError("État d'apprentissage invalide.")
-    meaning = (meaning or "").strip()
+    if not isinstance(meaning, str):
+        raise ValueError("La définition doit être du texte.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve de progression doit être du texte.")
+    meaning = meaning.strip()
     if len(meaning) > MAX_MEANING_LENGTH:
         raise ValueError("La définition est trop longue.")
     row = db.execute(
@@ -165,9 +296,13 @@ def advance_word(
     db.execute(
         """UPDATE personal_vocabulary
            SET state=?, meaning=CASE WHEN ? <> '' THEN ? ELSE meaning END,
-               evidence=?, updated_at=?
+               evidence=CASE WHEN ? <> '' THEN ? ELSE evidence END,
+               updated_at=?
            WHERE user_id=? AND word=?""",
-        (target_state, meaning, meaning, evidence[:500], utc_now(), user_id, clean),
+        (
+            target_state, meaning, meaning, evidence, evidence[:500],
+            utc_now(), user_id, clean,
+        ),
     )
     updated = db.execute(
         "SELECT * FROM personal_vocabulary WHERE user_id=? AND word=?",
@@ -177,6 +312,7 @@ def advance_word(
 
 
 def list_vocabulary(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
+    user_id = _require_user_id(user_id)
     rows = db.execute(
         """SELECT word, meaning, state, exposure_count, evidence, created_at, updated_at
            FROM personal_vocabulary WHERE user_id=?
@@ -187,6 +323,7 @@ def list_vocabulary(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]
 
 
 def get_usable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
+    user_id = _require_user_id(user_id)
     rows = db.execute(
         "SELECT word FROM personal_vocabulary WHERE user_id=? AND state='usable'",
         (user_id,),
@@ -196,6 +333,7 @@ def get_usable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
 
 def get_repeatable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
     """Words Chappie has explicitly learned to imitate or beyond."""
+    user_id = _require_user_id(user_id)
     rows = db.execute(
         """SELECT word FROM personal_vocabulary
            WHERE user_id=? AND state IN ('heard', 'imitated', 'recognized', 'understood', 'usable')""",
@@ -206,8 +344,10 @@ def get_repeatable_words(db: sqlite3.Connection, user_id: str) -> set[str]:
 
 def text_uses_only_allowed_words(text: str, allowed_words: set[str]) -> bool:
     """Return True only when a non-empty transcript uses known lexical items."""
+    if not isinstance(text, str):
+        return False
     tokens = re.findall(
-        r"[\wÀ-ÖØ-öø-ÿ'-]+", str(text or "").casefold(), flags=re.UNICODE
+        r"[\wÀ-ÖØ-öø-ÿ'-]+", text.casefold(), flags=re.UNICODE
     )
     return bool(tokens) and all(token in allowed_words for token in tokens)
 
@@ -218,7 +358,11 @@ def gate_spoken_text(
     max_words: int | None = None,
 ) -> str:
     """Filter lexical output; newborn mode can be restricted to isolated words."""
-    if not usable_words:
+    if max_words is not None and (
+        isinstance(max_words, bool) or not isinstance(max_words, int) or max_words < 1
+    ):
+        raise ValueError("La limite de mots doit être un entier positif.")
+    if not isinstance(text, str) or not usable_words:
         return ""
     tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+|[^\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
     output: list[str] = []

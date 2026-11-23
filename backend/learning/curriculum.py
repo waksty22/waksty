@@ -92,20 +92,24 @@ def _validate_user_id(user_id: str) -> str:
     )
 
 
+def _normalize_limit(value: Any, minimum: int, maximum: int) -> int:
+    """Valide une limite entière sans coercition implicite."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("La limite doit être un entier.")
+    if not minimum <= value <= maximum:
+        raise ValueError(f"La limite doit être comprise entre {minimum} et {maximum}.")
+    return value
+
+
 def _validate_score(score: float) -> float:
     """Valide un score compris entre 0 et 100."""
 
-    if isinstance(score, bool):
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
         raise ValueError(
             "Le score doit être un nombre."
         )
 
-    try:
-        score = float(score)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(
-            "Le score doit être un nombre."
-        ) from exc
+    score = float(score)
 
     if not math.isfinite(score):
         raise ValueError(
@@ -123,17 +127,12 @@ def _validate_score(score: float) -> float:
 def _validate_maturity(current_maturity: float) -> float:
     """Valide la maturité cognitive."""
 
-    if isinstance(current_maturity, bool):
+    if isinstance(current_maturity, bool) or not isinstance(current_maturity, (int, float)):
         raise ValueError(
             "La maturité cognitive doit être un nombre."
         )
 
-    try:
-        value = float(current_maturity)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(
-            "La maturité cognitive doit être un nombre."
-        ) from exc
+    value = float(current_maturity)
 
     if not math.isfinite(value):
         raise ValueError(

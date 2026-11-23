@@ -141,6 +141,60 @@ def test_explicit_close_closes_underlying_connection():
     assert raw.closed is True
 
 
+def test_real_libsql_shared_snapshot_owns_only_its_transaction():
+    """Shared snapshots use a read transaction without committing caller work."""
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    from cognition.shared_brain import _consistent_read_snapshot
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        db.execute(
+            "CREATE TABLE snapshot_probe "
+            "(id INTEGER PRIMARY KEY, label TEXT NOT NULL)"
+        )
+        db.execute("INSERT INTO snapshot_probe(label) VALUES (?)", ("base",))
+        db.commit()
+
+        # A standalone snapshot owns a read transaction and closes it.
+        with _consistent_read_snapshot(db):
+            assert db.in_transaction is True
+            assert db.execute(
+                "SELECT COUNT(*) FROM snapshot_probe"
+            ).fetchone()[0] == 1
+        assert db.in_transaction is False
+
+        # A caller-owned transaction must remain active across the snapshot.
+        db.execute("BEGIN")
+        db.execute(
+            "INSERT INTO snapshot_probe(label) VALUES (?)", ("outer",)
+        )
+        with _consistent_read_snapshot(db):
+            assert db.in_transaction is True
+            assert db.execute(
+                "SELECT COUNT(*) FROM snapshot_probe"
+            ).fetchone()[0] == 2
+        assert db.in_transaction is True
+        db.rollback()
+        assert db.execute(
+            "SELECT COUNT(*) FROM snapshot_probe"
+        ).fetchone()[0] == 1
+
+        # An exception rolls back only a transaction created by the snapshot.
+        with pytest.raises(RuntimeError, match="snapshot failure"):
+            with _consistent_read_snapshot(db):
+                db.execute(
+                    "INSERT INTO snapshot_probe(label) VALUES (?)", ("temporary",)
+                )
+                raise RuntimeError("snapshot failure")
+        assert db.in_transaction is False
+        assert db.execute(
+            "SELECT COUNT(*) FROM snapshot_probe"
+        ).fetchone()[0] == 1
+    finally:
+        db.close()
+
 def test_real_libsql_in_memory_driver_contract():
     """Exercise the actual installed libsql binding without touching Turso."""
     import pytest
@@ -333,80 +387,6 @@ def test_real_libsql_constraint_error_is_normalized():
 
 
 
-def test_real_libsql_executemany_and_cursor_iteration_contract():
-    import pytest
-    libsql = pytest.importorskip("libsql")
-    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
-    try:
-        db.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT NOT NULL)")
-        db.executemany("INSERT INTO events(label) VALUES (?)", [("wake",), ("learn",), ("remember",)])
-        db.commit()
-        cursor = db.execute("SELECT id, label FROM events ORDER BY id")
-        first_batch = cursor.fetchmany(2)
-        assert [row["label"] for row in first_batch] == ["wake", "learn"]
-        remaining = list(cursor)
-        assert len(remaining) == 1
-        assert remaining[0][1] == "remember"
-        empty_cursor = db.execute("SELECT id, label FROM events WHERE id < 0")
-        assert empty_cursor.description
-        assert empty_cursor.fetchone() is None
-        assert empty_cursor.fetchall() == []
-    finally:
-        db.close()
-
-
-def test_real_libsql_explicit_rollback_discards_pending_insert():
-    import pytest
-    libsql = pytest.importorskip("libsql")
-    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
-    try:
-        db.execute("CREATE TABLE transactions_test (id INTEGER PRIMARY KEY, label TEXT NOT NULL)")
-        db.commit()
-        db.execute("INSERT INTO transactions_test(label) VALUES (?)", ("temporary",))
-        db.rollback()
-        count = db.execute("SELECT COUNT(*) AS total FROM transactions_test").fetchone()["total"]
-        assert count == 0
-    finally:
-        db.close()
-
-
-def test_real_libsql_context_manager_commits_and_rolls_back():
-    import pytest
-    libsql = pytest.importorskip("libsql")
-    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
-    try:
-        db.execute("CREATE TABLE context_test (id INTEGER PRIMARY KEY, label TEXT NOT NULL)")
-        db.commit()
-        with db:
-            db.execute("INSERT INTO context_test(label) VALUES (?)", ("committed",))
-        assert db.execute("SELECT COUNT(*) AS total FROM context_test").fetchone()["total"] == 1
-        try:
-            with db:
-                db.execute("INSERT INTO context_test(label) VALUES (?)", ("rolled-back",))
-                raise RuntimeError("force rollback")
-        except RuntimeError:
-            pass
-        rows = db.execute("SELECT label FROM context_test ORDER BY id").fetchall()
-        assert [row["label"] for row in rows] == ["committed"]
-    finally:
-        db.close()
-
-
-def test_real_libsql_constraint_error_is_normalized():
-    import sqlite3
-    import pytest
-    libsql = pytest.importorskip("libsql")
-    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
-    try:
-        db.execute("CREATE TABLE unique_test (id INTEGER PRIMARY KEY, label TEXT UNIQUE NOT NULL)")
-        db.execute("INSERT INTO unique_test(label) VALUES (?)", ("same",))
-        db.commit()
-        with pytest.raises(sqlite3.IntegrityError):
-            db.execute("INSERT INTO unique_test(label) VALUES (?)", ("same",))
-    finally:
-        db.close()
-
-
 def test_real_libsql_episodic_memory_module_round_trip():
     """Exercise the real episodic-memory module on an isolated in-memory libSQL DB."""
     import pytest
@@ -463,6 +443,7 @@ def test_real_libsql_episodic_memory_module_round_trip():
             importance=2,
             source_type="confirmed",
             confidence=1.0,
+            allow_confirmation=True,
         )
         db.commit()
         refreshed = search_episodic_memories(db, "creator", query="guitare")
@@ -496,3 +477,25 @@ def test_real_libsql_episodic_memory_init_is_idempotent_and_user_scoped():
         assert search_episodic_memories(db, "another-user") == []
     finally:
         db.close()
+
+
+def test_context_manager_can_close_request_scoped_connection():
+    raw = FakeConnection()
+    with LibSQLConnectionAdapter(raw, close_on_context_exit=True) as db:
+        db.execute("SELECT id, label FROM sample")
+
+    assert raw.commits == 1
+    assert raw.closed is True
+
+
+def test_context_manager_closes_request_scoped_connection_after_rollback():
+    raw = FakeConnection()
+
+    try:
+        with LibSQLConnectionAdapter(raw, close_on_context_exit=True):
+            raise RuntimeError("expected")
+    except RuntimeError:
+        pass
+
+    assert raw.rollbacks == 1
+    assert raw.closed is True

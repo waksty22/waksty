@@ -131,3 +131,119 @@ def test_goal_skill_assessment_lookup_rejects_another_users_goal():
     except ValueError:
         pass
     db.close()
+
+
+
+def test_supervised_assessment_route_rejects_coerced_payload_values():
+    route = SERVER.split('@app.post("/api/cognition/skills/assessments")', 1)[1].split('@app.post("/api/skills/update")', 1)[0]
+    assert 'system_value = data.get("system", "")' in route
+    assert 'branch_value = data.get("branch", "")' in route
+    assert 'system_info = COGNITIVE_CATALOG[system_key]' in route
+    assert "if not isinstance(system_info, dict):" in route
+    assert 'branches = system_info.get("sub_branches", {})' in route
+    assert "if not isinstance(branches, dict) or branch_key not in branches:" in route
+    assert "if not isinstance(branches[branch_key], dict):" in route
+    assert 'evidence_value = data.get("evidence", "")' in route
+    assert "all(isinstance(value, str)" in route
+    assert 'raw_score = data.get("score")' in route
+    assert 'not isinstance(raw_score, (int, float))' in route
+    assert 'isinstance(raw_score, bool)' in route
+    assert "goal_id = int(goal_id)" not in route
+    assert "goal_step_id = int(goal_step_id)" not in route
+    assert "isinstance(goal_id, bool)" in route
+    assert "isinstance(goal_step_id, bool)" in route
+
+
+def test_skill_profile_rejects_coerced_scores_pass_flags_and_evidence():
+    valid_details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Résolution vérifiée sur plusieurs situations distinctes.",
+    }
+    base = {
+        "test_name": "tete:raisonnement_causal",
+        "passed": 1,
+        "score": 90,
+        "tested_at": "2026-11-15T12:00:00Z",
+        "details": valid_details,
+    }
+    invalid_rows = []
+    for field, values in {
+        "test_name": [7, True, None, "tete", "tete:raisonnement_causal:extra"],
+        "score": ["90", True, None, {}, [], float("nan"), float("inf")],
+        "passed": [True, "1", 0, None],
+        "tested_at": [7, None, {}],
+    }.items():
+        for value in values:
+            invalid_rows.append({**base, field: value})
+    missing_pass_flag = dict(base)
+    missing_pass_flag.pop("passed")
+    invalid_rows.append(missing_pass_flag)
+    for value in (None, 7, True, {}, [], "trop court"):
+        invalid_rows.append({
+            **base,
+            "details": {**valid_details, "evidence": value},
+        })
+
+    for row in invalid_rows:
+        profile, count = build_validated_skill_data([row])
+        assert count == 0, f"Une preuve invalide a été acceptée: {row!r}"
+        assert profile == {}
+
+
+def test_skill_profile_accepts_valid_json_details_but_deduplicates_evidence():
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Résolution vérifiée sur plusieurs situations distinctes.",
+    }
+    row = {
+        "test_name": "tete:raisonnement_causal",
+        "passed": 1,
+        "score": 90,
+        "tested_at": "2026-11-15T12:00:00Z",
+        "details": json.dumps(details),
+    }
+    profile, count = build_validated_skill_data([row, row])
+    assert count == 1
+    assert profile["tete"]["raisonnement_causal"]["confidence"] == 1 / 3
+
+
+def test_assessment_duplicate_guard_ignores_non_object_historical_details():
+    route = SERVER.split('@app.post("/api/cognition/skills/assessments")', 1)[1].split('@app.post("/api/skills/update")', 1)[0]
+    assert 'old_details = json.loads(row["details"] or "{}")' in route
+    assert "if not isinstance(old_details, dict):" in route
+    assert 'old_evidence = old_details.get("evidence")' in route
+    assert 'isinstance(old_evidence, str)' in route
+    assert 'normalize_evidence_text(old_evidence) == normalize_evidence_text(evidence)' in route
+
+def test_goal_skill_listing_ignores_failed_corrupt_and_unlinked_assessments():
+    db = make_db()
+    goal_id, step_id = seed_goal(db)
+    base = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Preuve documentée et vérifiable sur plusieurs essais.",
+        "goal_id": goal_id,
+        "goal_step_id": step_id,
+    }
+    rows = [
+        ("failed", 0, 95, base),
+        ("text-pass-flag", "yes", 95, base),
+        ("score-too-high", 1, 101, base),
+        ("score-infinite", 1, float("inf"), base),
+        ("score-text", 1, "not-a-number", base),
+        ("missing-evidence", 1, 95, {**base, "evidence": {"raw": "not proof"}}),
+        ("bad-step", 1, 95, {**base, "goal_step_id": "1"}),
+        ("wrong-step", 1, 95, {**base, "goal_step_id": step_id + 100}),
+    ]
+    for index, (name, passed, score, details) in enumerate(rows, start=1):
+        db.execute(
+            """INSERT INTO competency_tests
+               (user_id,test_name,passed,score,details,tested_at)
+               VALUES('creator',?,?,?,?,?)""",
+            (name, passed, score, json.dumps(details, allow_nan=True), f"2026-11-09T10:0{index}:00Z"),
+        )
+    db.commit()
+    assert list_goal_skill_assessments(db, "creator", goal_id) == []
+    db.close()

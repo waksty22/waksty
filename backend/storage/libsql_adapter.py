@@ -143,9 +143,18 @@ def _raise_sqlite_compatible_error(exc: Exception) -> None:
 class LibSQLConnectionAdapter:
     """Provide the subset of sqlite3.Connection used by the current backend."""
 
-    def __init__(self, connection: Any) -> None:
+    def __init__(
+        self, connection: Any, *, close_on_context_exit: bool = False
+    ) -> None:
         self._connection = connection
         self._closed = False
+        self._close_on_context_exit = close_on_context_exit
+
+    @property
+    def in_transaction(self) -> bool:
+        """Expose the native driver's transaction state without guessing."""
+        self._ensure_open()
+        return bool(getattr(self._connection, "in_transaction", False))
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -198,23 +207,56 @@ class LibSQLConnectionAdapter:
 
     def close(self) -> None:
         if not self._closed:
-            self._connection.close()
+            # Never permit reuse after a close attempt: native drivers may
+            # partially release a session before reporting a cleanup error.
             self._closed = True
+            self._connection.close()
 
     def __enter__(self) -> "LibSQLConnectionAdapter":
         self._ensure_open()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        # Match sqlite3.Connection's context-manager behavior: finish the
-        # transaction, but do not close the connection.
-        if exc_type is None:
-            self.commit()
-        else:
-            self.rollback()
+        # Preserve sqlite3 transaction semantics. Request-scoped adapters
+        # additionally release their remote session after the transaction.
+        primary_exception = exc if exc_type is not None else None
+        try:
+            if exc_type is None:
+                try:
+                    self.commit()
+                except Exception as commit_error:
+                    # A failed commit must not leave a request-scoped
+                    # transaction pending on the remote session. Preserve
+                    # the original commit error if rollback also fails.
+                    primary_exception = commit_error
+                    try:
+                        self.rollback()
+                    except Exception:
+                        pass
+                    raise
+            else:
+                try:
+                    self.rollback()
+                except Exception:
+                    # Do not replace the exception raised by the caller's
+                    # transaction body with a secondary rollback failure.
+                    pass
+        finally:
+            if self._close_on_context_exit:
+                try:
+                    self.close()
+                except Exception:
+                    # Cleanup failures are useful when they are the only
+                    # failure, but must not mask a transaction/body error.
+                    if primary_exception is None:
+                        raise
         return False
 
 
-def adapt_libsql_connection(connection: Any) -> LibSQLConnectionAdapter:
-    """Wrap an already-created libsql connection without opening a new one."""
-    return LibSQLConnectionAdapter(connection)
+def adapt_libsql_connection(
+    connection: Any, *, close_on_context_exit: bool = False
+) -> LibSQLConnectionAdapter:
+    """Wrap a libsql connection; optionally release request-scoped sessions."""
+    return LibSQLConnectionAdapter(
+        connection, close_on_context_exit=close_on_context_exit
+    )

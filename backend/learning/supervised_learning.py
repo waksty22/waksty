@@ -29,6 +29,18 @@ def _required_text(value: Any, field: str, limit: int) -> str:
     return value
 
 
+def _user_id(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Identifiant utilisateur invalide.")
+    return value.strip()
+
+
+def _record_id(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{field} invalide.")
+    return value
+
+
 def init_supervised_learning_tables(db: sqlite3.Connection) -> None:
     db.executescript("""
         CREATE TABLE IF NOT EXISTS imitation_examples (
@@ -72,12 +84,15 @@ def record_demonstration(
     source_type: str = "demonstrated",
     context: str = "",
 ) -> dict[str, Any]:
+    user_id = _user_id(user_id)
     behavior = _required_text(behavior, "Comportement", MAX_BEHAVIOR)
     evidence = _required_text(evidence, "Preuve de démonstration", MAX_EVIDENCE)
-    context = str(context or "").strip()
+    if not isinstance(context, str):
+        raise ValueError("Le contexte doit être du texte.")
+    context = context.strip()
     if len(context) > MAX_CONTEXT:
         raise ValueError("Le contexte est trop long.")
-    if source_type not in ALLOWED_SOURCES:
+    if not isinstance(source_type, str) or source_type not in ALLOWED_SOURCES:
         raise ValueError("Source attendue : demonstrated ou explicitly_taught.")
     now = _now()
     cur = db.execute(
@@ -104,6 +119,8 @@ def record_practice(
     evidence: str,
     successful: bool,
 ) -> dict[str, Any]:
+    user_id = _user_id(user_id)
+    example_id = _record_id(example_id, "Identifiant de démonstration")
     row = db.execute(
         "SELECT id,status FROM imitation_examples WHERE id=? AND user_id=?",
         (example_id, user_id),
@@ -117,18 +134,27 @@ def record_practice(
     if not isinstance(successful, bool):
         raise ValueError("successful doit être un booléen.")
     now = _now()
-    cur = db.execute(
-        """INSERT INTO imitation_attempts
-           (user_id,example_id,result,evidence,successful,created_at)
-           VALUES (?,?,?,?,?,?)""",
-        (user_id, example_id, result, evidence, int(successful), now),
-    )
-    db.execute(
-        """UPDATE imitation_examples SET status='practiced',updated_at=?
-           WHERE id=? AND user_id=?""",
-        (now, example_id, user_id),
-    )
-    db.commit()
+    db.execute("SAVEPOINT record_practice_transition")
+    try:
+        transition = db.execute(
+            """UPDATE imitation_examples SET status='practiced',updated_at=?
+               WHERE id=? AND user_id=? AND status IN ('observed','practiced')""",
+            (now, example_id, user_id),
+        )
+        if transition.rowcount != 1:
+            raise ValueError("Cette démonstration a déjà été clôturée.")
+        cur = db.execute(
+            """INSERT INTO imitation_attempts
+               (user_id,example_id,result,evidence,successful,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (user_id, example_id, result, evidence, int(successful), now),
+        )
+        db.execute("RELEASE SAVEPOINT record_practice_transition")
+        db.commit()
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT record_practice_transition")
+        db.execute("RELEASE SAVEPOINT record_practice_transition")
+        raise
     return {
         "attempt_id": cur.lastrowid, "example_id": example_id,
         "result": result, "evidence": evidence,
@@ -143,6 +169,8 @@ def validate_imitation(
     supervisor_approved: bool,
     validation_evidence: str,
 ) -> dict[str, Any]:
+    user_id = _user_id(user_id)
+    example_id = _record_id(example_id, "Identifiant de démonstration")
     if supervisor_approved is not True:
         raise ValueError("Une validation explicite du superviseur est obligatoire.")
     validation_evidence = _required_text(
@@ -165,14 +193,16 @@ def validate_imitation(
     if not attempts:
         raise ValueError("Aucune pratique réussie documentée.")
     now = _now()
-    db.execute(
+    cur = db.execute(
         """UPDATE imitation_examples
            SET status='validated',supervisor_approved=1,
                evidence=evidence || char(10) || 'Validation : ' || ?,
                updated_at=?
-           WHERE id=? AND user_id=?""",
+           WHERE id=? AND user_id=? AND status='practiced'""",
         (validation_evidence, now, example_id, user_id),
     )
+    if cur.rowcount != 1:
+        raise ValueError("Cette imitation a déjà été clôturée ou modifiée.")
     db.commit()
     return {
         "example_id": example_id, "status": "validated",
@@ -187,6 +217,8 @@ def reject_imitation(
     example_id: int,
     reason: str,
 ) -> dict[str, Any]:
+    user_id = _user_id(user_id)
+    example_id = _record_id(example_id, "Identifiant de démonstration")
     reason = _required_text(reason, "Motif du rejet", MAX_EVIDENCE)
     row = db.execute(
         "SELECT status FROM imitation_examples WHERE id=? AND user_id=?",
@@ -194,15 +226,18 @@ def reject_imitation(
     ).fetchone()
     if row is None:
         raise ValueError("Démonstration introuvable pour cet utilisateur.")
-    if row["status"] == "validated":
-        raise ValueError("Une imitation validée ne peut pas être rejetée directement.")
+    if row["status"] in {"validated", "rejected"}:
+        raise ValueError("Cette imitation est déjà clôturée et ne peut plus être modifiée.")
     now = _now()
-    db.execute(
+    cur = db.execute(
         """UPDATE imitation_examples SET status='rejected',
            evidence=evidence || char(10) || 'Rejet : ' || ?,
-           updated_at=? WHERE id=? AND user_id=?""",
+           updated_at=? WHERE id=? AND user_id=?
+             AND status NOT IN ('validated', 'rejected')""",
         (reason, now, example_id, user_id),
     )
+    if cur.rowcount != 1:
+        raise ValueError("Cette imitation a déjà été clôturée.")
     db.commit()
     return {"example_id": example_id, "status": "rejected", "reason": reason}
 
@@ -210,7 +245,9 @@ def reject_imitation(
 def list_imitation_learning(
     db: sqlite3.Connection, user_id: str, limit: int = 50
 ) -> dict[str, Any]:
-    limit = max(1, min(int(limit), 100))
+    user_id = _user_id(user_id)
+    limit = _record_id(limit, "Limite")
+    limit = min(limit, 100)
     examples = db.execute(
         """SELECT id,behavior,context,source_type,evidence,status,
                   supervisor_approved,created_at,updated_at

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import sqlite3
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -66,8 +67,12 @@ def _normalize_user_id(user_id: str) -> str:
 
 
 def _normalize_source_type(source_type: str) -> str:
-    """Valide la provenance d'un souvenir."""
-    source = str(source_type or "taught").strip().lower()
+    """Valide la provenance d'un souvenir, y compris l'état confirmé."""
+    if source_type is None:
+        return "taught"
+    if not isinstance(source_type, str):
+        raise ValueError("La provenance doit être du texte.")
+    source = source_type.strip().lower()
 
     if source not in VALID_SOURCE_TYPES:
         raise ValueError(
@@ -111,17 +116,17 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
     if tags is None:
         return []
 
-    if not isinstance(tags, (list, tuple)):
+    if not isinstance(tags, list):
         raise ValueError("Les tags doivent être fournis sous forme de liste.")
+
+    if any(not isinstance(tag, str) for tag in tags):
+        raise ValueError("Chaque tag doit être du texte.")
 
     safe_tags: list[str] = []
     seen: set[str] = set()
 
     for tag in tags:
-        if tag is None:
-            continue
-
-        clean = str(tag).strip()[:MAX_TAG_LENGTH]
+        clean = tag.strip()[:MAX_TAG_LENGTH]
 
         if not clean:
             continue
@@ -142,20 +147,14 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
 
 def _normalize_importance(importance: int) -> int:
     """Valide et borne l'importance entre 1 et 5."""
-    if isinstance(importance, bool):
-        raise ValueError("L'importance doit être un nombre entier.")
-
-    try:
-        value = int(importance)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Importance invalide.") from exc
-
-    return max(1, min(5, value))
+    if isinstance(importance, bool) or not isinstance(importance, int):
+        raise ValueError("L'importance doit être un entier.")
+    return max(1, min(5, importance))
 
 
 def _normalize_confidence(confidence: float) -> float:
     """Valide la confiance entre 0 et 1."""
-    if isinstance(confidence, bool):
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise ValueError("La confiance doit être un nombre.")
 
     try:
@@ -176,15 +175,9 @@ def _normalize_confidence(confidence: float) -> float:
 
 def _normalize_limit(limit: int, minimum: int, maximum: int) -> int:
     """Valide une limite numérique."""
-    if isinstance(limit, bool):
-        raise ValueError("La limite doit être un nombre entier.")
-
-    try:
-        value = int(limit)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("La limite doit être un nombre.") from exc
-
-    return max(minimum, min(maximum, value))
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
+    return max(minimum, min(maximum, limit))
 
 
 def _escape_like(value: str) -> str:
@@ -303,9 +296,20 @@ def migrate_legacy_memories(db: sqlite3.Connection) -> int:
     for raw in cursor.fetchall():
         row = _row_to_dict(raw, cursor)
         try:
-            user_id = _normalize_user_id(str(row["user_id"] or ""))
-            content = _normalize_content(str(row["content"] or ""))
-            category = _normalize_category(str(row["category"] or "general"))
+            # Legacy rows are untrusted: never turn malformed values into
+            # plausible user memories through str() coercion.
+            raw_user_id = row["user_id"]
+            raw_content = row["content"]
+            raw_category = row["category"]
+            if not isinstance(raw_user_id, str):
+                continue
+            if not isinstance(raw_content, str):
+                continue
+            if raw_category is not None and not isinstance(raw_category, str):
+                continue
+            user_id = _normalize_user_id(raw_user_id)
+            content = _normalize_content(raw_content)
+            category = _normalize_category(raw_category or "general")
             importance = _normalize_importance(row["importance"])
             access_count = _normalize_limit(row["access_count"], 0, 2_000_000_000)
         except (ValueError, TypeError):
@@ -314,12 +318,24 @@ def migrate_legacy_memories(db: sqlite3.Connection) -> int:
             tags = json.loads(row.get("tags") or "[]")
         except (ValueError, TypeError):
             tags = []
-        safe_tags = _normalize_tags(
-            ["legacy_source_unverified"] + (tags if isinstance(tags, list) else [])
+        legacy_tags = (
+            [tag for tag in tags if isinstance(tag, str)]
+            if isinstance(tags, list) else []
         )
+        safe_tags = _normalize_tags(
+            ["legacy_source_unverified"] + legacy_tags
+        )
+        raw_created_at = row.get("created_at")
+        raw_updated_at = row.get("updated_at")
+        # Do not turn BLOBs, numbers, or other malformed legacy timestamps
+        # into plausible-looking strings during migration.
+        if raw_created_at is not None and not isinstance(raw_created_at, str):
+            continue
+        if raw_updated_at is not None and not isinstance(raw_updated_at, str):
+            continue
         now = utc_now()
-        created_at = str(row.get("created_at") or now)
-        updated_at = str(row.get("updated_at") or created_at)
+        created_at = raw_created_at.strip() if raw_created_at and raw_created_at.strip() else now
+        updated_at = raw_updated_at.strip() if raw_updated_at and raw_updated_at.strip() else created_at
         result = db.execute(
             """INSERT OR IGNORE INTO memories_v19
                (user_id,category,content,importance,source_type,confidence,tags,
@@ -342,13 +358,15 @@ def save_episodic_memory(
     source_type: str = "taught",
     confidence: float = 0.8,
     tags: list[str] | None = None,
+    allow_confirmation: bool = False,
 ) -> dict[str, Any]:
     """
     Enregistre ou actualise un souvenir épisodique.
 
     Si le souvenir existe déjà pour cet utilisateur :
     - son importance ne diminue pas ;
-    - ses informations de provenance sont actualisées ;
+    - sa provenance et sa confiance restent inchangées par défaut ;
+    - elles ne peuvent être remplacées que par un appel interne autorisé ;
     - sa date de mise à jour est actualisée ;
     - son compteur d'accès est conservé.
     """
@@ -357,6 +375,11 @@ def save_episodic_memory(
     category = _normalize_category(category)
     importance = _normalize_importance(importance)
     source_type = _normalize_source_type(source_type)
+    if source_type == "confirmed" and allow_confirmation is not True:
+        raise ValueError(
+            "La provenance 'confirmed' exige un appel interne explicitement "
+            "autorisé ; les enregistrements ordinaires ne peuvent pas la définir."
+        )
     confidence = _normalize_confidence(confidence)
 
     safe_tags = _normalize_tags(tags)
@@ -387,8 +410,17 @@ def save_episodic_memory(
                 excluded.importance
             ),
 
-            source_type = excluded.source_type,
-            confidence = excluded.confidence,
+            -- A generic save may refresh a memory, but it cannot rewrite
+            -- its original provenance or confidence. In particular, a
+            -- later model inference must not downgrade a user-confirmed fact.
+            source_type = CASE
+                WHEN ? = 1 THEN excluded.source_type
+                ELSE memories_v19.source_type
+            END,
+            confidence = CASE
+                WHEN ? = 1 THEN excluded.confidence
+                ELSE memories_v19.confidence
+            END,
             tags = excluded.tags,
             updated_at = excluded.updated_at
         """,
@@ -402,16 +434,26 @@ def save_episodic_memory(
             tags_json,
             now,
             now,
+            1 if allow_confirmation is True else 0,
+            1 if allow_confirmation is True else 0,
         ),
     )
+
+    persisted = db.execute(
+        """SELECT importance, source_type, confidence
+           FROM memories_v19 WHERE user_id=? AND content=?""",
+        (user_id, content),
+    ).fetchone()
+    if persisted is None:
+        raise RuntimeError("Le souvenir enregistré est introuvable.")
 
     return {
         "saved": True,
         "content": content,
         "category": category,
-        "importance": importance,
-        "source_type": source_type,
-        "confidence": confidence,
+        "importance": persisted[0],
+        "source_type": persisted[1],
+        "confidence": persisted[2],
         "tags": safe_tags,
     }
 
@@ -490,9 +532,34 @@ def search_episodic_memories(
     terms = _memory_search_terms(query) if query else []
     for row in rows:
         item = _row_to_dict(row, cursor)
+        # Defensive read boundary: damaged rows must not crash ranking or
+        # leak coerced values into the shared cognitive context.
+        if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool):
+            continue
+        if not isinstance(item.get("content"), str) or not isinstance(item.get("category"), str):
+            continue
+        source_type = item.get("source_type")
+        if not isinstance(source_type, str) or source_type not in VALID_SOURCE_TYPES:
+            continue
+        if not isinstance(item.get("importance"), int) or isinstance(item.get("importance"), bool):
+            continue
+        raw_confidence = item.get("confidence")
+        if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+            continue
+        try:
+            confidence_value = float(raw_confidence)
+        except (OverflowError, TypeError, ValueError):
+            continue
+        if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+            continue
+        if not isinstance(item.get("access_count"), int) or isinstance(item.get("access_count"), bool):
+            continue
         try:
             parsed_tags = json.loads(item.get("tags") or "[]")
-            item["tags"] = parsed_tags if isinstance(parsed_tags, list) else []
+            item["tags"] = (
+                [tag for tag in parsed_tags if isinstance(tag, str)]
+                if isinstance(parsed_tags, list) else []
+            )
         except (ValueError, TypeError):
             item["tags"] = []
 
@@ -506,10 +573,23 @@ def search_episodic_memories(
             char for char in searchable_folded
             if not unicodedata.combining(char)
         )
-        matched = sum(
-            1 for term in terms if term in searchable_folded
+        searchable_tokens = re.findall(r"[a-z0-9]{2,}", searchable_folded)
+        searchable_token_set = set(searchable_tokens)
+        matched = sum(1 for term in terms if term in searchable_token_set)
+
+        normalized_query_folded = unicodedata.normalize("NFKD", normalized_query)
+        normalized_query_folded = "".join(
+            char for char in normalized_query_folded
+            if not unicodedata.combining(char)
         )
-        phrase_match = bool(normalized_query and normalized_query in searchable)
+        query_tokens = re.findall(r"[a-z0-9]{2,}", normalized_query_folded)
+        phrase_match = bool(
+            query_tokens
+            and any(
+                searchable_tokens[index:index + len(query_tokens)] == query_tokens
+                for index in range(len(searchable_tokens) - len(query_tokens) + 1)
+            )
+        )
         if query and matched == 0 and not phrase_match:
             continue
         # Relevance is lexical evidence, not a claim that the memory is true.
@@ -539,6 +619,9 @@ def search_episodic_memories(
             UPDATE memories_v19
             SET access_count = access_count + 1
             WHERE user_id = ? AND id = ?
+              AND typeof(access_count) = 'integer'
+              AND access_count >= 0
+              AND access_count < 9223372036854775807
             """,
             [(user_id, int(item["id"])) for item in results],
         )
@@ -579,12 +662,19 @@ def apply_memory_decay(
             importance = importance - 1,
             updated_at = ?
         WHERE user_id = ?
-          AND importance > 1
-          AND access_count < 2
-          AND (
-                julianday(updated_at) < julianday(?)
-                OR julianday(updated_at) IS NULL
-          )
+          AND typeof(importance) = 'integer'
+          AND importance BETWEEN 2 AND 5
+          AND typeof(access_count) = 'integer'
+          AND access_count BETWEEN 0 AND 1
+          AND typeof(content) = 'text' AND length(trim(content)) > 0
+          AND typeof(category) = 'text'
+          AND typeof(source_type) = 'text'
+          AND source_type IN ('observed', 'taught', 'inferred', 'confirmed')
+          AND typeof(confidence) IN ('integer', 'real')
+          AND confidence BETWEEN 0.0 AND 1.0
+          AND typeof(updated_at) = 'text'
+          AND julianday(updated_at) IS NOT NULL
+          AND julianday(updated_at) < julianday(?)
         """,
         (now, user_id, cutoff),
     )
@@ -631,6 +721,19 @@ def get_memory_statistics(
 
         FROM memories_v19
         WHERE user_id = ?
+          AND typeof(id) = 'integer'
+          AND typeof(user_id) = 'text'
+          AND typeof(content) = 'text' AND length(trim(content)) > 0
+          AND typeof(category) = 'text'
+          AND typeof(importance) = 'integer'
+          AND importance BETWEEN 1 AND 5
+          AND typeof(source_type) = 'text'
+          AND source_type IN ('observed', 'taught', 'inferred', 'confirmed')
+          AND typeof(confidence) IN ('integer', 'real')
+          AND confidence BETWEEN 0.0 AND 1.0
+          AND typeof(access_count) = 'integer' AND access_count >= 0
+          AND typeof(created_at) = 'text'
+          AND typeof(updated_at) = 'text'
         """,
         (user_id,),
     )

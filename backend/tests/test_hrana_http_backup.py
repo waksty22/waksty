@@ -9,7 +9,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from storage.hrana_backup import HranaTransactionConnection
-from storage.hrana_http import HranaHttpClient, HranaHttpError
+from storage.hrana_http import (
+    HranaHttpClient,
+    HranaHttpError,
+    open_guarded_restore_transaction,
+)
 from storage.logical_backup import (
     export_encrypted_logical_backup,
     verify_encrypted_logical_backup,
@@ -37,8 +41,11 @@ class FakeHranaServer:
         self.statements = []
         self.active = False
         self.closed = False
+        self.base_url = None
+        self.request_hosts = []
 
     def handle(self, request):
+        self.request_hosts.append(request.url.host)
         assert request.url.path == "/v2/pipeline"
         assert request.headers["authorization"] == "Bearer test-token"
         body = json.loads(request.content)
@@ -57,6 +64,12 @@ class FakeHranaServer:
             elif sql in {"COMMIT", "ROLLBACK"}:
                 self.active = False
                 result = {"cols": [], "rows": []}
+            elif sql.startswith("CREATE TRIGGER"):
+                result = {"cols": [], "rows": []}
+            elif sql == "SELECT 'a;b' AS value":
+                result = {"cols": [{"name": "value", "decltype": "TEXT"}], "rows": [[_typed("a;b")]]}
+            elif "name = 'sqlite_sequence'" in sql:
+                result = {"cols": [{"name": "1", "decltype": "INTEGER"}], "rows": []}
             elif "sqlite_master" in sql:
                 result = {
                     "cols": [
@@ -71,6 +84,22 @@ class FakeHranaServer:
                         _typed("memories"),
                         _typed("CREATE TABLE memories (id INTEGER, note TEXT)"),
                     ]],
+                }
+            elif "pragma_table_xinfo" in sql:
+                result = {
+                    "cols": [
+                        {"name": "cid", "decltype": "INTEGER"},
+                        {"name": "name", "decltype": "TEXT"},
+                        {"name": "type", "decltype": "TEXT"},
+                        {"name": "notnull", "decltype": "INTEGER"},
+                        {"name": "dflt_value", "decltype": "TEXT"},
+                        {"name": "pk", "decltype": "INTEGER"},
+                        {"name": "hidden", "decltype": "INTEGER"},
+                    ],
+                    "rows": [
+                        [_typed(0), _typed("id"), _typed("INTEGER"), _typed(0), _typed(None), _typed(0), _typed(0)],
+                        [_typed(1), _typed("note"), _typed("TEXT"), _typed(0), _typed(None), _typed(0), _typed(0)],
+                    ],
                 }
             elif 'FROM "memories"' in sql:
                 result = {
@@ -102,7 +131,7 @@ class FakeHranaServer:
             self.baton = "opaque-baton-" + str(self.counter)
         return httpx.Response(
             200,
-            json={"baton": self.baton, "base_url": None, "results": results},
+            json={"baton": self.baton, "base_url": self.base_url, "results": results},
         )
 
 
@@ -117,7 +146,7 @@ def test_http_v2_backup_uses_one_baton_transaction_and_verifies(tmp_path):
     transaction = None
     destination = tmp_path / "turso-backup.json.enc"
     try:
-        assert client._endpoint == "https://example-org.turso.io/v2/pipeline"
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
         transaction = client.transaction()
         report = export_encrypted_logical_backup(
             HranaTransactionConnection(transaction),
@@ -134,8 +163,9 @@ def test_http_v2_backup_uses_one_baton_transaction_and_verifies(tmp_path):
         )["valid"] is True
         assert server.statements[0] == "BEGIN"
         assert "sqlite_master" in server.statements[1]
-        assert 'SELECT * FROM "memories"' == server.statements[2]
-        assert server.statements[3] == "COMMIT"
+        assert "pragma_table_xinfo" in server.statements[2]
+        assert 'SELECT "id","note" FROM "memories"' == server.statements[3]
+        assert server.statements[5] == "COMMIT"
         assert server.closed is True
         assert server.active is False
     finally:
@@ -208,3 +238,209 @@ def test_http_v2_decodes_null_integer_float_text_and_blob():
     })
     assert result.columns == ("n", "i", "f", "t", "b")
     assert result.rows == [(None, 9223372036854775807, 1.25, "hello", bytes([0, 1, 2]))]
+
+def test_http_v2_write_allows_trigger_body_semicolons_but_rejects_extra_statements():
+    server = FakeHranaServer()
+    client = _client(server)
+    transaction = None
+    trigger_sql = (
+        "CREATE TRIGGER memories_after_insert AFTER INSERT ON memories "
+        "BEGIN INSERT INTO memories(id, note) VALUES (NEW.id + 1000, NEW.note); END;"
+    )
+    try:
+        transaction = client.transaction()
+        result = transaction.execute_write(trigger_sql)
+        assert result.columns == ()
+        assert server.statements == ["BEGIN", trigger_sql]
+        with pytest.raises(PermissionError):
+            transaction.execute_write(trigger_sql + " DROP TABLE memories;")
+        with pytest.raises(PermissionError):
+            transaction.execute_write("/* harmless prefix */ COMMIT")
+        assert server.statements == ["BEGIN", trigger_sql]
+        transaction.rollback()
+    finally:
+        client.close()
+
+
+def test_single_statement_guard_accepts_trailing_comments_and_quoted_semicolons():
+    from storage.hrana_http import _is_single_sql_statement
+    assert _is_single_sql_statement("SELECT ';' /* trailing comment */")
+    assert _is_single_sql_statement("/* leading comment */ SELECT 1")
+    assert _is_single_sql_statement("CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;")
+    assert not _is_single_sql_statement("SELECT 1; SELECT 2")
+    assert not _is_single_sql_statement("SELECT 1; -- comment\nDROP TABLE t")
+
+
+
+def test_guarded_restore_checks_exact_host_before_opening_transaction():
+    server = FakeHranaServer()
+    http = httpx.Client(transport=httpx.MockTransport(server.handle))
+    try:
+        with pytest.raises(PermissionError):
+            open_guarded_restore_transaction(
+                "libsql://isolated-db.turso.io",
+                "test-token",
+                expected_target_identity="different-db.turso.io",
+                production_identity="chappie-db.turso.io",
+                http_client=http,
+            )
+        with pytest.raises(PermissionError):
+            open_guarded_restore_transaction(
+                "libsql://chappie-db.turso.io",
+                "test-token",
+                expected_target_identity="chappie-db.turso.io",
+                production_identity="chappie-db.turso.io",
+                http_client=http,
+            )
+        assert server.statements == []
+        assert server.active is False
+    finally:
+        http.close()
+
+
+def test_guarded_restore_opens_transaction_only_for_expected_nonproduction_host():
+    server = FakeHranaServer()
+    http = httpx.Client(transport=httpx.MockTransport(server.handle))
+    client = transaction = None
+    try:
+        client, transaction = open_guarded_restore_transaction(
+            "libsql://isolated-db.turso.io",
+            "test-token",
+            expected_target_identity="ISOLATED-DB.TURSO.IO",
+            production_identity="chappie-db.turso.io",
+            http_client=http,
+        )
+        assert server.statements == ["BEGIN"]
+        assert server.active is True
+        transaction.rollback()
+        assert server.statements == ["BEGIN", "ROLLBACK"]
+        assert server.active is False
+    finally:
+        if transaction is not None and transaction._active:
+            transaction.rollback()
+        if client is not None:
+            client.close()
+        http.close()
+
+
+def test_http_rejects_cross_origin_base_url_without_forwarding_auth_token():
+    server = FakeHranaServer()
+    server.base_url = "https://attacker.example/v2/pipeline"
+    client = _client(server)
+    try:
+        with pytest.raises(HranaHttpError, match="origine de connexion"):
+            client.transaction()
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
+        assert server.request_hosts == ["example-org.turso.io", "example-org.turso.io"]
+    finally:
+        client.close()
+
+
+def test_http_accepts_same_origin_base_url_update_and_keeps_stream_working():
+    server = FakeHranaServer()
+    server.base_url = "https://EXAMPLE-ORG.TURSO.IO"
+    client = _client(server)
+    transaction = None
+    try:
+        transaction = client.transaction()
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
+        transaction.rollback()
+        assert server.request_hosts == ["example-org.turso.io", "example-org.turso.io"]
+        assert server.closed is True
+        assert server.active is False
+    finally:
+        if transaction is not None and transaction._active:
+            transaction.rollback()
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://example-org.turso.io.attacker.example",
+        "https://example-org.turso.io:444",
+        "http://example-org.turso.io",
+    ],
+)
+def test_http_rejects_deceptive_or_downgraded_base_url_updates(base_url):
+    server = FakeHranaServer()
+    server.base_url = base_url
+    client = _client(server)
+    try:
+        with pytest.raises(HranaHttpError, match="origine de connexion"):
+            client.transaction()
+        assert server.request_hosts == ["example-org.turso.io", "example-org.turso.io"]
+        assert client._endpoint.lower() == "https://example-org.turso.io/v2/pipeline"
+    finally:
+        client.close()
+
+
+def test_http_v2_backup_allows_quoted_semicolons_and_rejects_multiple_statements():
+    server = FakeHranaServer()
+    client = _client(server)
+    transaction = None
+    try:
+        transaction = client.transaction()
+        cursor = HranaTransactionConnection(transaction).execute("SELECT 'a;b' AS value")
+        assert cursor.fetchall() == [("a;b",)]
+        with pytest.raises(PermissionError):
+            HranaTransactionConnection(transaction).execute("SELECT 1; DELETE FROM memories")
+        assert server.statements == ["BEGIN", "SELECT 'a;b' AS value"]
+        transaction.rollback()
+    finally:
+        client.close()
+
+
+def test_http_closes_stream_when_begin_sql_fails_after_baton_allocation():
+    calls = []
+    baton = None
+    stream_closed = False
+
+    def handler(request):
+        nonlocal baton, stream_closed
+        body = json.loads(request.content)
+        calls.append((body["baton"], body["requests"]))
+        if body["requests"][0].get("stmt", {}).get("sql") == "BEGIN":
+            baton = "begin-error-baton"
+            return httpx.Response(
+                200,
+                json={
+                    "baton": baton,
+                    "results": [{
+                        "type": "error",
+                        "error": {"message": "BEGIN rejected", "code": "SQLITE_ERROR"},
+                    }],
+                },
+            )
+
+        assert body["baton"] == "begin-error-baton"
+        assert body["requests"][0]["stmt"]["sql"] == "ROLLBACK"
+        assert body["requests"][1]["type"] == "close"
+        stream_closed = True
+        baton = None
+        return httpx.Response(
+            200,
+            json={
+                "baton": None,
+                "results": [
+                    {"type": "ok", "response": {"type": "execute", "result": {}}},
+                    {"type": "ok", "response": {"type": "close"}},
+                ],
+            },
+        )
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = HranaHttpClient(
+        "libsql://example-org.turso.io", "test-token", http_client=http
+    )
+    try:
+        with pytest.raises(HranaHttpError, match="BEGIN rejected"):
+            client.transaction()
+        assert [entry[1][0].get("stmt", {}).get("sql") for entry in calls] == [
+            "BEGIN",
+            "ROLLBACK",
+        ]
+        assert stream_closed is True
+        assert baton is None
+    finally:
+        client.close()

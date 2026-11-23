@@ -106,3 +106,32 @@ def test_confirmed_place_is_not_silently_reidentified_on_similarity(db):
     assert revisit["place_id"] != first["place_id"]
     assert revisit["identity_status"] == "candidate"
     assert revisit["candidate_place_id"] == first["place_id"]
+
+
+def test_place_observation_cannot_attach_another_users_or_closed_session(db):
+    owner_session = start_location_session(db, "creator", True)
+    other_session = start_location_session(db, "other", True)
+    with pytest.raises(ValueError, match="appartenir à cet utilisateur"):
+        record_place_observation(
+            db, "creator", "Un bâtiment en pierre.",
+            session_id=other_session["session_id"],
+        )
+
+    stop_location_session(db, "creator", owner_session["session_id"])
+    with pytest.raises(ValueError, match="active, autorisée"):
+        record_place_observation(
+            db, "creator", "Un bâtiment en pierre.",
+            session_id=owner_session["session_id"],
+        )
+
+    # Sans session, une simple observation visuelle reste possible,
+    # mais elle ne peut pas être géolocalisée.
+    observation = record_place_observation(
+        db, "creator", "Un bâtiment en pierre.",
+    )
+    assert observation["identity_status"] == "unconfirmed"
+    with pytest.raises(ValueError, match="session de localisation"):
+        record_place_observation(
+            db, "creator", "Un autre bâtiment.",
+            48.1, -2.8,
+        )

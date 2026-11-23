@@ -54,3 +54,36 @@ def test_memory_health_reports_missing_tables_without_writing():
     assert "memories_v19" in report["missing_tables"]
     assert before == after
     db.close()
+
+
+def test_active_memory_count_uses_v19_and_scopes_by_user():
+    from storage.memory_health import count_active_episodic_memories
+
+    db = sqlite3.connect(":memory:")
+    db.executescript("""
+        CREATE TABLE memories (id INTEGER, user_id TEXT, content TEXT);
+        CREATE TABLE memories_v19 (id INTEGER, user_id TEXT, content TEXT);
+        INSERT INTO memories VALUES (1, 'creator', 'legacy one');
+        INSERT INTO memories VALUES (2, 'creator', 'legacy two');
+        INSERT INTO memories_v19 VALUES (1, 'creator', 'active one');
+        INSERT INTO memories_v19 VALUES (2, 'creator', 'active two');
+        INSERT INTO memories_v19 VALUES (3, 'other', 'other user');
+    """)
+    assert count_active_episodic_memories(db, "creator") == 2
+    assert count_active_episodic_memories(db, "other") == 1
+    assert count_active_episodic_memories(db, "missing") == 0
+    db.close()
+
+
+def test_active_memory_count_rejects_empty_user_id():
+    from storage.memory_health import count_active_episodic_memories
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE memories_v19 (id INTEGER, user_id TEXT)")
+    try:
+        count_active_episodic_memories(db, " ")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("empty user id must be rejected")
+    db.close()

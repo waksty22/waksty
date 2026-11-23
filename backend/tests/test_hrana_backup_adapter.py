@@ -20,6 +20,8 @@ class _Transaction:
 
     def execute(self, sql):
         self.statements.append(sql)
+        if "name = 'sqlite_sequence'" in sql:
+            return _Result(("1",), [])
         if "sqlite_master" in sql:
             return _Result(
                 ("type", "name", "tbl_name", "sql"),
@@ -69,6 +71,29 @@ def test_hrana_backup_adapter_rejects_non_select_sql(sql):
     assert transaction.statements == []
 
 
+
+def test_hrana_backup_adapter_allows_semicolons_inside_quoted_sql_literals():
+    class RecordingTransaction:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql):
+            self.statements.append(sql)
+            return _Result(("value",), [("a;b",)])
+
+    transaction = RecordingTransaction()
+    connection = HranaTransactionConnection(transaction)
+
+    result = connection.execute("SELECT 'a;b' AS value")
+
+    assert result.fetchall() == [("a;b",)]
+    assert transaction.statements == ["SELECT 'a;b' AS value"]
+
+    commented = connection.execute("/* export */ SELECT 1")
+    assert commented.fetchall() == [("a;b",)]
+    assert transaction.statements[-1] == "/* export */ SELECT 1"
+
+
 def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
     transaction = _Transaction()
     connection = HranaTransactionConnection(transaction)
@@ -83,7 +108,7 @@ def test_hrana_adapter_uses_the_same_caller_owned_transaction(tmp_path):
         assert report["verified"] is True
         assert report["total_rows"] == 1
         assert verify_logical_backup(destination)["valid"] is True
-        assert len(transaction.statements) == 3
+        assert len(transaction.statements) == 4
     finally:
         destination.unlink(missing_ok=True)
         destination.with_suffix(destination.suffix + ".sha256").unlink(missing_ok=True)

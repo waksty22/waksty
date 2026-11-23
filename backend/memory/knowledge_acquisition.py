@@ -6,6 +6,8 @@ promote observations, or infer that an experience proves understanding.
 """
 from __future__ import annotations
 
+import math
+
 import json
 import re
 import sqlite3
@@ -37,6 +39,40 @@ def _safe_rows(
         return []
 
 
+def _validated_assessment(details: Any, passed: Any, score: Any) -> bool:
+    """Only explicit, well-typed passing flags and supervisor provenance validate a skill."""
+    if not isinstance(details, dict):
+        return False
+    if details.get("source") != "supervised_assessment":
+        return False
+    if details.get("supervisor_approved") is not True:
+        return False
+    if isinstance(passed, bool) or not isinstance(passed, int) or passed != 1:
+        return False
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return False
+    try:
+        numeric_score = float(score)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return math.isfinite(numeric_score) and 70 <= numeric_score <= 100
+
+
+def _safe_score(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0
+
+
+def _safe_confidence(value: Any) -> float:
+    number = _safe_score(value)
+    return max(0.0, min(1.0, number))
+
+
 def retrieve_acquired_knowledge(
     db: sqlite3.Connection,
     user_id: str,
@@ -44,12 +80,17 @@ def retrieve_acquired_knowledge(
     limit: int = MAX_ITEMS,
 ) -> dict[str, Any]:
     """Return source-grounded knowledge candidates without mutating storage."""
-    if not isinstance(user_id, str) or not user_id.strip() or len(user_id) > 80:
+    if not isinstance(user_id, str):
+        raise ValueError("Identifiant utilisateur invalide.")
+    user_id = user_id.strip()
+    if not user_id or len(user_id) > 80:
         raise ValueError("Identifiant utilisateur invalide.")
     if not isinstance(query, str):
         raise ValueError("La recherche doit être du texte.")
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite doit être un entier.")
     query = query.strip()[:MAX_QUERY_CHARS]
-    limit = max(1, min(int(limit), MAX_ITEMS))
+    limit = max(1, min(limit, MAX_ITEMS))
     query_terms = set(_terms(query))
 
     memories = _safe_rows(
@@ -82,7 +123,11 @@ def retrieve_acquired_knowledge(
         kind: str, source_id: int, content: str, status: str,
         source: str, timestamp: str, metadata: dict[str, Any] | None = None,
     ) -> None:
-        text = str(content or "").strip()
+        if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id < 1:
+            return
+        if not isinstance(content, str) or not isinstance(timestamp, str):
+            return
+        text = content.strip()
         if not text:
             return
         terms = set(_terms(text))
@@ -104,9 +149,24 @@ def retrieve_acquired_knowledge(
         candidates.append(item)
 
     for row in memories:
-        source_type = str(row.get("source_type") or "inferred").lower()
-        if source_type not in VALID_MEMORY_STATES:
-            source_type = "inferred"
+        # Corrupt or untyped legacy rows are omitted, never relabelled as
+        # inferred knowledge. Retrieval must not manufacture provenance.
+        source_type = row.get("source_type")
+        if not isinstance(source_type, str) or source_type not in VALID_MEMORY_STATES:
+            continue
+        if not isinstance(row.get("content"), str) or not row["content"].strip():
+            continue
+        if not isinstance(row.get("category"), str):
+            continue
+        if isinstance(row.get("id"), bool) or not isinstance(row.get("id"), int) or row["id"] < 1:
+            continue
+        raw_confidence = row.get("confidence")
+        # Confidence is auxiliary metadata: malformed legacy values become
+        # zero confidence, while valid provenance and content remain usable.
+        confidence = _safe_confidence(raw_confidence)
+        timestamp = row.get("updated_at") or row.get("created_at")
+        if not isinstance(timestamp, str):
+            continue
         status = {
             "observed": "observed_not_understood",
             "taught": "taught_not_independently_verified",
@@ -115,19 +175,35 @@ def retrieve_acquired_knowledge(
         }[source_type]
         add_candidate(
             "memory", row["id"], row.get("content", ""), status,
-            "memories_v19:" + source_type, row.get("updated_at") or row.get("created_at"),
-            {"category": str(row.get("category") or "general"),
-             "confidence": max(0.0, min(1.0, float(row.get("confidence") or 0.0)))},
+            "memories_v19:" + source_type, timestamp,
+            {"category": row["category"],
+             "confidence": confidence},
         )
 
     for row in experiences:
+        actor = row.get("actor")
+        event_type = row.get("event_type")
+        conversation_id = row.get("source_conversation_id")
+        if actor is not None and not isinstance(actor, str):
+            continue
+        if event_type is not None and not isinstance(event_type, str):
+            continue
+        # A malformed optional reference must not abort retrieval of every
+        # other memory. Preserve only a genuine non-negative integer ID.
+        safe_conversation_id = (
+            conversation_id
+            if isinstance(conversation_id, int)
+            and not isinstance(conversation_id, bool)
+            and conversation_id >= 0
+            else None
+        )
         add_candidate(
-            "experience", row["id"], row.get("content", ""),
+            "experience", row.get("id"), row.get("content", ""),
             "experience_only_not_proof_of_learning",
-            "autobiographical_events:" + str(row.get("actor") or "unknown"),
+            "autobiographical_events:" + (actor or "unknown"),
             row.get("happened_at"),
-            {"event_type": str(row.get("event_type") or ""),
-             "source_conversation_id": int(row.get("source_conversation_id") or 0)},
+            {"event_type": event_type or "",
+             "source_conversation_id": safe_conversation_id},
         )
 
     for row in assessments:
@@ -137,21 +213,34 @@ def retrieve_acquired_knowledge(
                 details = {}
         except (TypeError, ValueError):
             details = {}
-        approved = details.get("source") == "supervised_assessment" and details.get("supervisor_approved") is True
-        passed = bool(row.get("passed")) and float(row.get("score") or 0) >= 70
-        status = "supervised_skill_validated" if approved and passed else (
+        approved = (
+            details.get("source") == "supervised_assessment"
+            and details.get("supervisor_approved") is True
+        )
+        validated = _validated_assessment(
+            details, row.get("passed"), row.get("score")
+        )
+        passed = row.get("passed") == 1 and not isinstance(row.get("passed"), bool)
+        score = _safe_score(row.get("score"))
+        status = "supervised_skill_validated" if validated else (
             "supervised_assessment_not_validated" if approved else "assessment_provenance_unconfirmed"
         )
-        skill = str(row.get("test_name") or "")
-        proof = str(details.get("evidence") or "")
+        raw_skill = row.get("test_name")
+        if not isinstance(raw_skill, str) or not raw_skill.strip():
+            continue
+        skill = raw_skill.strip()
+        # Evidence is explanatory text, not a place to stringify arbitrary
+        # JSON values into apparent proof.
+        raw_proof = details.get("evidence")
+        proof = raw_proof.strip() if isinstance(raw_proof, str) else ""
         content = "Compétence évaluée : " + skill
         if proof:
             content += ". Preuve : " + proof
         add_candidate(
             "skill_assessment", row["id"], content, status,
             "competency_tests", row.get("tested_at"),
-            {"skill": skill, "score": float(row.get("score") or 0),
-             "passed": bool(row.get("passed")),
+            {"skill": skill, "score": score,
+             "passed": passed,
              "supervisor_approved": approved,
              "goal_id": details.get("goal_id"),
              "goal_step_id": details.get("goal_step_id")},

@@ -112,7 +112,7 @@ def export_logical_backup(
             if obj["type"] == "table" and isinstance(obj.get("sql"), str)
             and "AUTOINCREMENT" in obj["sql"].upper()
         }
-        sequences = []
+        existing_sequences = {}
         has_sequence_table = bool(
             _query_rows(
                 connection,
@@ -121,11 +121,20 @@ def export_logical_backup(
             )[1]
         )
         if autoincrement_tables and has_sequence_table:
-            _, sequence_rows = _query_rows(connection, "SELECT name, seq FROM sqlite_sequence")
-            sequences = [
-                {"table": str(name), "seq": int(seq)}
-                for name, seq in sequence_rows if name in autoincrement_tables
-            ]
+            _, sequence_rows = _query_rows(
+                connection, "SELECT name, seq FROM sqlite_sequence"
+            )
+            existing_sequences = {
+                str(name): int(seq)
+                for name, seq in sequence_rows
+                if name in autoincrement_tables
+            }
+        # Explicitly preserve never-used tables (seq=0) as well as tables
+        # that were used and later emptied (their non-zero high-water mark).
+        sequences = [
+            {"table": name, "seq": existing_sequences.get(name, 0)}
+            for name in sorted(autoincrement_tables)
+        ]
     except BaseException as exc:
         primary_exception = exc
         if manage_snapshot:
@@ -252,7 +261,33 @@ def verify_logical_backup(path: str | Path) -> dict[str, Any]:
                 f"INSERT INTO {table_sql} ({column_sql}) VALUES ({placeholders})",
                 [[_restore_value(value) for value in row] for row in table["rows"]],
             )
-        for sequence in payload.get("sequences", []):
+        autoincrement_tables = {
+            obj["name"] for obj in objects
+            if obj["type"] == "table" and isinstance(obj.get("sql"), str)
+            and "AUTOINCREMENT" in obj["sql"].upper()
+        }
+        sequences = payload.get("sequences")
+        if not isinstance(sequences, list) or not all(isinstance(item, dict) for item in sequences):
+            return {"valid": False, "reason": "invalid_autoincrement_sequences", "sha256": digest}
+        sequence_names = [item.get("table") for item in sequences]
+        if (
+            any(name not in autoincrement_tables for name in sequence_names)
+            or len(set(sequence_names)) != len(sequence_names)
+            or set(sequence_names) != autoincrement_tables
+            or any(type(item.get("seq")) is not int or item["seq"] < 0 for item in sequences)
+        ):
+            return {"valid": False, "reason": "incomplete_autoincrement_sequences", "sha256": digest}
+        expected_sequences = {item["table"]: item["seq"] for item in sequences}
+        inserted_sequences = (
+            {
+                name: seq for name, seq in db.execute("SELECT name, seq FROM sqlite_sequence")
+                if name in autoincrement_tables
+            }
+            if autoincrement_tables else {}
+        )
+        if any(expected_sequences[name] < seq for name, seq in inserted_sequences.items()):
+            return {"valid": False, "reason": "autoincrement_high_water_regression", "sha256": digest}
+        for sequence in sequences:
             db.execute("DELETE FROM sqlite_sequence WHERE name = ?", (sequence["table"],))
             db.execute(
                 "INSERT INTO sqlite_sequence(name, seq) VALUES (?, ?)",
@@ -348,9 +383,10 @@ def restore_logical_backup_payload(
     if (
         any(name not in autoincrement_tables for name in sequence_names)
         or len(set(sequence_names)) != len(sequence_names)
+        or set(sequence_names) != autoincrement_tables
         or any(type(item.get("seq")) is not int or item["seq"] < 0 for item in sequences)
     ):
-        raise ValueError("Séquences AUTOINCREMENT invalides.")
+        raise ValueError("Séquences AUTOINCREMENT incomplètes ou invalides.")
 
     existing = connection.execute(
         "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' "
@@ -392,6 +428,17 @@ def restore_logical_backup_payload(
                 )
             restored_counts[name] = int(connection.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()[0])
 
+        expected_sequences = {item["table"]: item["seq"] for item in sequences}
+        inserted_sequences = (
+            {
+                name: int(seq)
+                for name, seq in connection.execute("SELECT name, seq FROM sqlite_sequence")
+                if name in autoincrement_tables
+            }
+            if autoincrement_tables else {}
+        )
+        if any(expected_sequences[name] < seq for name, seq in inserted_sequences.items()):
+            raise ValueError("Le compteur AUTOINCREMENT sauvegardé est inférieur à un identifiant restauré.")
         for sequence in sequences:
             connection.execute("DELETE FROM sqlite_sequence WHERE name = ?", (sequence["table"],))
             connection.execute(

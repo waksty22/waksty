@@ -34,7 +34,9 @@ export async function apiCall(url, options = {}) {
 
         if (!response.ok) {
             const errorMsg = typeof data === 'object' ? (data.detail || data.message || data.error) : data;
-            throw new Error(errorMsg || `Erreur HTTP ${response.status}: ${response.statusText}`);
+            const error = new Error(errorMsg || `Erreur HTTP ${response.status}: ${response.statusText}`);
+            error.status = response.status;
+            throw error;
         }
 
         return data;

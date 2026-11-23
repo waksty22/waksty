@@ -134,7 +134,7 @@ def test_chat_and_live_turns_enter_same_autobiographical_store_after_restart(
         reopened.close()
 
 
-def test_interrupted_live_turn_persists_confirmed_transcripts_only(
+def test_interrupted_live_turn_persists_history_without_promoting_learning(
     monkeypatch,
 ):
     from contextlib import nullcontext
@@ -176,13 +176,9 @@ def test_interrupted_live_turn_persists_confirmed_transcripts_only(
         "Réponse déjà transcrite.",
         "gemini_live_interrupted",
     )]
-    assert learning_calls == [(
-        learning_db,
-        "creator",
-        "Transcription utilisateur confirmée.",
-        {"evidence": "Transcription utilisateur confirmée avant interruption Live"},
-    )]
-    assert commits == [True]
+    # Interrupted text is history only: no lexical learning or DB commit.
+    assert learning_calls == []
+    assert commits == []
     assert state == {"user": "", "assistant": "", "audio": [], "audio_chars": 0}
 
     # Empty or audio-only partial turns are not persisted as conversations.

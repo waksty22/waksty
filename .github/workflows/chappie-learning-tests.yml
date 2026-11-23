@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - fix/live-learning-on-turn-complete
   pull_request:
     branches:
       - main
+      - feat/safe-logical-restore-core
 
 jobs:
   quality:

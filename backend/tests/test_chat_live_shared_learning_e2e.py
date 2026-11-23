@@ -181,18 +181,18 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
     assert chat_two["reply"] == "velociraptor"
 
     # A new Live connection sees both persisted words after reconnect.
-    reconnect_socket = FakeGeminiLiveSocket(respond=False)
-    _, reconnect_context = run_live_session("creator", reconnect_socket, False)
+    reconnect_socket = FakeGeminiLiveSocket("", "", turn_complete=True)
+    _, reconnect_context = run_live_session("creator", reconnect_socket, True)
     assert "zorbital" in reconnect_context
     assert "velociraptor" in reconnect_context
 
     # Another user's Live session must not receive the creator's vocabulary.
-    other_user_socket = FakeGeminiLiveSocket(respond=False)
+    other_user_socket = FakeGeminiLiveSocket("", "", turn_complete=True)
     owner_id = server.CHAPPIE_OWNER_ID
     monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", "other-user")
     try:
         _, other_user_context = run_live_session(
-            "other-user", other_user_socket, False
+            "other-user", other_user_socket, True
         )
     finally:
         monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", owner_id)

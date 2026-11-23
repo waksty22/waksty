@@ -399,12 +399,12 @@ def test_full_chappie_schema_encrypted_backup_restore_roundtrip(
 
     with zipfile.ZipFile(archive_path, "r") as archive:
         assert set(archive.namelist()) == {
-            "chappie-turso.json.enc",
-            "chappie-turso.json.enc.sha256",
+            "chappie-turso-backup.json.enc",
+            "chappie-turso-backup.json.enc.sha256",
         }
         archive.extractall(tmp_path / "unpacked")
 
-    encrypted_path = tmp_path / "unpacked" / "chappie-turso.json.enc"
+    encrypted_path = tmp_path / "unpacked" / "chappie-turso-backup.json.enc"
     target = sqlite3.connect(tmp_path / "chappie-restored.sqlite3")
     target.execute("PRAGMA foreign_keys=ON")
     restored = restore_encrypted_logical_backup(

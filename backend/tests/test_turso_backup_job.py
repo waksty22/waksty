@@ -45,17 +45,17 @@ def test_backup_job_creates_encrypted_archive_and_verifies_packaged_file(tmp_pat
 
         with zipfile.ZipFile(output) as archive:
             assert set(archive.namelist()) == {
-                "chappie-turso.json.enc",
-                "chappie-turso.json.enc.sha256",
+                "chappie-turso-backup.json.enc",
+                "chappie-turso-backup.json.enc.sha256",
             }
             extract_dir = tmp_path / "extracted"
             archive.extractall(extract_dir)
 
         assert verify_encrypted_logical_backup(
-            extract_dir / "chappie-turso.json.enc", key
+            extract_dir / "chappie-turso-backup.json.enc", key
         )["valid"] is True
         assert verify_encrypted_logical_backup(
-            extract_dir / "chappie-turso.json.enc",
+            extract_dir / "chappie-turso-backup.json.enc",
             "incorrect-test-key",
         )["valid"] is False
     finally:

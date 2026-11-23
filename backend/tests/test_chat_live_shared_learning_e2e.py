@@ -186,22 +186,25 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
     )
     assert chat_two["reply"] == "velociraptor"
 
-    # A fresh context build after closing the prior DB connections models
-    # the context reconstructed on a reconnecting Live session.
-    reconnect_context = server.build_untrusted_identity_context_message(
-        "creator"
-    )["parts"][0]["text"]
+    # A second real Live endpoint session reconstructs its initial context
+    # from the reopened database and sees both confirmed words.
+    reconnect_socket = FakeGeminiLiveSocket("", "", turn_complete=True)
+    reconnect_messages, reconnect_context = run_live_session(
+        "creator", reconnect_socket
+    )
     assert "zorbital" in reconnect_context
     assert "velociraptor" in reconnect_context
+    assert any(item.get("type") == "turn_complete" for item in reconnect_messages)
 
-    # The shared brain remains scoped to the requested user; another user's
-    # fresh Live context must not receive the creator's vocabulary.
+    # A separate owner context on the same isolated database must not receive
+    # the creator's transcript or vocabulary through the actual Live endpoint.
+    other_user_socket = FakeGeminiLiveSocket("", "", turn_complete=True)
     owner_id = server.CHAPPIE_OWNER_ID
     monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", "other-user")
     try:
-        other_user_context = server.build_untrusted_identity_context_message(
-            "other-user"
-        )["parts"][0]["text"]
+        _, other_user_context = run_live_session(
+            "other-user", other_user_socket
+        )
     finally:
         monkeypatch.setattr(server, "CHAPPIE_OWNER_ID", owner_id)
     assert "zorbital" not in other_user_context

@@ -343,7 +343,7 @@ def format_acquired_knowledge_context(
         line = "ENREGISTREMENT_JSON_NON_FIABLE: " + encoded
         candidate = lines + [line]
         suffix = ([partial_note] if omitted else []) + [footer]
-        if len("\\n".join(candidate + suffix)) > max_chars:
+        if len("\n".join(candidate + suffix)) > max_chars:
             omitted = True
             break
         lines.append(line)
@@ -353,7 +353,7 @@ def format_acquired_knowledge_context(
     if omitted:
         lines.append(partial_note)
     lines.append(footer)
-    context = "\\n".join(lines)
+    context = "\n".join(lines)
     if len(context) > max_chars:
         # If fixed policy text alone approaches the budget, retain its core
         # warning and footer rather than slicing a record or failing retrieval.
@@ -364,7 +364,7 @@ def format_acquired_knowledge_context(
         if omitted:
             compact_lines.append(partial_note)
         compact_lines.append(footer)
-        context = "\\n".join(compact_lines)
+        context = "\n".join(compact_lines)
     if len(context) > max_chars:
         raise ValueError("La limite minimale du contexte est trop petite.")
     return context

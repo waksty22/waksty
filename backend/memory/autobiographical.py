@@ -12,6 +12,25 @@ import unicodedata
 from typing import Any
 
 
+def _validated_user_id(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Identifiant utilisateur invalide.")
+    value = value.strip()
+    if not value or len(value) > 80:
+        raise ValueError("Identifiant utilisateur invalide.")
+    return value
+
+
+def _validated_integer(value: Any, field: str, minimum: int = 1) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"{field} doit être un entier supérieur ou égal à {minimum}.")
+    return value
+
+
+def _bounded_limit(value: Any, maximum: int, field: str = "Limite") -> int:
+    return min(_validated_integer(value, field), maximum)
+
+
 def init_autobiographical_tables(db: sqlite3.Connection) -> None:
     db.executescript("""
         CREATE TABLE IF NOT EXISTS autobiographical_events (
@@ -61,7 +80,10 @@ def sync_autobiographical_events(
     commit: bool = True,
 ) -> dict[str, int]:
     """Indexe idempotemment les conversations absentes du journal autobiographique."""
-    limit = max(1, min(int(limit), 2000))
+    user_id = _validated_user_id(user_id)
+    limit = _bounded_limit(limit, 2000)
+    if not isinstance(commit, bool):
+        raise ValueError("commit doit être un booléen.")
     rows = db.execute(
         """
         SELECT c.id, c.role, c.content, c.created_at
@@ -78,9 +100,18 @@ def sync_autobiographical_events(
 
     inserted = 0
     for row in rows:
-        actor = str(row["role"])
-        content = str(row["content"] or "").strip()
-        if actor not in {"user", "assistant"} or not content:
+        actor = row["role"]
+        raw_content = row["content"]
+        source_id = row["id"]
+        created_at = row["created_at"]
+        if actor not in {"user", "assistant"} or not isinstance(raw_content, str):
+            continue
+        if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id < 1:
+            continue
+        if not isinstance(created_at, str) or not created_at.strip():
+            continue
+        content = raw_content.strip()
+        if not content:
             continue
         event_type = "user_statement" if actor == "user" else "chappie_response"
         importance = 3 if actor == "user" else 1
@@ -91,8 +122,8 @@ def sync_autobiographical_events(
                  content, happened_at, importance, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, int(row["id"]), actor, event_type, content[:8000],
-             str(row["created_at"]), importance, str(row["created_at"])),
+            (user_id, source_id, actor, event_type, content[:8000],
+             created_at, importance, created_at),
         )
         inserted += max(0, cursor.rowcount)
 
@@ -140,12 +171,14 @@ def list_autobiographical_events(
     limit: int = 30,
     before_id: int | None = None,
 ) -> list[dict[str, Any]]:
-    limit = max(1, min(int(limit), 100))
+    user_id = _validated_user_id(user_id)
+    limit = _bounded_limit(limit, 100)
     params: list[Any] = [user_id]
     where = "user_id=?"
     if before_id is not None:
+        before_id = _validated_integer(before_id, "Identifiant de pagination")
         where += " AND id < ?"
-        params.append(max(0, int(before_id)))
+        params.append(before_id)
     params.append(limit)
     rows = db.execute(
         f"""
@@ -162,7 +195,9 @@ def list_autobiographical_events(
 
 
 def _normalize_search_text(value: str) -> str:
-    value = str(value or "").casefold().replace("œ", "oe").replace("æ", "ae")
+    if not isinstance(value, str):
+        raise ValueError("Le texte à normaliser doit être une chaîne.")
+    value = value.casefold().replace("œ", "oe").replace("æ", "ae")
     value = unicodedata.normalize("NFKD", value)
     value = "".join(char for char in value if not unicodedata.combining(char))
     return " ".join(re.findall(r"[a-z0-9]+", value))
@@ -192,10 +227,13 @@ def search_autobiographical_events(
     included only when a matching user episode has an explicit same-turn link;
     the link is labeled as dialogue context, never as semantic confirmation.
     """
-    query = str(query or "").strip()[:200]
+    user_id = _validated_user_id(user_id)
+    if not isinstance(query, str):
+        raise ValueError("La recherche doit être du texte.")
+    query = query.strip()[:200]
     if not query:
         return []
-    limit = max(1, min(int(limit), 30))
+    limit = _bounded_limit(limit, 30)
     normalized_query = _normalize_search_text(query)
     tokens = [
         token for token in normalized_query.split()
@@ -300,8 +338,9 @@ def find_related_autobiographical_events(
     Results are lexical candidates only. A shared word is not proof that two
     episodes concern the same object, person, or cause. No rows are written.
     """
-    event_id = max(0, int(event_id))
-    limit = max(1, min(int(limit), 10))
+    user_id = _validated_user_id(user_id)
+    event_id = _validated_integer(event_id, "Identifiant d’épisode")
+    limit = _bounded_limit(limit, 10)
     source = db.execute(
         """
         SELECT id, content, happened_at
@@ -368,6 +407,7 @@ def autobiographical_statistics(
     db: sqlite3.Connection,
     user_id: str,
 ) -> dict[str, int]:
+    user_id = _validated_user_id(user_id)
     row = db.execute(
         """
         SELECT COUNT(*) AS total,

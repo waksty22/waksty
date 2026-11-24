@@ -264,3 +264,107 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
             "WHERE user_id=? AND content LIKE '%interrompuword%'",
             ("creator",),
         ).fetchone()[0] == 1
+
+
+class TwoTurnFakeGeminiLiveSocket(FakeGeminiLiveSocket):
+    """Provider double that returns two turns in one uninterrupted Live session."""
+
+    def __init__(self):
+        super().__init__()
+        self._turn_queue = asyncio.Queue()
+        self._input_count = 0
+        self.refresh_seen_before_second_input = False
+
+    async def send(self, raw: str) -> None:
+        payload = json.loads(raw)
+        self.sent.append(payload)
+        if isinstance(payload.get("clientContent"), dict):
+            # The initial history is sent before the first input. The later
+            # clientContent message is the in-session shared-brain delta.
+            if self._input_count == 1:
+                self.refresh_seen_before_second_input = True
+        if isinstance(payload.get("realtimeInput"), dict):
+            self._input_count += 1
+            if self._input_count == 2:
+                assert self.refresh_seen_before_second_input, (
+                    "second user input reached Gemini before shared-brain refresh"
+                )
+            if self._input_count == 1:
+                user_text, assistant_text = "zorbital", "oui"
+            elif self._input_count == 2:
+                user_text, assistant_text = "zorbital", "zorbital"
+            else:
+                raise AssertionError("unexpected third input in two-turn test")
+            content = {
+                "inputTranscription": {"text": user_text},
+                "outputTranscription": {"text": assistant_text},
+                "modelTurn": {"parts": [{"text": assistant_text}]},
+                "turnComplete": True,
+            }
+            await self._turn_queue.put(json.dumps({"serverContent": content}))
+            if self._input_count == 2:
+                await self._turn_queue.put(None)
+
+    async def __anext__(self) -> str:
+        item = await asyncio.wait_for(self._turn_queue.get(), timeout=5)
+        if item is None:
+            raise StopAsyncIteration
+        return item
+
+
+def test_live_refreshes_shared_brain_between_turns_without_reconnecting(
+    monkeypatch, tmp_path
+):
+    """A word learned on turn one is sent to the same provider session before turn two."""
+    import server
+
+    database_path = tmp_path / "live-in-session-refresh.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.setattr(server, "GEMINI_API_KEY", "test-only-provider-key")
+    server.init_db()
+
+    provider = TwoTurnFakeGeminiLiveSocket()
+
+    @asynccontextmanager
+    async def fake_connection(websocket):
+        yield provider
+
+    monkeypatch.setattr(server, "supervised_gemini_connection", fake_connection)
+
+    fake_client = FakeClientWebSocket([
+        {"action": "audio_chunk", "pcm_data": "AQID"},
+        {"action": "audio_chunk", "pcm_data": "BAUG"},
+    ])
+    ticket = server.live_ws_tickets.issue("creator")
+    asyncio.run(server.websocket_endpoint(fake_client, ticket=ticket))
+
+    assert fake_client.accepted
+    assert not fake_client.closed
+    assert provider._input_count == 2
+    assert provider.refresh_seen_before_second_input
+    assert any(
+        item.get("type") == "turn_complete" for item in fake_client.sent
+    )
+    refresh_messages = [
+        payload for payload in provider.sent
+        if isinstance(payload.get("clientContent"), dict)
+        and payload.get("clientContent", {}).get("turns")
+    ]
+    # Initial context plus at least one incremental brain update in-session.
+    assert len(refresh_messages) >= 2
+    incremental_text = json.dumps(refresh_messages[1], ensure_ascii=False)
+    assert "zorbital" in incremental_text
+
+    with server.db_connection() as db:
+        words = {
+            row["word"] for row in db.execute(
+                "SELECT word FROM personal_vocabulary WHERE user_id=?",
+                ("creator",),
+            ).fetchall()
+        }
+    assert "zorbital" in words

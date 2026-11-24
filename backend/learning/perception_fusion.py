@@ -185,13 +185,11 @@ def review_perception_fusion(
     """Record an explicit human review without promoting a candidate to world knowledge."""
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("Identifiant utilisateur invalide.")
-    if isinstance(candidate_id, bool):
-        raise ValueError("Identifiant de rapprochement invalide.")
-    try:
-        candidate_id = int(candidate_id)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Identifiant de rapprochement invalide.") from exc
-    if candidate_id < 1:
+    if (
+        isinstance(candidate_id, bool)
+        or not isinstance(candidate_id, int)
+        or candidate_id < 1
+    ):
         raise ValueError("Identifiant de rapprochement invalide.")
 
     if not isinstance(decision, str):

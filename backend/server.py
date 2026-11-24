@@ -48,7 +48,7 @@ from fastapi.responses import (
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictFloat, field_validator
 
 from utils.validators import normalize_and_validate_user_id
 from utils.live_tickets import OneTimeTicketStore
@@ -1403,12 +1403,12 @@ class MemoryRequest(BaseModel):
     )  
     content: str = Field(min_length=1, max_length=4000)  
     category: str = Field(default="general", min_length=1, max_length=60)  
-    importance: int = Field(default=3, ge=1, le=5)  
+    importance: StrictInt = Field(default=3, ge=1, le=5)  
     source_type: str = Field(  
         default="taught",  
         pattern=r"^(observed|taught|inferred)$",  
     )  
-    confidence: float = Field(default=0.8, ge=0.0, le=1.0)  
+    confidence: StrictFloat = Field(default=0.8, ge=0.0, le=1.0)  
     tags: list[str] = Field(default_factory=list, max_length=20)
 
 class MemorySearchRequest(BaseModel):
@@ -1416,7 +1416,7 @@ class MemorySearchRequest(BaseModel):
 
     user_id: str = "creator"  
     query: str = Field(default="", max_length=500)  
-    limit: int = Field(default=10, ge=1, le=30)
+    limit: StrictInt = Field(default=10, ge=1, le=30)
 
 class TursoMigrationApplyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1456,9 +1456,11 @@ class GoalRequest(BaseModel):
     steps: list[str] = Field(default_factory=list, max_length=30)
 
 class GoalStepRequest(BaseModel):
-    goal_id: Optional[int] = None
-    step_id: Optional[int] = None
-    completed: bool = True
+    model_config = ConfigDict(extra="forbid")
+
+    goal_id: Optional[StrictInt] = Field(default=None, gt=0)
+    step_id: Optional[StrictInt] = Field(default=None, gt=0)
+    completed: StrictBool = True
     evidence: str = Field(default="Progression validée", min_length=1, max_length=2000)
 
 class DreamRequest(BaseModel):
@@ -3629,34 +3631,34 @@ def create_goal(
 
 def update_goal_progress(
     db: sqlite3.Connection,
+    user_id: str,
     goal_id: int,
-) -> None:
+) -> dict[str, Any]:
+    if isinstance(goal_id, bool) or not isinstance(goal_id, int) or goal_id < 1:
+        raise ValueError("Identifiant d'objectif invalide.")
 
-    row = db.execute(  
-        """  
-        SELECT  
-            COUNT(*) AS total,  
-            SUM(  
-                CASE  
-                    WHEN status='completed'  
-                    AND length(trim(evidence))>0  
-                    THEN 1 ELSE 0  
-                END  
-            ) AS done  
-        FROM goal_steps  
-        WHERE goal_id=?  
-        """,  
-        (goal_id,),  
-    ).fetchone()  
+    owned_goal = db.execute(
+        "SELECT id FROM goals WHERE id=? AND user_id=?",
+        (goal_id, user_id),
+    ).fetchone()
+    if owned_goal is None:
+        raise ValueError("Objectif introuvable pour cet utilisateur.")
+
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN status='completed'
+                         AND length(trim(evidence))>0
+                        THEN 1 ELSE 0 END) AS done
+        FROM goal_steps WHERE goal_id=?
+        """,
+        (goal_id,),
+    ).fetchone()
 
     total = row["total"] or 0  
     done = row["done"] or 0  
 
-    progress = (  
-        100.0  
-        if total == 0  
-        else 100.0 * done / total  
-    )  
+    progress = 100.0 * done / total if total else 0.0  
 
     status = (  
         "completed"  
@@ -3668,10 +3670,12 @@ def update_goal_progress(
         """  
         UPDATE goals  
         SET progress=?, status=?, updated_at=?  
-        WHERE id=?  
-        """,  
-        (progress, status, utc_now(), goal_id),  
+        WHERE id=? AND user_id=?
+        """,
+        (progress, status, utc_now(), goal_id, user_id),
     )
+    return {"goal_id": goal_id, "progress": progress, "status": status}
+
 
 def generate_dream(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
@@ -5022,13 +5026,16 @@ async def api_goal_progress(
     if goal_id is None:  
         raise HTTPException(status_code=400, detail="Objectif manquant.")  
 
-    with db_connection() as db:  
-        result = update_goal_progress(db, goal_id)  
-        db.commit()  
+    try:
+        with db_connection() as db:
+            result = update_goal_progress(db, user_id, goal_id)
+            db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
-    return {  
-        "success": True,  
-        "result": result,  
+    return {
+        "success": True,
+        "result": result,
     }
 
 @app.post("/api/speak")

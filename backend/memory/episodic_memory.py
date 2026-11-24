@@ -669,7 +669,7 @@ def apply_memory_decay(
           AND typeof(content) = 'text' AND length(trim(content)) > 0
           AND typeof(category) = 'text'
           AND typeof(source_type) = 'text'
-          AND source_type IN ('observed', 'taught', 'inferred', 'confirmed')
+          AND source_type IN ('observed', 'taught', 'inferred')
           AND typeof(confidence) IN ('integer', 'real')
           AND confidence BETWEEN 0.0 AND 1.0
           AND typeof(updated_at) = 'text'

@@ -460,6 +460,27 @@ def test_live_camera_frame_reaches_provider_and_receipt_enters_shared_brain(
         assert metadata["session_id"]
         assert metadata["frame_sequence"] == 1
 
+        visual_rows = db.execute(
+            """SELECT content, source, confidence, metadata_json
+               FROM sensory_observations
+               WHERE user_id=? AND source='gemini_live_visual_analysis'""",
+            ("creator",),
+        ).fetchall()
+        assert len(visual_rows) == 1
+        visual = dict(visual_rows[0])
+        visual_metadata = json.loads(visual["metadata_json"])
+        assert visual["content"] == "Je peux décrire ce que la caméra me transmet."
+        assert visual["confidence"] == 0.0
+        assert visual_metadata["model"] == server.GEMINI_LIVE_MODEL
+        assert visual_metadata["session_id"]
+        assert visual_metadata["frame_sequence"] == 1
+        assert visual_metadata["question"] == "Que vois-tu ?"
+        assert visual_metadata["semantic_analysis_performed"] is True
+        assert visual_metadata["semantic_understanding_confirmed"] is False
+        assert visual_metadata["human_review_required"] is True
+        assert visual_metadata["image_bytes_persisted"] is False
+        assert visual_metadata["is_learned_fact"] is False
+
     # The post-turn shared-brain refresh contains the persisted receipt, not
     # image bytes or a fabricated visual description.
     refresh_payloads = [
@@ -473,3 +494,54 @@ def test_live_camera_frame_reaches_provider_and_receipt_enters_shared_brain(
     assert "live_camera_frame_received_by_server" in refreshed_context
     assert image_data not in refreshed_context
     assert "semantic_analysis_performed" in refreshed_context
+
+
+def test_live_camera_frame_is_not_saved_as_analysis_for_nonvisual_question(
+    monkeypatch, tmp_path
+):
+    """A camera frame alone does not turn an ordinary Live reply into vision knowledge."""
+    import server
+
+    database_path = tmp_path / "live-camera-nonvisual-question.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.setattr(server, "GEMINI_API_KEY", "test-only-provider-key")
+    server.init_db()
+
+    provider = FakeGeminiLiveSocket(
+        user_text="Bonjour Chappie.",
+        assistant_text="Bonjour, je suis là.",
+    )
+
+    @asynccontextmanager
+    async def fake_connection(websocket):
+        yield provider
+
+    monkeypatch.setattr(server, "supervised_gemini_connection", fake_connection)
+    fake_client = FakeClientWebSocket([
+        {
+            "action": "video_frame",
+            "data": "aGVsbG8tdmlzaW9uLWZyYW1l",
+            "mime_type": "image/jpeg",
+        }
+    ])
+    ticket = server.live_ws_tickets.issue("creator")
+    asyncio.run(server.websocket_endpoint(fake_client, ticket=ticket))
+
+    with server.db_connection() as db:
+        rows = db.execute(
+            """SELECT COUNT(*) FROM sensory_observations
+               WHERE user_id=? AND source='gemini_live_visual_analysis'""",
+            ("creator",),
+        ).fetchone()
+        assert rows[0] == 0
+        receipts = db.execute(
+            """SELECT COUNT(*) FROM sensory_observations
+               WHERE user_id=? AND source='live_camera_frame_received_by_server'""",
+            ("creator",),
+        ).fetchone()
+        assert receipts[0] == 1

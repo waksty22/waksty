@@ -341,7 +341,7 @@ def test_shared_brain_context_skips_non_finite_json_records():
     }
     context = format_shared_brain_context(snapshot)
     match = re.search(
-        r"ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS:\\n(\\[.*?\\])",
+        r"ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS:\n(\[.*?\])",
         context,
         flags=re.S,
     )

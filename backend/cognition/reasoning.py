@@ -623,18 +623,25 @@ def run_metacognitive_audit(
             "created_at": utc_now()
         }
 
-    confidences = [
-        _safe_number(
-            trace.get("confidence"),
-            default=0.5,
-            minimum=MIN_CONFIDENCE,
-            maximum=MAX_CONFIDENCE
-        )
-        for trace in traces
-    ]
+    # A corrupted or legacy trace must not become an invented neutral
+    # confidence. Keep the full trace count for the audit, but calculate
+    # confidence statistics only from finite, explicitly stored values.
+    confidences = []
+    invalid_confidence_count = 0
+    for trace in traces:
+        raw_confidence = trace.get("confidence")
+        if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+            invalid_confidence_count += 1
+            continue
+        confidence = float(raw_confidence)
+        if not math.isfinite(confidence) or not MIN_CONFIDENCE <= confidence <= MAX_CONFIDENCE:
+            invalid_confidence_count += 1
+            continue
+        confidences.append(confidence)
 
     confidence_average = (
         sum(confidences) / len(confidences)
+        if confidences else 0.0
     )
 
     doubt_count = sum(
@@ -711,9 +718,13 @@ def run_metacognitive_audit(
         "doubt_count": doubt_count,
 
         "doubt_ratio": round(
-            doubt_count / len(traces),
+            doubt_count / len(confidences),
             4
-        ),
+        ) if confidences else 0.0,
+
+        "confidence_sample_count": len(confidences),
+
+        "invalid_confidence_count": invalid_confidence_count,
 
         "thought_types": thought_types,
 
@@ -728,7 +739,13 @@ def run_metacognitive_audit(
 
     recommendations = []
 
-    if confidence_average < DEFAULT_CONFIDENCE_THRESHOLD:
+    if not confidences:
+
+        recommendations.append(
+            "Collecter des traces avec une confiance explicitement mesurée avant de tirer une conclusion."
+        )
+
+    elif confidence_average < DEFAULT_CONFIDENCE_THRESHOLD:
 
         recommendations.append(
             "Renforcer la vérification des informations "

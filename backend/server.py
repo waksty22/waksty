@@ -3090,8 +3090,10 @@ TOOLS = [{
 
 def _memory_fact_is_grounded_in_user_text(content: str, user_text: str) -> bool:
     """Require both an exact user quote and an explicit, non-negated memory request."""
-    fact = re.sub(r"\s+", " ", str(content or "")).strip().casefold()
-    source = re.sub(r"\s+", " ", str(user_text or "")).strip().casefold()
+    if not isinstance(content, str) or not isinstance(user_text, str):
+        return False
+    fact = re.sub(r"\s+", " ", content).strip().casefold()
+    source = re.sub(r"\s+", " ", user_text).strip().casefold()
     if len(fact) < 4 or not source or fact not in source:
         return False
 
@@ -3126,9 +3128,32 @@ def execute_tool(
     user_source_text: str = "",
 ) -> dict[str, Any]:
 
-    try:  
+    try:
+        if not isinstance(args, dict):
+            return {"error": "Les arguments de l’outil doivent être un objet."}
+
         if name == "remember_fact":
-            content = str(args.get("content", "")).strip()[:4000]
+            content = args.get("content", "")
+            category = args.get("category", "general")
+            importance = args.get("importance", 3)
+            source_type = args.get("source_type", "taught")
+            confidence = args.get("confidence", 0.8)
+            tags = args.get("tags", [])
+            if not isinstance(content, str):
+                raise ValueError("Le contenu du souvenir doit être du texte.")
+            if not isinstance(category, str):
+                raise ValueError("La catégorie doit être du texte.")
+            if isinstance(importance, bool) or not isinstance(importance, int):
+                raise ValueError("L’importance doit être un entier.")
+            if not isinstance(source_type, str):
+                raise ValueError("La provenance doit être du texte.")
+            if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                raise ValueError("La confiance doit être numérique.")
+            if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                raise ValueError("Les étiquettes doivent être une liste de textes.")
+            content = content.strip()
+            if len(content) > 4000:
+                raise ValueError("Le souvenir dépasse 4000 caractères.")
             if not _memory_fact_is_grounded_in_user_text(
                 content, user_source_text
             ):
@@ -3140,27 +3165,22 @@ def execute_tool(
                     ),
                 }
 
-            return remember(  
-                user_id,  
-                content,  
-                str(args.get("category", "general")),  
-                int(args.get("importance", 3)),  
-                str(args.get("source_type", "taught")),  
-                float(args.get("confidence", 0.8)),  
-                args.get("tags", []),  
-            )  
+            return remember(
+                user_id, content, category, importance,
+                source_type, confidence, tags,
+            )
 
         if name == "search_memories":  
             return {  
                 "memories": retrieve_memories(  
                     user_id,  
-                    str(args.get("query", "")),  
+                    args.get("query", ""),  
                     10,  
                 )  
             }  
 
         if name == "retrieve_acquired_knowledge":
-            query = str(args.get("query", ""))[:200]
+            query = args.get("query", "")
             with db_connection() as knowledge_db:
                 result = retrieve_acquired_knowledge(
                     knowledge_db, user_id, query=query, limit=10
@@ -3184,7 +3204,7 @@ def execute_tool(
             }
 
         if name == "find_related_autobiographical_events":
-            event_id = int(args.get("event_id", 0))
+            event_id = args.get("event_id", 0)
             with db_connection() as autobiography_db:
                 related = find_related_autobiographical_events(
                     autobiography_db, user_id, event_id, limit=5

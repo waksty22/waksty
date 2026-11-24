@@ -6677,18 +6677,18 @@ async def websocket_endpoint(
                             except Exception:
                                 log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")
                                 raise
-                        # Learn from the confirmed user transcript before evaluating speech.
-                        # This allows same-turn imitation without promoting comprehension.
-                        with db_connection() as language_db:
-                            repeatable_words = get_repeatable_words(language_db, user_id)
-                        maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
-                        lexical_gate_passed = (
-                            text_uses_only_allowed_words(assistant_text, repeatable_words)
-                            and (maturity >= 3.0 or sum(
-                                1 for part in assistant_text.split()
-                                if any(character.isalnum() for character in part)
-                            ) <= 1)
-                        )
+                            # Learn from the confirmed user transcript before evaluating speech.
+                            # This allows same-turn imitation without promoting comprehension.
+                            with db_connection() as language_db:
+                                repeatable_words = get_repeatable_words(language_db, user_id)
+                            maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+                            lexical_gate_passed = (
+                                text_uses_only_allowed_words(assistant_text, repeatable_words)
+                                and (maturity >= 3.0 or sum(
+                                    1 for part in assistant_text.split()
+                                    if any(character.isalnum() for character in part)
+                                ) <= 1)
+                            )
 
                             try:
                                 save_conversation_turn(

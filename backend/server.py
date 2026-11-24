@@ -48,7 +48,7 @@ from fastapi.responses import (
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from utils.validators import normalize_and_validate_user_id
 from utils.live_tickets import OneTimeTicketStore
@@ -1467,6 +1467,7 @@ class VocabularyTeachRequest(BaseModel):
     state: Literal["heard", "imitated", "recognized", "understood", "usable"]
     meaning: str = Field(default="", max_length=1000)
     evidence: str = Field(default="Enseignement explicite par le créateur", max_length=500)
+    supervisor_approved: StrictBool = False
 
 def _skill_table_columns(db: Any) -> set[str]:
     """Return the columns actually exposed by the active skills table."""
@@ -5639,6 +5640,20 @@ async def api_teach_vocabulary(
                     db, user_id, payload.word, payload.evidence
                 )
             else:
+                if payload.state != "heard":
+                    if payload.supervisor_approved is not True:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="La progression au-delà de « entendu » exige une validation explicite du créateur.",
+                        )
+                    if len(payload.evidence.strip()) < 20:
+                        raise ValueError(
+                            "Une preuve concrète d'au moins 20 caractères est obligatoire pour valider cette étape."
+                        )
+                    if payload.state in {"understood", "usable"} and not payload.meaning.strip():
+                        raise ValueError(
+                            "Une définition ou explication est obligatoire pour valider la compréhension ou l'utilisation."
+                        )
                 response = advance_word(
                     db, user_id, payload.word, payload.state,
                     payload.meaning, payload.evidence,

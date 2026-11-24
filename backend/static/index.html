@@ -1407,8 +1407,10 @@
               <option value="understood">4. Compris</option>
               <option value="usable">5. Utilisable</option>
             </select>
-            <label for="teachMeaning">Signification (à partir de « compris »)</label>
+            <label for="teachMeaning">Signification (obligatoire à partir de « compris »)</label>
             <input id="teachMeaning" type="text" maxlength="1000" placeholder="Ce que Chappie a appris sur ce mot">
+            <label for="teachEvidence">Preuve observée (20 caractères minimum pour valider une étape)</label>
+            <input id="teachEvidence" type="text" maxlength="500" placeholder="Ex. Chappie a répété correctement le mot à voix haute.">
             <div class="row-btns">
               <button type="button" onclick="teachVocabulary()">Valider l'étape</button>
               <button type="button" class="secondary" onclick="loadVocabulary()">Actualiser les mots</button>

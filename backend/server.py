@@ -3181,6 +3181,8 @@ def execute_tool(
 
         if name == "retrieve_acquired_knowledge":
             query = args.get("query", "")
+            if not isinstance(query, str):
+                raise ValueError("La recherche doit être du texte.")
             with db_connection() as knowledge_db:
                 result = retrieve_acquired_knowledge(
                     knowledge_db, user_id, query=query, limit=10
@@ -3205,6 +3207,8 @@ def execute_tool(
 
         if name == "find_related_autobiographical_events":
             event_id = args.get("event_id", 0)
+            if isinstance(event_id, bool) or not isinstance(event_id, int) or event_id < 1:
+                raise ValueError("Identifiant d’épisode invalide.")
             with db_connection() as autobiography_db:
                 related = find_related_autobiographical_events(
                     autobiography_db, user_id, event_id, limit=5

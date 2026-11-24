@@ -1451,7 +1451,9 @@
             <p class="muted">Après avoir enseigné un mot dans le dictionnaire, tu peux lui montrer l'objet et valider l'association. L'analyse visuelle reste une observation, pas une compréhension automatique.</p>
             <label for="visionWord">Mot déjà imité par Chappie</label>
             <input id="visionWord" type="text" maxlength="80" placeholder="Ex. coq">
-            <button type="button" onclick="associateVisionWord()">Associer le mot à l'image</button>
+            <label for="visionEvidence">Preuve visuelle observée (1 à 500 caractères)</label>
+            <textarea id="visionEvidence" rows="2" maxlength="500" placeholder="Décris ce qui te permet de confirmer que le mot correspond à l'élément visible."></textarea>
+            <button type="button" onclick="associateVisionWord()">Valider l'association mot-image</button>
             <div id="visionObservationStatus" class="status">Aucune observation visuelle sélectionnée.</div>
           </div>
           <div class="panel" style="margin-top:12px">

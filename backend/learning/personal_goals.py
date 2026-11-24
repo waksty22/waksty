@@ -217,7 +217,14 @@ def list_goal_skill_assessments(
             details = json.loads(row["details"] or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(details, dict) or details.get("goal_id") != goal_id:
+        if not isinstance(details, dict):
+            continue
+        linked_goal_id = details.get("goal_id")
+        if (
+            isinstance(linked_goal_id, bool)
+            or not isinstance(linked_goal_id, int)
+            or linked_goal_id != goal_id
+        ):
             continue
         if details.get("source") != "supervised_assessment" or details.get("supervisor_approved") is not True:
             continue
@@ -254,11 +261,14 @@ def list_goal_skill_assessments(
         ).fetchone()
         if step is None:
             continue
+        tested_at = row["tested_at"]
+        if not isinstance(tested_at, str) or not tested_at.strip():
+            continue
         linked.append({
             "test_name": test_name.strip(),
             "passed": True,
             "score": score,
-            "tested_at": str(row["tested_at"]),
+            "tested_at": tested_at,
             "goal_step_id": goal_step_id,
             "evidence": raw_evidence.strip()[:500],
         })

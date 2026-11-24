@@ -202,3 +202,92 @@ def test_personal_goal_step_rejects_invalid_identifiers_without_writing():
             pass
     assert db.execute("SELECT status FROM goal_steps").fetchone()["status"] == "pending"
     db.close()
+
+
+def test_supervised_goal_assessments_require_strict_integer_goal_linkage():
+    import json
+    from learning.personal_goals import list_goal_skill_assessments
+
+    db = make_db()
+    db.execute("INSERT INTO goals(user_id,title) VALUES('creator','Objectif')")
+    goal_id = db.execute("SELECT id FROM goals").fetchone()["id"]
+    db.execute(
+        "INSERT INTO goal_steps(goal_id,description,status,evidence) VALUES(?,?,?,?)",
+        (goal_id, "Étape", "completed", "Preuve documentée"),
+    )
+    step_id = db.execute("SELECT id FROM goal_steps").fetchone()["id"]
+    db.execute("""
+        CREATE TABLE competency_tests (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            test_name TEXT,
+            passed,
+            score,
+            tested_at,
+            details TEXT
+        )
+    """)
+    def details(linked_goal_id):
+        return json.dumps({
+            "goal_id": linked_goal_id,
+            "goal_step_id": step_id,
+            "source": "supervised_assessment",
+            "supervisor_approved": True,
+            "evidence": "Évaluation supervisée et preuve vérifiable.",
+        })
+    rows = [
+        ("creator", "memory:recall", 1, 90, "2026-11-24", details(True)),
+        ("creator", "memory:recall", 1, 90, "2026-11-24", details(1.0)),
+        ("creator", "memory:recall", 1, 90, "2026-11-24", details("1")),
+        ("creator", "memory:recall", 1, 90, "2026-11-24", details(goal_id)),
+    ]
+    db.executemany(
+        "INSERT INTO competency_tests(user_id,test_name,passed,score,tested_at,details) VALUES(?,?,?,?,?,?)",
+        rows,
+    )
+    db.commit()
+
+    assessments = list_goal_skill_assessments(db, "creator", goal_id)
+    assert len(assessments) == 1
+    assert assessments[0]["test_name"] == "memory:recall"
+    assert assessments[0]["score"] == 90.0
+    db.close()
+
+
+def test_supervised_goal_assessment_rejects_untyped_timestamp():
+    import json
+    from learning.personal_goals import list_goal_skill_assessments
+
+    db = make_db()
+    db.execute("INSERT INTO goals(user_id,title) VALUES('creator','Objectif')")
+    goal_id = db.execute("SELECT id FROM goals").fetchone()["id"]
+    db.execute(
+        "INSERT INTO goal_steps(goal_id,description,status,evidence) VALUES(?,?,?,?)",
+        (goal_id, "Étape", "completed", "Preuve documentée"),
+    )
+    step_id = db.execute("SELECT id FROM goal_steps").fetchone()["id"]
+    db.execute("""
+        CREATE TABLE competency_tests (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            test_name TEXT,
+            passed,
+            score,
+            tested_at,
+            details TEXT
+        )
+    """)
+    details = json.dumps({
+        "goal_id": goal_id,
+        "goal_step_id": step_id,
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Évaluation supervisée et preuve vérifiable.",
+    })
+    db.execute(
+        "INSERT INTO competency_tests(user_id,test_name,passed,score,tested_at,details) VALUES(?,?,?,?,?,?)",
+        ("creator", "memory:recall", 1, 90, None, details),
+    )
+    db.commit()
+    assert list_goal_skill_assessments(db, "creator", goal_id) == []
+    db.close()

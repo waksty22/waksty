@@ -99,6 +99,7 @@ from learning.live_visual_observation import (
     build_gemini_visual_observation,
     build_live_visual_analysis_observation,
     is_explicit_live_visual_question,
+    live_visual_frame_is_fresh,
     live_visual_observation_due,
 )
 from learning.object_learning import (
@@ -6071,6 +6072,7 @@ async def websocket_endpoint(
         "visual_frame_sequence": 0,
         "last_visual_analysis_frame_sequence": 0,
         "last_camera_mime_type": "image/jpeg",
+        "last_camera_frame_at": 0.0,
         "repeatable_words": set(),
         "brain_snapshot_fingerprint": "",
         "brain_refresh_version": 0,
@@ -6252,6 +6254,7 @@ async def websocket_endpoint(
                             }
                         }
                         live_turn_state["last_camera_mime_type"] = mime_type
+                        live_turn_state["last_camera_frame_at"] = time.monotonic()
                         # Keep session/frame provenance for each persisted receipt.
                         # The image itself is never written to the memory database.
                         live_turn_state["visual_frame_sequence"] += 1
@@ -6503,6 +6506,10 @@ async def websocket_endpoint(
                             assistant_text
                             and current_frame_sequence > previous_analysis_sequence
                             and is_explicit_live_visual_question(confirmed_user_text)
+                            and live_visual_frame_is_fresh(
+                                time.monotonic(),
+                                live_turn_state["last_camera_frame_at"],
+                            )
                         ):
                             visual_analysis = build_live_visual_analysis_observation(
                                 assistant_text,

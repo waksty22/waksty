@@ -3980,8 +3980,11 @@ def _safe_dict(value):
     return {}
 
 async def _json_object(request: Request) -> dict:
-    """Decode a request body and reject arrays/scalars before route field access."""
-    data = await request.json()
+    """Decode a request body and reject malformed/non-object JSON consistently."""
+    try:
+        data = await request.json()
+    except (ValueError, TypeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Corps JSON invalide.") from exc
     if not isinstance(data, dict):
         raise HTTPException(status_code=422, detail="Un objet JSON est attendu.")
     return data
@@ -4374,7 +4377,7 @@ async def api_cognitive_skill_catalog(auth=Depends(require_auth)):
 @app.post("/api/cognition/skills/assessments")
 async def api_record_skill_assessment(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     system_value = data.get("system", "")
     branch_value = data.get("branch", "")
     evidence_value = data.get("evidence", "")
@@ -4496,7 +4499,7 @@ async def api_cognition_development(auth=Depends(require_auth)):
 @app.post("/api/cognition/decisions")
 async def api_record_decision(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_decision(
@@ -4515,7 +4518,7 @@ async def api_evaluate_decision(
     decision_id: int, request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = evaluate_decision(
@@ -4531,7 +4534,7 @@ async def api_evaluate_decision(
 @app.post("/api/personality/preferences")
 async def api_record_preference(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_preference(
@@ -5134,7 +5137,7 @@ async def api_vision_analyze(
     auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     image_value = (
         data.get("image")
         or data.get("image_data")
@@ -5264,7 +5267,7 @@ async def api_review_perception_fusion(
     """Allow the authenticated owner to confirm or reject a cross-modal candidate."""
     user_id = _authenticated_user(auth)
     try:
-        data = await request.json()
+        data = await _json_object(request)
     except (ValueError, TypeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail="Corps JSON invalide.") from exc
     if not isinstance(data, dict):
@@ -5288,7 +5291,7 @@ async def api_associate_visual_word(
     auth=Depends(require_auth),
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = associate_word_with_observation(
@@ -5336,7 +5339,7 @@ async def api_teach_object_property(
     auth=Depends(require_auth),
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = teach_object_property(
@@ -5372,7 +5375,7 @@ async def api_record_object_experience(
     auth=Depends(require_auth),
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_object_experience(
@@ -5396,7 +5399,7 @@ async def api_compare_known_objects(
     auth=Depends(require_auth),
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             comparison = compare_known_objects(
@@ -5778,7 +5781,7 @@ async def api_personal_learning_goals(auth=Depends(require_auth)):
 @app.post("/api/learning/goals/steps")
 async def api_record_personal_goal_step(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_personal_goal_step(
@@ -5796,7 +5799,7 @@ async def api_record_causal_observation(
     request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_causal_observation(
@@ -5814,7 +5817,7 @@ async def api_propose_causal_hypothesis(
     request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = propose_hypothesis(
@@ -5832,7 +5835,7 @@ async def api_plan_causal_experiment(
     request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = plan_experiment(
@@ -5850,7 +5853,7 @@ async def api_evaluate_causal_experiment(
     experiment_id: int, request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = evaluate_experiment(
@@ -5874,7 +5877,7 @@ async def api_record_imitation_demonstration(
     request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_demonstration(
@@ -5891,7 +5894,7 @@ async def api_record_imitation_practice(
     example_id: int, request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_practice(
@@ -5908,7 +5911,7 @@ async def api_validate_imitation(
     example_id: int, request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = validate_imitation(
@@ -5926,7 +5929,7 @@ async def api_reject_imitation(
     example_id: int, request: Request, auth=Depends(require_auth)
 ):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = reject_imitation(

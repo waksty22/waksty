@@ -266,6 +266,27 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
         ).fetchone()[0] == 1
 
 
+class TurnGatedFakeClientWebSocket(FakeClientWebSocket):
+    """Deliver the next user turn only after the previous turn is completed."""
+
+    def __init__(self, payloads):
+        super().__init__(payloads)
+        self._turn_complete = asyncio.Event()
+        self._first_payload_delivered = False
+
+    async def send_json(self, payload):
+        await super().send_json(payload)
+        if payload.get("type") == "turn_complete":
+            self._turn_complete.set()
+
+    async def receive_json(self):
+        if self._first_payload_delivered:
+            await asyncio.wait_for(self._turn_complete.wait(), timeout=5)
+        payload = await super().receive_json()
+        self._first_payload_delivered = True
+        return payload
+
+
 class TwoTurnFakeGeminiLiveSocket(FakeGeminiLiveSocket):
     """Provider double that returns two turns in one uninterrupted Live session."""
 
@@ -336,7 +357,7 @@ def test_live_refreshes_shared_brain_between_turns_without_reconnecting(
 
     monkeypatch.setattr(server, "supervised_gemini_connection", fake_connection)
 
-    fake_client = FakeClientWebSocket([
+    fake_client = TurnGatedFakeClientWebSocket([
         {"action": "audio_chunk", "pcm_data": "AQID"},
         {"action": "audio_chunk", "pcm_data": "BAUG"},
     ])

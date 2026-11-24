@@ -6560,32 +6560,6 @@ async def websocket_endpoint(
                         # Do not accept another user frame until the committed brain state is refreshed.
                         brain_context_ready.clear()
                         assistant_text = live_turn_state["assistant"].strip()
-                        with db_connection() as language_db:
-                            repeatable_words = get_repeatable_words(language_db, user_id)
-                        maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
-                        lexical_gate_passed = (
-                            text_uses_only_allowed_words(assistant_text, repeatable_words)
-                            and (maturity >= 3.0 or sum(
-                                1 for part in assistant_text.split()
-                                if any(character.isalnum() for character in part)
-                            ) <= 1)
-                        )
-                        if lexical_gate_passed:
-                            for audio_chunk in live_turn_state["audio"]:
-                                await websocket.send_json({
-                                    "type": "audio_stream",
-                                    **audio_chunk,
-                                })
-                            if assistant_text:
-                                await websocket.send_json({
-                                    "type": "text", "text": assistant_text,
-                                })
-                        else:
-                            await websocket.send_json({
-                                "type": "speech_blocked",
-                                "message": "Chappie n'a pas encore acquis les mots nécessaires pour prononcer cette réponse.",
-                            })
-
                         confirmed_user_text = live_turn_state["user"].strip()
                         current_frame_sequence = live_turn_state["visual_frame_sequence"]
                         previous_analysis_sequence = live_turn_state[
@@ -6680,6 +6654,7 @@ async def websocket_endpoint(
                                 )
                                 raise
 
+                        lexical_gate_passed = False
                         if live_turn_state["user"] or assistant_text:
                             try:
                                 with db_connection() as teaching_db:
@@ -6703,6 +6678,19 @@ async def websocket_endpoint(
                             except Exception:
                                 log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")
                                 raise
+                            # Learn from the confirmed user transcript before evaluating speech.
+                            # This allows same-turn imitation without promoting comprehension.
+                            with db_connection() as language_db:
+                                repeatable_words = get_repeatable_words(language_db, user_id)
+                            maturity = float(get_skills_summary(user_id).get("average_level", 0.0))
+                            lexical_gate_passed = (
+                                text_uses_only_allowed_words(assistant_text, repeatable_words)
+                                and (maturity >= 3.0 or sum(
+                                    1 for part in assistant_text.split()
+                                    if any(character.isalnum() for character in part)
+                                ) <= 1)
+                            )
+
                             try:
                                 save_conversation_turn(
                                     user_id,
@@ -6720,6 +6708,23 @@ async def websocket_endpoint(
                             except Exception:
                                 log.exception("[V34] Échec d'enregistrement du tour Live")
                                 raise
+
+                        # Release generated speech only after every persistence step succeeded.
+                        if lexical_gate_passed:
+                            for audio_chunk in live_turn_state["audio"]:
+                                await websocket.send_json({
+                                    "type": "audio_stream",
+                                    **audio_chunk,
+                                })
+                            if assistant_text:
+                                await websocket.send_json({
+                                    "type": "text", "text": assistant_text,
+                                })
+                        else:
+                            await websocket.send_json({
+                                "type": "speech_blocked",
+                                "message": "Chappie n'a pas encore acquis les mots nécessaires pour prononcer cette réponse.",
+                            })
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []

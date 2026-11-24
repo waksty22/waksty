@@ -31,8 +31,9 @@ class FakeClientWebSocket:
 
 
 class FakeGeminiLiveSocket:
-    def __init__(self, assistant_text: str):
+    def __init__(self, assistant_text: str, user_text: str = "bonjour"):
         self.assistant_text = assistant_text
+        self.user_text = user_text
         self.sent: list[dict] = []
         self.ready = asyncio.Event()
         self.yielded = False
@@ -56,7 +57,7 @@ class FakeGeminiLiveSocket:
         self.yielded = True
         return json.dumps({
             "serverContent": {
-                "inputTranscription": {"text": "bonjour"},
+                "inputTranscription": {"text": self.user_text},
                 "outputTranscription": {"text": self.assistant_text},
                 "modelTurn": {
                     "parts": [
@@ -74,7 +75,7 @@ class FakeGeminiLiveSocket:
         })
 
 
-def run_live_turn(monkeypatch, tmp_path, assistant_text: str):
+def run_live_turn(monkeypatch, tmp_path, assistant_text: str, user_text: str = "bonjour"):
     import server
     from learning.language import record_heard_word
 
@@ -92,7 +93,7 @@ def run_live_turn(monkeypatch, tmp_path, assistant_text: str):
         record_heard_word(db, "creator", "bonjour", "Exposition de test")
         db.commit()
 
-    provider = FakeGeminiLiveSocket(assistant_text)
+    provider = FakeGeminiLiveSocket(assistant_text, user_text=user_text)
 
     @asynccontextmanager
     async def fake_connection(websocket):
@@ -126,3 +127,35 @@ def test_live_emits_audio_only_when_every_spoken_word_is_known(
         for item in messages
     )
     assert not any(item.get("type") == "speech_blocked" for item in messages)
+
+
+
+def test_live_can_imitate_a_word_first_heard_in_the_same_confirmed_turn(
+    monkeypatch, tmp_path
+):
+    messages = run_live_turn(
+        monkeypatch, tmp_path, assistant_text="montre", user_text="bonjour montre"
+    )
+
+    assert any(
+        item.get("type") == "text" and item.get("text") == "montre"
+        for item in messages
+    )
+    assert any(item.get("type") == "audio_stream" for item in messages)
+    assert not any(item.get("type") == "speech_blocked" for item in messages)
+
+
+
+def test_live_does_not_emit_audio_when_conversation_persistence_fails(
+    monkeypatch, tmp_path
+):
+    import server
+
+    def fail_conversation_save(*args, **kwargs):
+        raise RuntimeError("synthetic persistence failure")
+
+    monkeypatch.setattr(server, "save_conversation_turn", fail_conversation_save)
+    messages = run_live_turn(monkeypatch, tmp_path, "bonjour")
+
+    assert not any(item.get("type") == "audio_stream" for item in messages)
+    assert not any(item.get("type") == "text" for item in messages)

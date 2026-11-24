@@ -389,3 +389,87 @@ def test_live_refreshes_shared_brain_between_turns_without_reconnecting(
             ).fetchall()
         }
     assert "zorbital" in words
+
+
+def test_live_camera_frame_reaches_provider_and_receipt_enters_shared_brain(
+    monkeypatch, tmp_path
+):
+    """A Live frame is relayed and its technical receipt is shared without claiming understanding."""
+    import server
+
+    database_path = tmp_path / "live-camera-forwarding.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.setattr(server, "GEMINI_API_KEY", "test-only-provider-key")
+    server.init_db()
+
+    provider = FakeGeminiLiveSocket(
+        user_text="Que vois-tu ?", assistant_text="Je peux décrire ce que la caméra me transmet."
+    )
+
+    @asynccontextmanager
+    async def fake_connection(websocket):
+        yield provider
+
+    monkeypatch.setattr(server, "supervised_gemini_connection", fake_connection)
+
+    image_data = "aGVsbG8tdmlzaW9uLWZyYW1l"
+    fake_client = FakeClientWebSocket([
+        {
+            "action": "video_frame",
+            "data": image_data,
+            "mime_type": "image/jpeg",
+        }
+    ])
+    ticket = server.live_ws_tickets.issue("creator")
+    asyncio.run(server.websocket_endpoint(fake_client, ticket=ticket))
+
+    assert fake_client.accepted
+    relayed_frames = [
+        payload["realtimeInput"]["video"]
+        for payload in provider.sent
+        if isinstance(payload.get("realtimeInput"), dict)
+        and isinstance(payload["realtimeInput"].get("video"), dict)
+    ]
+    assert relayed_frames == [{
+        "data": image_data,
+        "mimeType": "image/jpeg",
+    }]
+    assert any(item.get("type") == "turn_complete" for item in fake_client.sent)
+
+    with server.db_connection() as db:
+        rows = db.execute(
+            """SELECT observation_id, content, source, confidence, metadata_json
+               FROM sensory_observations
+               WHERE user_id=? AND source='live_camera_frame_received_by_server'""",
+            ("creator",),
+        ).fetchall()
+        assert len(rows) == 1
+        receipt = dict(rows[0])
+        metadata = json.loads(receipt["metadata_json"])
+        assert receipt["confidence"] == 0.0
+        assert "ne confirme ni sa transmission au modèle" in receipt["content"]
+        assert "ne décrit pas le contenu de l'image" in receipt["content"]
+        assert metadata["mime_type"] == "image/jpeg"
+        assert metadata["image_bytes_persisted"] is False
+        assert metadata["semantic_analysis_performed"] is False
+        assert metadata["session_id"]
+        assert metadata["frame_sequence"] == 1
+
+    # The post-turn shared-brain refresh contains the persisted receipt, not
+    # image bytes or a fabricated visual description.
+    refresh_payloads = [
+        payload for payload in provider.sent
+        if isinstance(payload.get("clientContent"), dict)
+        and payload.get("clientContent", {}).get("turns")
+    ]
+    assert len(refresh_payloads) >= 2
+    refreshed_context = json.dumps(refresh_payloads[-1], ensure_ascii=False)
+    assert "OBSERVATIONS SENSORIELLES" in refreshed_context
+    assert "live_camera_frame_received_by_server" in refreshed_context
+    assert image_data not in refreshed_context
+    assert "semantic_analysis_performed" in refreshed_context

@@ -102,3 +102,15 @@ def test_empty_goal_progress_stays_zero_and_active(goals_db):
 def test_memory_search_request_rejects_coerced_or_out_of_range_limits(bad_limit):
     with pytest.raises(ValidationError):
         server.MemorySearchRequest(query="souvenir", limit=bad_limit)
+
+
+@pytest.mark.parametrize("bad_importance", [True, 1.5, "3", 0, 6])
+def test_memory_request_rejects_coerced_or_invalid_importance(bad_importance):
+    with pytest.raises(ValidationError):
+        server.MemoryRequest(content="Souvenir", importance=bad_importance)
+
+
+@pytest.mark.parametrize("bad_confidence", [True, "0.8", "NaN", float("inf"), -0.1, 1.1])
+def test_memory_request_rejects_coerced_or_invalid_confidence(bad_confidence):
+    with pytest.raises(ValidationError):
+        server.MemoryRequest(content="Souvenir", confidence=bad_confidence)

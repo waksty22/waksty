@@ -6,6 +6,7 @@ never becomes a learned property unless a teaching/validation action records it.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -77,6 +78,19 @@ def _clean_optional_evidence(evidence: str) -> str:
     return evidence
 
 
+def _validated_confidence(value: Any) -> float:
+    """Accept only explicit finite numeric confidence values in [0, 1]."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Confiance invalide.")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Confiance invalide.") from exc
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        raise ValueError("La confiance doit être une valeur finie comprise entre 0 et 1.")
+    return number
+
+
 def _require_known_object(
     db: sqlite3.Connection, user_id: str, word: str
 ) -> tuple[str, str]:
@@ -139,14 +153,7 @@ def teach_object_property(
     evidence = _clean_optional_evidence(evidence)
     if not isinstance(source_type, str) or source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
-    if isinstance(confidence, bool):
-        raise ValueError("Confiance invalide.")
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Confiance invalide.") from exc
-    if not 0 <= confidence <= 1:
-        raise ValueError("La confiance doit être comprise entre 0 et 1.")
+    confidence = _validated_confidence(confidence)
     now = utc_now()
     db.execute(
         """INSERT INTO object_properties
@@ -297,14 +304,7 @@ def record_object_experience(
     evidence = _clean_optional_evidence(evidence)
     if not isinstance(source_type, str) or source_type not in {"taught", "observed", "confirmed"}:
         raise ValueError("Provenance invalide.")
-    if isinstance(confidence, bool):
-        raise ValueError("Confiance invalide.")
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Confiance invalide.") from exc
-    if not 0 <= confidence <= 1:
-        raise ValueError("La confiance doit être comprise entre 0 et 1.")
+    confidence = _validated_confidence(confidence)
     now = utc_now()
     cursor = db.execute(
         """INSERT INTO object_experiences

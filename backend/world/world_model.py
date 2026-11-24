@@ -117,17 +117,12 @@ def _validate_source_type(source_type: str) -> str:
 def _validate_confidence(confidence: float) -> float:
     """Garantit un niveau de confiance compris entre 0 et 1."""
 
-    if isinstance(confidence, bool):
-        raise ValueError(
-            "confidence doit être un nombre."
-        )
-
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise ValueError("confidence doit être un nombre JSON numérique.")
     try:
         confidence = float(confidence)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(
-            "confidence doit être un nombre."
-        ) from exc
+        raise ValueError("confidence doit être un nombre.") from exc
 
     if not math.isfinite(confidence):
         raise ValueError(
@@ -268,19 +263,15 @@ def _normalize_limit(
 ) -> int:
     """Valide et borne une limite de résultats."""
 
-    if isinstance(limit, bool):
-        raise ValueError(
-            "limit doit être un nombre entier."
-        )
-
-    try:
-        value = int(limit)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(
-            "limit doit être un nombre entier."
-        ) from exc
-
-    return max(minimum, min(maximum, value))
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit doit être un entier strict.")
+    if (
+        isinstance(minimum, bool) or not isinstance(minimum, int)
+        or isinstance(maximum, bool) or not isinstance(maximum, int)
+        or minimum < 0 or maximum < minimum
+    ):
+        raise ValueError("Bornes de limite invalides.")
+    return max(minimum, min(maximum, limit))
 
 
 # ============================================================

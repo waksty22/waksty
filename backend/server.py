@@ -5144,10 +5144,15 @@ async def api_vision_analyze(
         or data.get("image_base64")
     )
     image_bytes = _decode_data_url(image_value, MAX_CAMERA_IMAGE_BYTES)
-    question_value = (
-        data.get("question") or data.get("prompt")
-        or "Observe cette image et relève uniquement les éléments visuellement perceptibles."
+    default_visual_question = (
+        "Observe cette image et relève uniquement les éléments visuellement perceptibles."
     )
+    if "question" in data and data.get("question") is not None:
+        question_value = data.get("question")
+    elif "prompt" in data and data.get("prompt") is not None:
+        question_value = data.get("prompt")
+    else:
+        question_value = default_visual_question
     if not isinstance(question_value, str):
         raise HTTPException(status_code=422, detail="La question visuelle doit être du texte.")
     question = question_value.strip()

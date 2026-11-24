@@ -2231,6 +2231,7 @@ def record_memory_relevance_doubt_trace(
     query: str,
     *,
     channel: str,
+    relevant_memories: Optional[list[dict[str, Any]]] = None,
 ) -> bool:
     """Record uncertainty only when retrieved memory evidence is weak.
 
@@ -2240,7 +2241,11 @@ def record_memory_relevance_doubt_trace(
     if channel not in {"chat", "gemini_live"}:
         raise ValueError("Canal cognitif non autorisé.")
 
-    relevant = retrieve_memories(user_id, query, 6)
+    relevant = (
+        relevant_memories
+        if relevant_memories is not None
+        else retrieve_memories(user_id, query, 6)
+    )
     doubt_evaluation = evaluate_memory_relevance_doubt(relevant)
     if not doubt_evaluation or not doubt_evaluation.get("requires_doubt"):
         return False
@@ -3390,7 +3395,13 @@ async def run_brain(
     # Une conversation n'est pas une preuve d'apprentissage.
     # Les compétences progressent uniquement après validation explicite.
 
-    record_memory_relevance_doubt_trace(user_id, message, channel="chat")
+    relevant = retrieve_memories(user_id, message, 6)
+    record_memory_relevance_doubt_trace(
+        user_id,
+        message,
+        channel="chat",
+        relevant_memories=relevant,
+    )
 
     with db_connection() as db:  
         rows = db.execute(  

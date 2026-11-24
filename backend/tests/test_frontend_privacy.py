@@ -28,3 +28,25 @@ def test_perception_fusion_review_ui_is_explicit_and_uses_safe_dom_text():
     assert 'id="perceptionFusionList"' in html
     assert "Actualiser les rapprochements" in html
     assert "Une coïncidence temporelle n'est pas une identité" in html
+
+
+
+def test_live_visual_observations_can_be_selected_for_supervised_word_association():
+    backend = Path(__file__).resolve().parents[1]
+    source = (backend / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (backend / "static" / "index.html").read_text(encoding="utf-8")
+    start = source.index("window.loadSensoryObservations")
+    end = source.index("window.loadPerceptionFusions", start)
+    sensory_ui = source[start:end]
+
+    assert "/api/senses/observations" in sensory_ui
+    assert "semantic_analysis_performed === true" in sensory_ui
+    assert "human_review_required === true" in sensory_ui
+    assert "is_learned_fact === false" in sensory_ui
+    assert "Sélectionner pour associer un mot" in sensory_ui
+    assert "field.value = item.observation_id" in sensory_ui
+    assert "createElement" in sensory_ui
+    assert "textContent" in sensory_ui
+    assert "innerHTML" not in sensory_ui
+    assert 'id="sensoryHistory"' in html
+    assert 'id="visionObservationId"' in html

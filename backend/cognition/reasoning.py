@@ -291,29 +291,34 @@ def log_cognitive_trace(
 
     user_id = _normalize_user_id(user_id)
 
-    thought_type = _safe_text(
-        thought_type,
-        default="general",
-        maximum=100
-    )
-
-    context_summary = _safe_text(
-        context_summary
-    )
-
-    decision_made = _safe_text(
-        decision_made
-    )
-
-    confidence = _safe_number(
-        confidence,
-        default=0.5,
-        minimum=MIN_CONFIDENCE,
-        maximum=MAX_CONFIDENCE
-    )
-
+    # Cognitive traces are persisted audit records: reject malformed input
+    # instead of silently stringifying objects, truncating evidence, or
+    # inventing a neutral confidence value.
+    if not isinstance(thought_type, str):
+        raise ValueError("thought_type doit être du texte.")
+    thought_type = thought_type.strip()
     if not thought_type:
         thought_type = "general"
+    if len(thought_type) > 100:
+        raise ValueError("thought_type est trop long.")
+
+    for field_name, value in (
+        ("context_summary", context_summary),
+        ("decision_made", decision_made),
+    ):
+        if not isinstance(value, str):
+            raise ValueError(f"{field_name} doit être du texte.")
+        if len(value) > MAX_TEXT_LENGTH:
+            raise ValueError(f"{field_name} est trop long.")
+
+    context_summary = context_summary.strip()
+    decision_made = decision_made.strip()
+
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise ValueError("confidence doit être un nombre fini entre 0 et 1.")
+    confidence = float(confidence)
+    if not math.isfinite(confidence) or not MIN_CONFIDENCE <= confidence <= MAX_CONFIDENCE:
+        raise ValueError("confidence doit être un nombre fini entre 0 et 1.")
 
     created_at = utc_now()
 

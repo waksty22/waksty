@@ -327,3 +327,26 @@ def test_snapshot_includes_validated_word_links_and_unconfirmed_perception_candi
     assert "RAPPROCHEMENTS AUDIO/VISION" in context
     assert "coïncidences temporelles, non confirmées" in context
     db.close()
+
+
+
+def test_shared_brain_context_skips_non_finite_json_records():
+    snapshot = {
+        "autobiographical_events": [
+            {"id": 1, "content": "souvenir valide"},
+            {"id": 2, "content": "valeur corrompue", "confidence": float("nan")},
+            {"id": 3, "content": "autre souvenir valide"},
+        ],
+        "statistics": {"totals": {"autobiographical_events": 3}},
+    }
+    context = format_shared_brain_context(snapshot)
+    match = re.search(
+        r"ÉPISODES AUTOBIOGRAPHIQUES SOURCÉS:\\n(\\[.*?\\])",
+        context,
+        flags=re.S,
+    )
+    assert match is not None
+    records = json.loads(match.group(1))
+    assert [row["id"] for row in records] == [1, 3]
+    assert "CONTEXTE PARTIEL" in context
+    assert "NaN" not in match.group(1)

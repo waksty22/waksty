@@ -8,6 +8,7 @@ from memory.autobiographical import (
     init_autobiographical_tables,
     sync_autobiographical_events,
     search_autobiographical_events,
+    list_autobiographical_events,
 )
 
 

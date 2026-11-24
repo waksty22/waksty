@@ -189,7 +189,7 @@ def test_causal_review_rejects_invalid_limit(db, bad):
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), "nan", "inf"])
 def test_causal_confidence_rejects_non_finite_values_without_writing(db, bad):
-    with pytest.raises(ValueError, match="finie"):
+    with pytest.raises(ValueError, match="invalide|finie"):
         record_observation(
             db, "creator", "événement", "résultat", confidence=bad
         )

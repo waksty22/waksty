@@ -34,9 +34,16 @@ def _safe_rows(
 ) -> list[dict[str, Any]]:
     try:
         return [dict(row) for row in db.execute(sql, params).fetchall()]
-    except (sqlite3.OperationalError, TypeError):
-        # Older databases may not yet contain an optional subsystem table.
-        return []
+    except sqlite3.OperationalError as exc:
+        # Only an actually absent optional subsystem table is compatible with
+        # older databases. Missing columns, locks, corruption and other SQL
+        # failures must surface instead of making Chappie appear to have
+        # forgotten persisted knowledge.
+        message = str(exc).casefold()
+        table_name = sql.partition("FROM ")[2].split()[0].strip(chr(34))
+        if "no such table" in message and table_name.casefold() in message:
+            return []
+        raise
 
 
 def _validated_assessment(details: Any, passed: Any, score: Any) -> bool:
@@ -68,9 +75,18 @@ def _safe_score(value: Any) -> float:
     return number if math.isfinite(number) else 0.0
 
 
-def _safe_confidence(value: Any) -> float:
-    number = _safe_score(value)
-    return max(0.0, min(1.0, number))
+def _safe_confidence(value: Any) -> float | None:
+    # Unknown or malformed confidence is not evidence of an explicit 0.0.
+    # Preserve only real, finite numeric values in the declared range.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        return None
+    return number
 
 
 def retrieve_acquired_knowledge(

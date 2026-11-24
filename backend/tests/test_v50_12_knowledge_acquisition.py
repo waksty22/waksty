@@ -202,7 +202,7 @@ def test_corrupt_memory_rows_are_skipped_without_inventing_provenance():
         item for item in result["items"]
         if item["content"] == "Confiance invalide"
     )
-    assert invalid_confidence["confidence"] == 0.0
+    assert invalid_confidence["confidence"] is None
     assert "Categorie absente" not in contents
     assert "Une montre possède un cadran rond" in contents
     db.close()

@@ -165,6 +165,7 @@ class LiveVisualObservationTests(unittest.TestCase):
         types_module.GenerateContentConfig = lambda **kwargs: kwargs
         google_module.genai = genai_module
 
+        place_calls = []
         with ExitStack() as stack:
             stack.enter_context(patch.dict(sys.modules, {
                 "google": google_module,
@@ -181,7 +182,8 @@ class LiveVisualObservationTests(unittest.TestCase):
                 server, "link_temporally_cooccurring_observation", lambda *args: []
             ))
             stack.enter_context(patch.object(
-                server, "record_place_observation", lambda *args: {"status": "candidate"}
+                server, "record_place_observation",
+                lambda *args: place_calls.append(args) or {"status": "candidate"},
             ))
 
             result = asyncio.run(
@@ -200,6 +202,39 @@ class LiveVisualObservationTests(unittest.TestCase):
         self.assertFalse(saved[0]["metadata"]["semantic_understanding_confirmed"])
         self.assertTrue(saved[0]["metadata"]["human_review_required"])
         self.assertFalse(saved[0]["metadata"]["image_bytes_persisted"])
+        self.assertEqual(len(place_calls), 1)
+        self.assertEqual(place_calls[0][5], "")
+        self.assertEqual(place_calls[0][7], 0.0)
+        self.assertEqual(place_calls[0][8], "")
+
+
+    def test_vision_api_rejects_non_text_prompt_and_place_metadata(self):
+        import asyncio
+        from unittest.mock import patch
+        from fastapi import HTTPException
+        import server
+
+        class FakeRequest:
+            def __init__(self, payload):
+                self.payload = payload
+
+            async def json(self):
+                return self.payload
+
+        invalid_payloads = (
+            {"image": "data:image/jpeg;base64,AA==", "question": 7},
+            {"image": "data:image/jpeg;base64,AA==", "prompt": []},
+            {"image": "data:image/jpeg;base64,AA==", "place_label": 12},
+            {"image": "data:image/jpeg;base64,AA==", "session_id": True},
+        )
+        with patch.object(server, "_decode_data_url", lambda *_: b"\\xff\\xd8\\xffimage"):
+            for payload in invalid_payloads:
+                with self.subTest(payload=payload):
+                    with self.assertRaises(HTTPException) as error:
+                        asyncio.run(
+                            server.api_vision_analyze(FakeRequest(payload), auth="creator")
+                        )
+                    self.assertEqual(error.exception.status_code, 422)
 
 
     def test_live_visual_question_requires_explicit_visual_intent(self):

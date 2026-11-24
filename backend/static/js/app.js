@@ -104,9 +104,14 @@ document.addEventListener("DOMContentLoaded", () => {
     window.associateVisionWord = async function() {
         const word = document.getElementById("visionWord")?.value?.trim();
         const observationId = document.getElementById("visionObservationId")?.value?.trim();
+        const evidence = document.getElementById("visionEvidence")?.value?.trim();
         const token = getToken();
         if (!word || !observationId) {
-            alert("Analyse d'abord une image et enseigne le mot à associer.");
+            alert("Sélectionne une observation visuelle et indique le mot à associer.");
+            return;
+        }
+        if (!evidence || evidence.length > 500) {
+            alert("Décris la preuve visuelle observée (1 à 500 caractères).");
             return;
         }
         try {
@@ -116,7 +121,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: {
                     word: word,
                     observation_id: observationId,
-                    evidence: "Association image-mot validée manuellement par le créateur"
+                    evidence: evidence
                 }
             });
             const status = document.getElementById("visionObservationStatus");

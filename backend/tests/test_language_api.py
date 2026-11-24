@@ -78,11 +78,19 @@ def test_vocabulary_api_requires_concrete_evidence_and_meaning(language_api_db):
             ),
             auth="creator",
         )
+        await server.api_teach_vocabulary(
+            payload(
+                "coq", "recognized",
+                evidence="Il a associé le mot à l'image correcte.",
+                **approved,
+            ),
+            auth="creator",
+        )
         with pytest.raises(HTTPException) as missing_meaning:
             await server.api_teach_vocabulary(
                 payload(
-                    "coq", "recognized",
-                    evidence="Il a associé le mot à l'image correcte.",
+                    "coq", "understood",
+                    evidence="Il a expliqué ce que représente le mot.",
                     **approved,
                 ),
                 auth="creator",
@@ -93,7 +101,7 @@ def test_vocabulary_api_requires_concrete_evidence_and_meaning(language_api_db):
     row = language_api_db.execute(
         "SELECT state FROM personal_vocabulary WHERE user_id='creator' AND word='coq'"
     ).fetchone()
-    assert row["state"] == "imitated"
+    assert row["state"] == "recognized"
 
 
 def test_vocabulary_api_can_progress_one_supervised_stage_at_a_time(language_api_db):

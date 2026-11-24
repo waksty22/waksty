@@ -133,6 +133,8 @@ def test_live_emits_audio_only_when_every_spoken_word_is_known(
 def test_live_can_imitate_a_word_first_heard_in_the_same_confirmed_turn(
     monkeypatch, tmp_path
 ):
+    import server
+
     messages = run_live_turn(
         monkeypatch, tmp_path, assistant_text="montre", user_text="bonjour montre"
     )
@@ -143,6 +145,18 @@ def test_live_can_imitate_a_word_first_heard_in_the_same_confirmed_turn(
     )
     assert any(item.get("type") == "audio_stream" for item in messages)
     assert not any(item.get("type") == "speech_blocked" for item in messages)
+
+    # Same-turn imitation is allowed, but exposure alone must not be upgraded
+    # to imitation, recognition, comprehension, or usable vocabulary.
+    with server.db_connection() as db:
+        word = db.execute(
+            "SELECT state, meaning FROM personal_vocabulary "
+            "WHERE user_id=? AND word=?",
+            ("creator", "montre"),
+        ).fetchone()
+        assert word is not None
+        assert word["state"] == "heard"
+        assert word["meaning"] == ""
 
 
 

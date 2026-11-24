@@ -127,27 +127,44 @@ def sync_autobiographical_events(
         )
         inserted += max(0, cursor.rowcount)
 
-    # Relie uniquement les messages user/assistant consécutifs du même tour.
-    # L'horodatage seul ne suffit pas : deux tours distincts peuvent partager
-    # le même timestamp (résolution de l'horloge ou écritures rapprochées).
+    # Relie uniquement deux messages adjacents dans l'historique de CE
+    # user. Les IDs de conversations sont globaux : un message d'un autre
+    # utilisateur peut légitimement se glisser entre les deux IDs.
+    # L'horodatage doit aussi correspondre pour éviter de relier deux tours.
     db.execute(
         """
         INSERT OR IGNORE INTO autobiographical_links
             (user_id, source_event_id, target_event_id, relation_type, created_at)
         SELECT u.user_id, u.id, a.id, 'same_dialogue_turn', u.created_at
-        FROM autobiographical_events u
+        FROM conversations user_message
+        JOIN conversations assistant_message
+          ON assistant_message.user_id=user_message.user_id
+         AND assistant_message.id > user_message.id
+         AND assistant_message.role='assistant'
+         AND assistant_message.created_at=user_message.created_at
+        JOIN autobiographical_events u
+          ON u.user_id=user_message.user_id
+         AND u.source_conversation_id=user_message.id
+         AND u.actor='user'
         JOIN autobiographical_events a
-          ON a.user_id=u.user_id
-         AND a.source_conversation_id=u.source_conversation_id + 1
-         AND a.happened_at=u.happened_at
+          ON a.user_id=assistant_message.user_id
+         AND a.source_conversation_id=assistant_message.id
          AND a.actor='assistant'
-        WHERE u.user_id=? AND u.actor='user'
+        WHERE user_message.user_id=?
+          AND user_message.role='user'
           AND NOT EXISTS (
               SELECT 1
-              FROM conversations previous
-              WHERE previous.user_id=u.user_id
-                AND previous.id=u.source_conversation_id - 1
-                AND previous.role='user'
+              FROM conversations previous_same_user
+              WHERE previous_same_user.id=user_message.id - 1
+                AND previous_same_user.user_id=user_message.user_id
+                AND previous_same_user.role='user'
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM conversations between_turn
+              WHERE between_turn.user_id=user_message.user_id
+                AND between_turn.id > user_message.id
+                AND between_turn.id < assistant_message.id
           )
         """,
         (user_id,),

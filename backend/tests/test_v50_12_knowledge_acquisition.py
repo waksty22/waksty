@@ -1,5 +1,6 @@
 """V50.12 — provenance-aware knowledge retrieval and reuse."""
 import json
+import pytest
 import sqlite3
 import sys
 from pathlib import Path
@@ -321,3 +322,9 @@ def test_context_never_cuts_a_json_record_at_the_character_limit():
     assert context.endswith(
         "présentée comme une connaissance acquise."
     )
+
+
+@pytest.mark.parametrize("invalid_limit", [True, False, 900.5, "900", None])
+def test_context_rejects_non_integer_character_limits(invalid_limit):
+    with pytest.raises(ValueError, match="entier"):
+        format_acquired_knowledge_context({"items": []}, max_chars=invalid_limit)

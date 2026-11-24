@@ -306,7 +306,9 @@ def format_acquired_knowledge_context(
     result: dict[str, Any], max_chars: int = MAX_CONTEXT_CHARS
 ) -> str:
     """Format bounded JSON records so untrusted memory text cannot alter structure."""
-    max_chars = max(500, min(int(max_chars), MAX_CONTEXT_CHARS))
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int):
+        raise ValueError("La limite du contexte doit être un entier.")
+    max_chars = max(500, min(max_chars, MAX_CONTEXT_CHARS))
     raw_items = result.get("items") if isinstance(result, dict) else []
     items = raw_items if isinstance(raw_items, list) else []
     lines = [

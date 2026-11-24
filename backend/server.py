@@ -135,6 +135,7 @@ from cognition.reasoning import (
     init_cognition_tables,
     log_cognitive_trace,
     evaluate_decision_doubt,
+    evaluate_memory_relevance_doubt,
     run_metacognitive_audit,
 )
 from cognition.maintenance import apply_passive_maintenance
@@ -3363,36 +3364,21 @@ async def run_brain(
         6,  
     )  
 
-    avg_confidence = (  
-        sum(  
-            float(m.get("confidence", 0.8))  
-            for m in relevant  
-        ) / len(relevant)  
-        if relevant else 0.3  
-    )  
+    doubt_evaluation = evaluate_memory_relevance_doubt(relevant)
 
-    doubt_evaluation = evaluate_decision_doubt(  
-        avg_confidence,  
-        threshold=0.65,  
-    )  
-
-    if (  
-        doubt_evaluation.get("is_uncertain")  
-        or doubt_evaluation.get("requires_doubt")  
-        or any(  
-            word in message.casefold()  
-            for word in ("pute", "connard", "débile")  
-        )  
-    ):  
-        with db_connection() as db_trace:  
-            log_cognitive_trace(  
-                db_trace,  
-                user_id,  
-                "doute_absurdite",  
-                f"Message perçu comme étrange : {message[:300]}",  
-                "exprimer_le_doute",  
-                avg_confidence,  
-            )  
+    # A lack of retrieved memories is not evidence of low confidence.
+    # Record only evidence-based uncertainty; never infer it from insults
+    # or persist the user's raw message in a cognitive trace.
+    if doubt_evaluation and doubt_evaluation.get("requires_doubt"):
+        with db_connection() as db_trace:
+            log_cognitive_trace(
+                db_trace,
+                user_id,
+                "incertitude_contexte_memoire",
+                "Les éléments de mémoire récupérés présentent une confiance limitée.",
+                "Demander une vérification ou des informations complémentaires.",
+                doubt_evaluation["confidence"],
+            )
             db_trace.commit()  
 
     with db_connection() as db:  

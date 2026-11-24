@@ -437,6 +437,37 @@ def evaluate_decision_doubt(
     }
 
 
+def evaluate_memory_relevance_doubt(
+    relevant_memories: Any,
+    threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+) -> Optional[dict[str, Any]]:
+    """Evaluate uncertainty only when retrieved memory evidence exists.
+
+    An empty retrieval is absence of evidence, not a low-confidence result.
+    This helper intentionally consumes memory confidence metadata only; it
+    does not inspect user wording or model-private reasoning.
+    """
+    if not isinstance(relevant_memories, list) or not relevant_memories:
+        return None
+
+    confidences = []
+    for memory in relevant_memories:
+        if not isinstance(memory, dict):
+            continue
+        confidences.append(_safe_number(
+            memory.get("confidence", 0.8),
+            default=0.8,
+            minimum=MIN_CONFIDENCE,
+            maximum=MAX_CONFIDENCE,
+        ))
+
+    if not confidences:
+        return None
+
+    average = sum(confidences) / len(confidences)
+    return evaluate_decision_doubt(average, threshold=threshold)
+
+
 # ============================================================
 # LECTURE DES TRACES COGNITIVES
 # ============================================================

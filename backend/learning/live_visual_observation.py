@@ -116,6 +116,27 @@ def build_gemini_visual_observation(
     }
 
 
+LIVE_VISUAL_FRAME_MAX_AGE_SECONDS = 15.0
+
+
+def live_visual_frame_is_fresh(
+    now: Any,
+    last_frame_at: Any,
+    max_age_seconds: Any = LIVE_VISUAL_FRAME_MAX_AGE_SECONDS,
+) -> bool:
+    """Reject visual answers when the most recent camera frame is stale."""
+    values = (now, last_frame_at, max_age_seconds)
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        for value in values
+    ):
+        return False
+    if now < 0 or last_frame_at <= 0 or max_age_seconds <= 0:
+        return False
+    age = now - last_frame_at
+    return 0 <= age <= max_age_seconds
+
+
 def is_explicit_live_visual_question(question: Any) -> bool:
     """Recognize explicit visual-inspection requests without guessing intent."""
     if not isinstance(question, str) or not question.strip() or len(question) > 1000:

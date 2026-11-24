@@ -127,3 +127,26 @@ def test_temporal_fusion_never_links_observations_across_users(db):
 
     assert result == []
     assert list_perception_fusions(db, "bob") == []
+
+
+def test_technical_camera_receipt_never_creates_a_semantic_fusion_candidate(db):
+    audio = record_observation(
+        db, "creator", "audio", "Que vois-tu ?", "microphone"
+    )
+    receipt = record_observation(
+        db,
+        "creator",
+        "vision",
+        "Le serveur a reçu une trame caméra.",
+        "live_camera_frame_received_by_server",
+        confidence=0.0,
+        metadata={"image_bytes_persisted": False, "semantic_analysis_performed": False},
+    )
+
+    assert link_temporally_cooccurring_observation(
+        db, "creator", audio["observation_id"]
+    ) == []
+    assert link_temporally_cooccurring_observation(
+        db, "creator", receipt["observation_id"]
+    ) == []
+    assert list_perception_fusions(db, "creator") == []

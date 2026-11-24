@@ -140,6 +140,7 @@ def start_location_session(
 def stop_location_session(
     db: sqlite3.Connection, user_id: str, session_id: str
 ) -> dict[str, Any]:
+    session_id = _text(session_id, "Session", 80, True)
     row = db.execute(
         "SELECT * FROM spatial_sessions WHERE session_id=? AND user_id=?",
         (session_id, user_id),
@@ -161,6 +162,7 @@ def record_location(
     altitude_m: Any = None, heading_deg: Any = None, speed_mps: Any = None,
     recorded_at: str = ""
 ) -> dict[str, Any]:
+    session_id = _text(session_id, "Session", 80, True)
     session = db.execute(
         """SELECT session_id FROM spatial_sessions
            WHERE session_id=? AND user_id=? AND consented=1 AND ended_at IS NULL""",
@@ -233,7 +235,7 @@ def record_place_observation(
 ) -> dict[str, Any]:
     description = _text(description, "Description visuelle", 4000, True)
     label = _text(label, "Nom du lieu", 120)
-    raw_signature = str(visual_signature or description).strip()[:1000]
+    raw_signature = description if visual_signature is None or visual_signature == "" else visual_signature
     signature = _text(raw_signature, "Signature visuelle", 1000) or description.casefold()[:1000]
     conf = _finite(confidence, "Confiance", 0, 1)
     lat = None if latitude is None else _finite(latitude, "Latitude", -90, 90)

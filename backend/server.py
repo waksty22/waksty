@@ -3170,14 +3170,11 @@ def execute_tool(
                 source_type, confidence, tags,
             )
 
-        if name == "search_memories":  
-            return {  
-                "memories": retrieve_memories(  
-                    user_id,  
-                    args.get("query", ""),  
-                    10,  
-                )  
-            }  
+        if name == "search_memories":
+            query = args.get("query", "")
+            if not isinstance(query, str):
+                raise ValueError("La recherche doit être du texte.")
+            return {"memories": retrieve_memories(user_id, query, 10)}
 
         if name == "retrieve_acquired_knowledge":
             query = args.get("query", "")

@@ -59,7 +59,7 @@ def link_temporally_cooccurring_observation(
         raise ValueError("La fenêtre temporelle doit être au moins égale à une seconde.")
     window = min(window_seconds, MAX_WINDOW_SECONDS)
     current = db.execute(
-        """SELECT observation_id, modality, content, created_at
+        """SELECT observation_id, modality, content, source, created_at
            FROM sensory_observations
            WHERE observation_id=? AND user_id=?""",
         (observation_id, user_id),
@@ -67,6 +67,10 @@ def link_temporally_cooccurring_observation(
     if current is None:
         raise ValueError("Observation sensorielle introuvable.")
     if current["modality"] not in {"audio", "vision"}:
+        return []
+    # A server-side camera receipt proves only that bytes reached this backend.
+    # It is not visual content and must never become an audio/vision match.
+    if current["source"] == "live_camera_frame_received_by_server":
         return []
 
     try:
@@ -80,7 +84,7 @@ def link_temporally_cooccurring_observation(
     upper = (current_time + timedelta(seconds=window)).isoformat()
     other_modality = "vision" if current["modality"] == "audio" else "audio"
     rows = db.execute(
-        """SELECT observation_id, modality, content, created_at
+        """SELECT observation_id, modality, content, source, created_at
            FROM sensory_observations
            WHERE user_id=? AND modality=? AND created_at BETWEEN ? AND ?
              AND observation_id<>?
@@ -90,6 +94,8 @@ def link_temporally_cooccurring_observation(
 
     created = []
     for other in rows:
+        if other["source"] == "live_camera_frame_received_by_server":
+            continue
         try:
             other_time = datetime.fromisoformat(other["created_at"])
             if other_time.tzinfo is None:

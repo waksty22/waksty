@@ -118,17 +118,15 @@ class LiveVisualObservationTests(unittest.TestCase):
             self.assertIsNone(build_gemini_visual_observation(*args))
 
 
-    def test_vision_api_persists_real_provider_output_with_provenance(
-        self, monkeypatch
-    ):
+    def test_vision_api_persists_real_provider_output_with_provenance(self):
         import asyncio
         import sys
         import types
-        from contextlib import contextmanager
+        from contextlib import ExitStack, contextmanager
         from types import SimpleNamespace
+        from unittest.mock import patch
 
         import server
-        from learning.sensory import init_sensory_tables, list_observations
 
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
@@ -164,26 +162,31 @@ class LiveVisualObservationTests(unittest.TestCase):
         types_module.GenerateContentConfig = lambda **kwargs: kwargs
         google_module.genai = genai_module
 
-        monkeypatch.setitem(sys.modules, "google", google_module)
-        monkeypatch.setitem(sys.modules, "google.genai", genai_module)
-        monkeypatch.setitem(sys.modules, "google.genai.types", types_module)
-        monkeypatch.setattr(server, "db_connection", connection)
-        monkeypatch.setattr(server, "_decode_data_url", lambda *_: b"\\xff\\xd8\\xffimage")
-        monkeypatch.setattr(server, "GEMINI_API_KEY", "test-only-key")
-        monkeypatch.setattr(server, "GEMINI_MODEL", "gemini-test-vision")
-        monkeypatch.setattr(
-            server, "link_temporally_cooccurring_observation", lambda *args: []
-        )
-        monkeypatch.setattr(
-            server, "record_place_observation", lambda *args: {"status": "candidate"}
-        )
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, {
+                "google": google_module,
+                "google.genai": genai_module,
+                "google.genai.types": types_module,
+            }))
+            stack.enter_context(patch.object(server, "db_connection", connection))
+            stack.enter_context(patch.object(
+                server, "_decode_data_url", lambda *_: b"\\xff\\xd8\\xffimage"
+            ))
+            stack.enter_context(patch.object(server, "GEMINI_API_KEY", "test-only-key"))
+            stack.enter_context(patch.object(server, "GEMINI_MODEL", "gemini-test-vision"))
+            stack.enter_context(patch.object(
+                server, "link_temporally_cooccurring_observation", lambda *args: []
+            ))
+            stack.enter_context(patch.object(
+                server, "record_place_observation", lambda *args: {"status": "candidate"}
+            ))
 
-        result = asyncio.run(
-            server.api_vision_analyze(FakeRequest(), auth="creator")
-        )
-        saved = list_observations(db, "creator")
+            result = asyncio.run(
+                server.api_vision_analyze(FakeRequest(), auth="creator")
+            )
+            saved = list_observations(db, "creator")
+
         db.close()
-
         self.assertTrue(result["success"])
         self.assertFalse(result["is_learned_fact"])
         self.assertEqual(len(saved), 1)

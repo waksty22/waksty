@@ -69,3 +69,48 @@ def build_live_visual_observation(
         "confidence": 0.0,
         "metadata": metadata,
     }
+
+
+def build_gemini_visual_observation(
+    analysis: Any,
+    model: Any,
+    mime_type: Any,
+    question: Any,
+) -> dict[str, Any] | None:
+    """Persist a model-produced visual description with explicit provenance.
+
+    The model output is a sensory observation, not a verified fact or proof
+    that Chappie has learned the words used in the description.
+    """
+    if not isinstance(analysis, str):
+        return None
+    analysis = analysis.strip()
+    if not analysis or len(analysis) > 12_000:
+        return None
+    if not isinstance(model, str) or not model.strip() or len(model) > 128:
+        return None
+    if not isinstance(mime_type, str) or mime_type not in {
+        "image/jpeg", "image/png", "image/webp"
+    }:
+        return None
+    if not isinstance(question, str) or len(question) > 1000:
+        return None
+
+    return {
+        "modality": "vision",
+        "content": analysis,
+        "source": "gemini_image_analysis",
+        # No calibrated model confidence is available; do not invent one.
+        "confidence": 0.0,
+        "metadata": {
+            "model": model.strip(),
+            "mime_type": mime_type,
+            "question": question,
+            "model_generated": True,
+            "semantic_analysis_performed": True,
+            "semantic_understanding_confirmed": False,
+            "human_review_required": True,
+            "image_bytes_persisted": False,
+            "is_learned_fact": False,
+        },
+    }

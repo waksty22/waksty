@@ -96,6 +96,7 @@ from learning.sensory import (
 )
 from learning.live_visual_observation import (
     build_live_visual_observation,
+    build_gemini_visual_observation,
     live_visual_observation_due,
 )
 from learning.object_learning import (
@@ -5127,11 +5128,23 @@ async def api_vision_analyze(
         if not answer:
             answer = "Aucun élément visuel exploitable n'a été identifié."
 
+        visual_observation = build_gemini_visual_observation(
+            answer, GEMINI_MODEL, image_mime, question
+        )
+        if visual_observation is None:
+            raise HTTPException(
+                status_code=502,
+                detail="La description visuelle produite est invalide.",
+            )
+
         with db_connection() as db:
             observation = record_observation(
-                db, user_id, "vision", answer, "camera_snapshot",
-                confidence=0.45,
-                metadata={"mime_type": image_mime, "question": question},
+                db, user_id,
+                visual_observation["modality"],
+                visual_observation["content"],
+                visual_observation["source"],
+                confidence=visual_observation["confidence"],
+                metadata=visual_observation["metadata"],
             )
             link_temporally_cooccurring_observation(
                 db, user_id, observation["observation_id"]

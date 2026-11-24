@@ -5,6 +5,7 @@ from learning.sensory import init_sensory_tables, list_observations, record_obse
 from learning.live_visual_observation import (
     LIVE_VISUAL_OBSERVATION_INTERVAL_SECONDS,
     build_live_visual_observation,
+    build_gemini_visual_observation,
     live_visual_observation_due,
 )
 
@@ -84,6 +85,118 @@ class LiveVisualObservationTests(unittest.TestCase):
         self.assertFalse(live_visual_observation_due(True, 0.0))
         self.assertFalse(live_visual_observation_due(2.0, 3.0))
         self.assertFalse(live_visual_observation_due(-1.0, 0.0))
+
+
+    def test_gemini_analysis_is_stored_with_explicit_unverified_provenance(self):
+        observation = build_gemini_visual_observation(
+            "Une forme rouge arrondie est visible.",
+            "gemini-3.6-flash",
+            "image/jpeg",
+            "Décris les éléments visibles.",
+        )
+        self.assertIsNotNone(observation)
+        self.assertEqual(observation["modality"], "vision")
+        self.assertEqual(observation["source"], "gemini_image_analysis")
+        self.assertEqual(observation["content"], "Une forme rouge arrondie est visible.")
+        self.assertEqual(observation["confidence"], 0.0)
+        self.assertTrue(observation["metadata"]["model_generated"])
+        self.assertTrue(observation["metadata"]["semantic_analysis_performed"])
+        self.assertFalse(observation["metadata"]["semantic_understanding_confirmed"])
+        self.assertTrue(observation["metadata"]["human_review_required"])
+        self.assertFalse(observation["metadata"]["image_bytes_persisted"])
+        self.assertFalse(observation["metadata"]["is_learned_fact"])
+
+    def test_gemini_visual_analysis_rejects_missing_or_invalid_provenance(self):
+        invalid_cases = (
+            ("", "gemini-3.6-flash", "image/jpeg", "question"),
+            ("description", "", "image/jpeg", "question"),
+            ("description", "gemini-3.6-flash", "image/gif", "question"),
+            ("description", "gemini-3.6-flash", "image/jpeg", "q" * 1001),
+            ("x" * 12001, "gemini-3.6-flash", "image/jpeg", "question"),
+        )
+        for args in invalid_cases:
+            self.assertIsNone(build_gemini_visual_observation(*args))
+
+
+    def test_vision_api_persists_real_provider_output_with_provenance(self):
+        import asyncio
+        import sys
+        import types
+        from contextlib import ExitStack, contextmanager
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        import server
+
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        init_sensory_tables(db)
+
+        @contextmanager
+        def connection():
+            yield db
+
+        class FakeRequest:
+            async def json(self):
+                return {
+                    "image": "data:image/jpeg;base64,AA==",
+                    "question": "Que vois-tu ?",
+                }
+
+        class FakeClient:
+            def __init__(self, api_key):
+                self.models = SimpleNamespace(
+                    generate_content=lambda **kwargs: SimpleNamespace(
+                        text="Une forme rouge arrondie est visible."
+                    )
+                )
+
+        google_module = types.ModuleType("google")
+        google_module.__path__ = []
+        genai_module = types.ModuleType("google.genai")
+        genai_module.Client = FakeClient
+        types_module = types.ModuleType("google.genai.types")
+        types_module.Part = SimpleNamespace(
+            from_bytes=lambda **kwargs: {"image_part": True}
+        )
+        types_module.GenerateContentConfig = lambda **kwargs: kwargs
+        google_module.genai = genai_module
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(sys.modules, {
+                "google": google_module,
+                "google.genai": genai_module,
+                "google.genai.types": types_module,
+            }))
+            stack.enter_context(patch.object(server, "db_connection", connection))
+            stack.enter_context(patch.object(
+                server, "_decode_data_url", lambda *_: b"\xff\xd8\xffimage"
+            ))
+            stack.enter_context(patch.object(server, "GEMINI_API_KEY", "test-only-key"))
+            stack.enter_context(patch.object(server, "GEMINI_MODEL", "gemini-test-vision"))
+            stack.enter_context(patch.object(
+                server, "link_temporally_cooccurring_observation", lambda *args: []
+            ))
+            stack.enter_context(patch.object(
+                server, "record_place_observation", lambda *args: {"status": "candidate"}
+            ))
+
+            result = asyncio.run(
+                server.api_vision_analyze(FakeRequest(), auth="creator")
+            )
+            saved = list_observations(db, "creator")
+
+        db.close()
+        self.assertTrue(result["success"])
+        self.assertFalse(result["is_learned_fact"])
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["source"], "gemini_image_analysis")
+        self.assertEqual(saved[0]["confidence"], 0.0)
+        self.assertEqual(saved[0]["metadata"]["model"], "gemini-test-vision")
+        self.assertTrue(saved[0]["metadata"]["semantic_analysis_performed"])
+        self.assertFalse(saved[0]["metadata"]["semantic_understanding_confirmed"])
+        self.assertTrue(saved[0]["metadata"]["human_review_required"])
+        self.assertFalse(saved[0]["metadata"]["image_bytes_persisted"])
 
 
 if __name__ == "__main__":

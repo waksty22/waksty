@@ -3842,8 +3842,14 @@ def generate_rumination(user_id: str) -> dict[str, Any]:
     }
 
 async def autonomous_maintenance_loop() -> None:
+    first_cycle = True
     while True:
-        await asyncio.sleep(BACKGROUND_INTERVAL_SECONDS)
+        # Reprendre les échéances persistées dès le démarrage du processus.
+        # Les cycles suivants conservent l'intervalle normal; même si la base
+        # est absente ou qu'une erreur survient, le prochain passage attendra.
+        if not first_cycle:
+            await asyncio.sleep(BACKGROUND_INTERVAL_SECONDS)
+        first_cycle = False
         if STORAGE_MIGRATION_PENDING_CUTOVER:
             return
 
@@ -4864,7 +4870,8 @@ async def api_generate_dream(
     user_id = _authenticated_user(auth)
 
     try:  
-        result = await generate_dream(user_id)  
+        # generate_dream est synchrone et gère sa propre transaction DB.
+        result = generate_dream(user_id)  
         return {  
             "success": True,  
             "dream": result,  

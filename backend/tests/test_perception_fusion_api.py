@@ -119,7 +119,7 @@ def test_review_route_prevents_cross_user_candidate_access(fusion_api_db):
             }),
             auth="another-user",
         ))
-    assert error.value.status_code == 422
+    assert error.value.status_code == 403
     assert list_perception_fusions(fusion_api_db, "creator")[0]["status"] == "candidate"
     assert list_perception_fusions(fusion_api_db, "another-user") == []
 

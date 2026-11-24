@@ -6632,6 +6632,7 @@ async def websocket_endpoint(
                                     log.exception(
                                         "[GEMINI LIVE] Échec de persistance de l'analyse visuelle"
                                     )
+                                    raise
 
                         if confirmed_user_text:
                             try:
@@ -6670,6 +6671,7 @@ async def websocket_endpoint(
                                 log.exception(
                                     "[GEMINI LIVE] Échec mémorisation du transcript confirmé"
                                 )
+                                raise
 
                         if live_turn_state["user"] or assistant_text:
                             try:
@@ -6693,6 +6695,7 @@ async def websocket_endpoint(
                                         )
                             except Exception:
                                 log.exception("[APPRENTISSAGE PARTAGÉ] Échec d'enregistrement d'un enseignement Live")
+                                raise
                             try:
                                 save_conversation_turn(
                                     user_id,
@@ -6709,6 +6712,7 @@ async def websocket_endpoint(
                                 )
                             except Exception:
                                 log.exception("[V34] Échec d'enregistrement du tour Live")
+                                raise
                         live_turn_state["user"] = ""
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []

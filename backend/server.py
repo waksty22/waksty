@@ -2226,6 +2226,43 @@ def retrieve_memories(
 
         return fallback_results
 
+def record_memory_relevance_doubt_trace(
+    user_id: str,
+    query: str,
+    *,
+    channel: str,
+    relevant_memories: Optional[list[dict[str, Any]]] = None,
+) -> bool:
+    """Record uncertainty only when retrieved memory evidence is weak.
+
+    The raw query is used only for retrieval and is never persisted in the
+    cognitive trace. Only completed turns should call this helper.
+    """
+    if channel not in {"chat", "gemini_live"}:
+        raise ValueError("Canal cognitif non autorisé.")
+
+    relevant = (
+        relevant_memories
+        if relevant_memories is not None
+        else retrieve_memories(user_id, query, 6)
+    )
+    doubt_evaluation = evaluate_memory_relevance_doubt(relevant)
+    if not doubt_evaluation or not doubt_evaluation.get("requires_doubt"):
+        return False
+
+    with db_connection() as db_trace:
+        log_cognitive_trace(
+            db_trace,
+            user_id,
+            f"incertitude_contexte_memoire_{channel}",
+            "Les éléments de mémoire récupérés présentent une confiance limitée.",
+            "Demander une vérification ou des informations complémentaires.",
+            doubt_evaluation["confidence"],
+        )
+        db_trace.commit()
+    return True
+
+
 def get_latest_summary(user_id: str) -> str:
     with db_connection() as db:
         row = db.execute(
@@ -3358,28 +3395,13 @@ async def run_brain(
     # Une conversation n'est pas une preuve d'apprentissage.
     # Les compétences progressent uniquement après validation explicite.
 
-    relevant = retrieve_memories(  
-        user_id,  
-        message,  
-        6,  
-    )  
-
-    doubt_evaluation = evaluate_memory_relevance_doubt(relevant)
-
-    # A lack of retrieved memories is not evidence of low confidence.
-    # Record only evidence-based uncertainty; never infer it from insults
-    # or persist the user's raw message in a cognitive trace.
-    if doubt_evaluation and doubt_evaluation.get("requires_doubt"):
-        with db_connection() as db_trace:
-            log_cognitive_trace(
-                db_trace,
-                user_id,
-                "incertitude_contexte_memoire",
-                "Les éléments de mémoire récupérés présentent une confiance limitée.",
-                "Demander une vérification ou des informations complémentaires.",
-                doubt_evaluation["confidence"],
-            )
-            db_trace.commit()  
+    relevant = retrieve_memories(user_id, message, 6)
+    record_memory_relevance_doubt_trace(
+        user_id,
+        message,
+        channel="chat",
+        relevant_memories=relevant,
+    )
 
     with db_connection() as db:  
         rows = db.execute(  
@@ -6540,6 +6562,16 @@ async def websocket_endpoint(
                                     )
 
                         if confirmed_user_text:
+                            try:
+                                record_memory_relevance_doubt_trace(
+                                    user_id,
+                                    confirmed_user_text,
+                                    channel="gemini_live",
+                                )
+                            except Exception:
+                                log.exception(
+                                    "[GEMINI LIVE] Échec d'évaluation du doute fondé sur la mémoire"
+                                )
                             try:
                                 live_emotions = update_emotions_once(
                                     user_id, confirmed_user_text

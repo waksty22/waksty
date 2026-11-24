@@ -150,6 +150,14 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
             row["word"] for row in snapshot_after_chat["vocabulary"]
         }
 
+    # Live cognitive doubt uses the same evidence-based policy as Chat.
+    # This fake retrieval result is isolated to the test; no production memory is touched.
+    monkeypatch.setattr(
+        server,
+        "retrieve_memories",
+        lambda user_id, query="", limit=10: [{"confidence": 0.2}],
+    )
+
     # Chat -> Live: the real Live endpoint receives the same persisted word in
     # its initial context, then confirms and commits a new spoken word exactly once.
     live_socket = FakeGeminiLiveSocket("velociraptor", "zorbital")
@@ -157,6 +165,13 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
     assert "zorbital" in live_context
     assert "velociraptor" not in live_context
     assert any(item.get("type") == "turn_complete" for item in live_messages)
+    with server.db_connection() as trace_db:
+        live_traces = trace_db.execute(
+            "SELECT thought_type, context_summary FROM cognitive_traces WHERE user_id=?",
+            ("creator",),
+        ).fetchall()
+        assert any(row["thought_type"] == "incertitude_contexte_memoire_gemini_live" for row in live_traces)
+        assert all("velociraptor" not in row["context_summary"] for row in live_traces)
     assert any(
         item.get("type") == "text" and item.get("text") == "zorbital"
         for item in live_messages
@@ -218,7 +233,7 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
                 f"SELECT COUNT(*) FROM {table} WHERE user_id=?",
                 ("creator",),
             ).fetchone()[0]
-            for table in ("personal_vocabulary", "mood_events", "affective_history", "sensory_observations")
+            for table in ("personal_vocabulary", "mood_events", "affective_history", "sensory_observations", "cognitive_traces")
         }
         before_emotions = tuple(before_db.execute(
             "SELECT joy, fear, curiosity, frustration, sadness, energy "

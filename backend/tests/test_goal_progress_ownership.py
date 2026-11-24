@@ -84,3 +84,15 @@ def test_goal_progress_request_rejects_non_strict_identifiers(bad_id):
 def test_goal_progress_request_rejects_coerced_booleans(bad_completed):
     with pytest.raises(ValidationError):
         server.GoalStepRequest(goal_id=1, completed=bad_completed)
+
+
+def test_empty_goal_progress_stays_zero_and_active(goals_db):
+    goals_db.execute(
+        "INSERT INTO goals(user_id,title) VALUES('creator','Sans étapes')"
+    )
+    goal_id = goals_db.execute(
+        "SELECT id FROM goals WHERE title='Sans étapes'"
+    ).fetchone()["id"]
+    result = server.update_goal_progress(goals_db, "creator", goal_id)
+    assert result["progress"] == 0.0
+    assert result["status"] == "active"

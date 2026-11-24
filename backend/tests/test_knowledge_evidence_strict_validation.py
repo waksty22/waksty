@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from memory.knowledge_acquisition import retrieve_acquired_knowledge
+from memory.knowledge_acquisition import _safe_score, retrieve_acquired_knowledge
 from learning.causal_learning import init_causal_learning_tables, record_observation
 from learning.perception_fusion import review_perception_fusion
 
@@ -103,3 +103,14 @@ def test_invalid_assessment_score_is_not_fabricated_as_zero():
     assert assessment["status"] == "supervised_assessment_not_validated"
     assert assessment["score"] is None
     db.close()
+
+
+
+@pytest.mark.parametrize("bad_score", [True, "85", None, float("nan"), float("inf"), -1, 101])
+def test_assessment_score_requires_finite_numeric_value_in_range(bad_score):
+    assert _safe_score(bad_score) is None
+
+
+@pytest.mark.parametrize("valid_score", [0, 70, 85.5, 100])
+def test_assessment_score_preserves_valid_numeric_value(valid_score):
+    assert _safe_score(valid_score) == float(valid_score)

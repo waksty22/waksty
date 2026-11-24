@@ -1,5 +1,6 @@
 """V50.12 — provenance-aware knowledge retrieval and reuse."""
 import json
+import pytest
 import sqlite3
 import sys
 from pathlib import Path

@@ -73,7 +73,7 @@ def _safe_score(value: Any) -> float | None:
         number = float(value)
     except (OverflowError, TypeError, ValueError):
         return None
-    return number if math.isfinite(number) else None
+    return number if math.isfinite(number) and 0.0 <= number <= 100.0 else None
 
 
 def _safe_confidence(value: Any) -> float | None:

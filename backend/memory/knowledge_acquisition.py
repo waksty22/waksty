@@ -317,7 +317,8 @@ def format_acquired_knowledge_context(
         "taught_not_independently_verified = enseigné mais non vérifié seul ; "
         "observed_not_understood = observé sans preuve de compréhension ; "
         "experience_only_not_proof_of_learning = expérience autobiographique, "
-        "pas preuve d'apprentissage ; supervised_skill_validated = compétence "
+        "pas preuve d'apprentissage ; observed_not_understood = observation non comprise ; "
+        "supervised_skill_validated = compétence "
         "validée par évaluation supervisée réussie.",
     ]
     footer = (
@@ -342,7 +343,9 @@ def format_acquired_knowledge_context(
             continue
         line = "ENREGISTREMENT_JSON_NON_FIABLE: " + encoded
         candidate = lines + [line]
-        suffix = ([partial_note] if omitted else []) + [footer]
+        # Reserve room for the partial-context marker even if a later record
+        # does not fit; otherwise adding that marker could overflow the budget.
+        suffix = [partial_note, footer]
         if len("\n".join(candidate + suffix)) > max_chars:
             omitted = True
             break

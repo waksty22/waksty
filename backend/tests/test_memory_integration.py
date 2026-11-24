@@ -184,7 +184,7 @@ def test_knowledge_retrieval_rejects_coerced_limits_and_handles_bad_confidence()
             raise AssertionError(f"limit should be rejected: {invalid_limit!r}")
 
     result = retrieve_acquired_knowledge(db, " creator ", query="souvenir")
-    assert result["items"][0]["confidence"] == 0.0
+    assert result["items"][0]["confidence"] is None
     db.close()
 
 

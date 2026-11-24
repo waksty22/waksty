@@ -3658,11 +3658,7 @@ def update_goal_progress(
     total = row["total"] or 0  
     done = row["done"] or 0  
 
-    progress = (  
-        100.0  
-        if total == 0  
-        else 100.0 * done / total  
-    )  
+    progress = 100.0 * done / total if total else 0.0  
 
     status = (  
         "completed"  

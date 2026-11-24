@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
 BACKEND = Path(__file__).resolve().parents[1]
-if str(BACKEND) not in __import__("sys").path:
-    __import__("sys").path.insert(0, str(BACKEND))
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
 
 import server
 from cognition.shared_brain import get_shared_brain_snapshot
@@ -106,11 +107,11 @@ def test_supervised_live_visual_association_enters_shared_brain_without_overlear
         for row in snapshot["word_visual_associations"]
     )
     assert any(
-        row["entity_id"] == "object:coq" and row["entity_type"] == "object"
+        row["id"] == "object:coq" and row["entity_type"] == "object"
         for row in snapshot["world_entities"]
     )
     assert any(
-        row["relation_type"] == "associated_with_visual_observation"
+        row["predicate"] == "associated_with_visual_observation"
         and row["source_type"] == "taught"
         for row in snapshot["world_relations"]
     )

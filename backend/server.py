@@ -4506,7 +4506,9 @@ async def api_cognition_audit(auth=Depends(require_auth)):
     try:  
         from cognition.reasoning import run_metacognitive_audit  
 
-        result = run_metacognitive_audit(user_id)  
+        with db_connection() as db:
+            result = run_metacognitive_audit(db, user_id)
+            db.commit()  
     except Exception as exc:  
         print("[COGNITION AUDIT]", repr(exc))  
         raise HTTPException(  

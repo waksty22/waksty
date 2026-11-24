@@ -359,6 +359,16 @@ def log_cognitive_trace(
 # ÉVALUATION DU DOUTE DÉCISIONNEL
 # ============================================================
 
+def _validated_confidence(value: Any, field_name: str) -> float:
+    """Validate measured confidence without coercion, defaults, or clamping."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} doit être un nombre fini entre 0 et 1.")
+    number = float(value)
+    if not math.isfinite(number) or not MIN_CONFIDENCE <= number <= MAX_CONFIDENCE:
+        raise ValueError(f"{field_name} doit être un nombre fini entre 0 et 1.")
+    return number
+
+
 def evaluate_decision_doubt(
     confidence: float,
     threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
@@ -386,19 +396,8 @@ def evaluate_decision_doubt(
     Cette fonction ne vérifie pas la vérité de la décision.
     """
 
-    confidence = _safe_number(
-        confidence,
-        default=0.5,
-        minimum=MIN_CONFIDENCE,
-        maximum=MAX_CONFIDENCE
-    )
-
-    threshold = _safe_number(
-        threshold,
-        default=DEFAULT_CONFIDENCE_THRESHOLD,
-        minimum=MIN_CONFIDENCE,
-        maximum=MAX_CONFIDENCE
-    )
+    confidence = _validated_confidence(confidence, "confidence")
+    threshold = _validated_confidence(threshold, "threshold")
 
     requires_doubt = confidence < threshold
 
@@ -459,12 +458,14 @@ def evaluate_memory_relevance_doubt(
     for memory in relevant_memories:
         if not isinstance(memory, dict):
             continue
-        confidences.append(_safe_number(
-            memory.get("confidence", 0.8),
-            default=0.8,
-            minimum=MIN_CONFIDENCE,
-            maximum=MAX_CONFIDENCE,
-        ))
+        # Missing or malformed confidence is unknown, not an invitation
+        # to assign a plausible-looking default.
+        try:
+            confidences.append(_validated_confidence(
+                memory.get("confidence"), "memory confidence"
+            ))
+        except (TypeError, ValueError, OverflowError):
+            continue
 
     if not confidences:
         return None

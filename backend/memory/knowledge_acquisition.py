@@ -65,14 +65,15 @@ def _validated_assessment(details: Any, passed: Any, score: Any) -> bool:
     return math.isfinite(numeric_score) and 70 <= numeric_score <= 100
 
 
-def _safe_score(value: Any) -> float:
+def _safe_score(value: Any) -> float | None:
+    # A malformed score is unknown, not a genuine zero-point assessment.
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return 0.0
+        return None
     try:
         number = float(value)
     except (OverflowError, TypeError, ValueError):
-        return 0.0
-    return number if math.isfinite(number) else 0.0
+        return None
+    return number if math.isfinite(number) and 0.0 <= number <= 100.0 else None
 
 
 def _safe_confidence(value: Any) -> float | None:
@@ -177,8 +178,8 @@ def retrieve_acquired_knowledge(
         if isinstance(row.get("id"), bool) or not isinstance(row.get("id"), int) or row["id"] < 1:
             continue
         raw_confidence = row.get("confidence")
-        # Confidence is auxiliary metadata: malformed legacy values become
-        # zero confidence, while valid provenance and content remain usable.
+        # Confidence is auxiliary metadata: malformed legacy values remain
+        # unknown, while valid provenance and content remain usable.
         confidence = _safe_confidence(raw_confidence)
         timestamp = row.get("updated_at") or row.get("created_at")
         if not isinstance(timestamp, str):

@@ -279,5 +279,5 @@ def test_supervised_skill_score_above_100_is_not_validated():
     items = retrieve_acquired_knowledge(db, "creator")["items"]
     item = next(row for row in items if row.get("skill") == "tete:score_corrompu")
     assert item["status"] == "supervised_assessment_not_validated"
-    assert item["score"] == 101.0
+    assert item["score"] is None
     db.close()

@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from memory.knowledge_acquisition import retrieve_acquired_knowledge
+from memory.knowledge_acquisition import _safe_score, retrieve_acquired_knowledge
 from learning.causal_learning import init_causal_learning_tables, record_observation
 from learning.perception_fusion import review_perception_fusion
 
@@ -71,3 +71,46 @@ def test_perception_review_accepts_real_integer_id_only_after_lookup():
     assert result["status"] == "confirmed"
     assert result["world_knowledge_promoted"] is False
     db.close()
+
+
+
+def test_invalid_assessment_score_is_not_fabricated_as_zero():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE memories_v19 (
+            id INTEGER PRIMARY KEY, user_id TEXT, category TEXT, content TEXT,
+            source_type TEXT, confidence REAL, importance INTEGER,
+            created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE autobiographical_events (
+            id INTEGER PRIMARY KEY, user_id TEXT, actor TEXT, event_type TEXT,
+            content TEXT, happened_at TEXT, source_conversation_id INTEGER
+        );
+        CREATE TABLE competency_tests (
+            id INTEGER PRIMARY KEY, user_id TEXT, test_name TEXT, passed,
+            score, details TEXT, tested_at TEXT
+        );
+        INSERT INTO competency_tests
+            (id,user_id,test_name,passed,score,details,tested_at)
+        VALUES
+            (1,'creator','vocabulaire',1,'score inconnu',
+             '{"source":"supervised_assessment","supervisor_approved":true}',
+             '2026-11-24T00:00:00+00:00');
+    """)
+    result = retrieve_acquired_knowledge(db, "creator")
+    assessment = result["items"][0]
+    assert assessment["status"] == "supervised_assessment_not_validated"
+    assert assessment["score"] is None
+    db.close()
+
+
+
+@pytest.mark.parametrize("bad_score", [True, "85", None, float("nan"), float("inf"), -1, 101])
+def test_assessment_score_requires_finite_numeric_value_in_range(bad_score):
+    assert _safe_score(bad_score) is None
+
+
+@pytest.mark.parametrize("valid_score", [0, 70, 85.5, 100])
+def test_assessment_score_preserves_valid_numeric_value(valid_score):
+    assert _safe_score(valid_score) == float(valid_score)

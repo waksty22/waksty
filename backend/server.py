@@ -5745,8 +5745,8 @@ async def api_record_personal_goal_step(request: Request, auth=Depends(require_a
     try:
         with db_connection() as db:
             result = record_personal_goal_step(
-                db, user_id, int(data.get("goal_id", 0)),
-                int(data.get("step_id", 0)), data.get("evidence", ""),
+                db, user_id, data.get("goal_id", 0),
+                data.get("step_id", 0), data.get("evidence", ""),
                 data.get("completed", True),
             )
         return {"ok": True, "result": result}

@@ -6654,6 +6654,7 @@ async def websocket_endpoint(
                                 )
                                 raise
 
+                        lexical_gate_passed = False
                         if live_turn_state["user"] or assistant_text:
                             try:
                                 with db_connection() as teaching_db:

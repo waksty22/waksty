@@ -170,7 +170,7 @@ class LiveVisualObservationTests(unittest.TestCase):
             }))
             stack.enter_context(patch.object(server, "db_connection", connection))
             stack.enter_context(patch.object(
-                server, "_decode_data_url", lambda *_: b"\\xff\\xd8\\xffimage"
+                server, "_decode_data_url", lambda *_: b"\xff\xd8\xffimage"
             ))
             stack.enter_context(patch.object(server, "GEMINI_API_KEY", "test-only-key"))
             stack.enter_context(patch.object(server, "GEMINI_MODEL", "gemini-test-vision"))

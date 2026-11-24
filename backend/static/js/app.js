@@ -79,14 +79,23 @@ document.addEventListener("DOMContentLoaded", () => {
         const word = document.getElementById('teachWord')?.value?.trim();
         const state = document.getElementById('teachState')?.value || 'heard';
         const meaning = document.getElementById('teachMeaning')?.value?.trim() || '';
+        const evidence = document.getElementById('teachEvidence')?.value?.trim() || '';
         const token = getToken();
         if (!word) return alert('Saisis un mot à enseigner.');
+        if (state !== 'heard' && evidence.length < 20) {
+            return alert('Décris une preuve concrète (20 caractères minimum) avant de valider cette étape.');
+        }
+        if ((state === 'understood' || state === 'usable') && !meaning) {
+            return alert('Ajoute une définition ou une explication pour valider cette étape.');
+        }
         try {
             await apiCall('/api/language/teach', {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + token },
-                body: { user_id: 'creator', word, state, meaning,
-                    evidence: 'Enseignement validé depuis le tableau de bord' }
+                body: {
+                    user_id: 'creator', word, state, meaning, evidence: evidence || 'Mot entendu dans une interaction.',
+                    supervisor_approved: state !== 'heard'
+                }
             });
             await window.loadVocabulary();
         } catch (error) { alert(error.message); }

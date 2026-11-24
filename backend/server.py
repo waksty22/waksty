@@ -6068,7 +6068,7 @@ async def websocket_endpoint(
                 repeatable_words = sorted(get_repeatable_words(language_db, user_id))
             with db_connection() as brain_db:
                 initial_brain_snapshot = get_shared_brain_snapshot(
-                    brain_db, user_id, limit=1
+                    brain_db, user_id, limit=8
                 )
             live_turn_state["repeatable_words"] = set(repeatable_words)
             live_turn_state["brain_snapshot_fingerprint"] = json.dumps(
@@ -6552,7 +6552,7 @@ async def websocket_endpoint(
                         try:
                             with db_connection() as refresh_db:
                                 refreshed_snapshot = get_shared_brain_snapshot(
-                                    refresh_db, user_id, limit=1
+                                    refresh_db, user_id, limit=8
                                 )
                             with db_connection() as language_db:
                                 refreshed_words = set(

@@ -1136,6 +1136,61 @@ class CognitiveEngine:
         }
 
 
+def get_cognitive_milestones(user_id: str) -> list[Dict[str, Any]]:
+    """
+    Retourne les jalons réellement atteints à partir des compétences persistées.
+
+    Un jalon n'est exposé que si le niveau enregistré et une preuve non vide
+    existent. Cette fonction ne crée ni n'augmente aucune compétence.
+    """
+    if not isinstance(user_id, str) or not user_id.strip():
+        return []
+
+    normalized_user_id = user_id.strip()[:256]
+    from server import db_connection  # type: ignore
+
+    with db_connection() as db:
+        rows = db.execute(
+            """
+            SELECT skill_name, level, evidence, updated_at
+            FROM skills
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, skill_name ASC
+            """,
+            (normalized_user_id,),
+        ).fetchall()
+
+    milestones: list[Dict[str, Any]] = []
+    thresholds = (
+        (1.0, "premier_palier", "Première compétence validée"),
+        (5.0, "progression_confirmee", "Progression confirmée"),
+        (10.0, "maitrise_avancee", "Niveau avancé atteint"),
+    )
+    for row in rows:
+        skill_name = str(row["skill_name"] or "").strip()
+        evidence = str(row["evidence"] or "").strip()
+        try:
+            level = float(row["level"])
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not skill_name or not evidence or not math.isfinite(level):
+            continue
+        for threshold, milestone_id, title in thresholds:
+            if level >= threshold:
+                milestones.append({
+                    "id": f"{milestone_id}:{skill_name}",
+                    "type": milestone_id,
+                    "title": title,
+                    "skill_name": skill_name,
+                    "level": level,
+                    "threshold": threshold,
+                    "evidence": evidence[:500],
+                    "achieved_at": row["updated_at"],
+                    "source": "persisted_supervised_skill",
+                })
+    return milestones
+
+
 # ============================================================
 # INSTANCE GLOBALE ET FONCTION DE COMPATIBILITÉ
 # ============================================================

@@ -548,3 +548,60 @@ def test_live_camera_frame_is_not_saved_as_analysis_for_nonvisual_question(
             ("creator",),
         ).fetchone()
         assert receipts[0] == 1
+
+
+
+def test_interrupted_live_visual_turn_does_not_persist_model_description(
+    monkeypatch, tmp_path
+):
+    """A partial visual answer must not become a confirmed sensory observation."""
+    import server
+
+    database_path = tmp_path / "live-visual-interrupted.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.setattr(server, "GEMINI_API_KEY", "test-only-provider-key")
+    server.init_db()
+
+    provider = FakeGeminiLiveSocket(
+        user_text="Que vois-tu ?",
+        assistant_text="Je vois peut-être un oiseau",
+        turn_complete=False,
+    )
+
+    @asynccontextmanager
+    async def fake_connection(websocket):
+        yield provider
+
+    monkeypatch.setattr(server, "supervised_gemini_connection", fake_connection)
+    fake_client = FakeClientWebSocket([{
+        "action": "video_frame",
+        "data": "aGVsbG8tdmlzaW9uLWZyYW1l",
+        "mime_type": "image/jpeg",
+    }])
+    ticket = server.live_ws_tickets.issue("creator")
+    messages = asyncio.run(server.websocket_endpoint(fake_client, ticket=ticket))
+
+    assert not any(item.get("type") == "turn_complete" for item in fake_client.sent)
+    with server.db_connection() as db:
+        confirmed_visuals = db.execute(
+            """SELECT COUNT(*) FROM sensory_observations
+               WHERE user_id=? AND source='gemini_live_visual_analysis'""",
+            ("creator",),
+        ).fetchone()[0]
+        camera_receipts = db.execute(
+            """SELECT COUNT(*) FROM sensory_observations
+               WHERE user_id=? AND source='live_camera_frame_received_by_server'""",
+            ("creator",),
+        ).fetchone()[0]
+        assert confirmed_visuals == 0
+        assert camera_receipts == 1
+        assert db.execute(
+            """SELECT COUNT(*) FROM personal_vocabulary
+               WHERE user_id=?""",
+            ("creator",),
+        ).fetchone()[0] == 0

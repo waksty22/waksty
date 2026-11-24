@@ -48,7 +48,7 @@ from fastapi.responses import (
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictFloat, field_validator
 
 from utils.validators import normalize_and_validate_user_id
 from utils.live_tickets import OneTimeTicketStore
@@ -1403,12 +1403,12 @@ class MemoryRequest(BaseModel):
     )  
     content: str = Field(min_length=1, max_length=4000)  
     category: str = Field(default="general", min_length=1, max_length=60)  
-    importance: int = Field(default=3, ge=1, le=5)  
+    importance: StrictInt = Field(default=3, ge=1, le=5)  
     source_type: str = Field(  
         default="taught",  
         pattern=r"^(observed|taught|inferred)$",  
     )  
-    confidence: float = Field(default=0.8, ge=0.0, le=1.0)  
+    confidence: StrictFloat = Field(default=0.8, ge=0.0, le=1.0)  
     tags: list[str] = Field(default_factory=list, max_length=20)
 
 class MemorySearchRequest(BaseModel):

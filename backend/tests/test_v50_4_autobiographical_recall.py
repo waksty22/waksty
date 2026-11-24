@@ -249,3 +249,72 @@ def test_autobiographical_sync_rejects_coerced_commit_flag():
         sync_autobiographical_events(db, "creator", commit=1)
     assert db.execute("SELECT COUNT(*) FROM autobiographical_events").fetchone()[0] == 0
     db.close()
+
+
+
+def test_autobiographical_links_ignore_global_id_gaps_from_other_users():
+    db = make_db()
+    timestamp = "2026-11-24T10:00:00+00:00"
+    db.executemany(
+        "INSERT INTO conversations(id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+        [
+            (10, "creator", "user", "Question du créateur", timestamp),
+            (11, "another-user", "user", "Question indépendante", timestamp),
+            (12, "creator", "assistant", "Réponse au créateur", timestamp),
+        ],
+    )
+
+    result = sync_autobiographical_events(db, "creator")
+
+    links = db.execute(
+        """
+        SELECT u.source_conversation_id AS user_source,
+               a.source_conversation_id AS assistant_source
+        FROM autobiographical_links l
+        JOIN autobiographical_events u ON u.id=l.source_event_id
+        JOIN autobiographical_events a ON a.id=l.target_event_id
+        WHERE l.user_id='creator'
+        """
+    ).fetchall()
+
+    assert result["inserted"] == 2
+    assert [(row["user_source"], row["assistant_source"]) for row in links] == [
+        (10, 12)
+    ]
+    db.close()
+
+
+def test_autobiographical_links_still_reject_same_user_intervening_message():
+    db = make_db()
+    timestamp = "2026-11-24T10:00:00+00:00"
+    db.executemany(
+        "INSERT INTO conversations(id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+        [
+            (20, "creator", "user", "Premier message", timestamp),
+            (21, "another-user", "user", "Message indépendant", timestamp),
+            (22, "creator", "user", "Second message", timestamp),
+            (23, "creator", "assistant", "Réponse", timestamp),
+        ],
+    )
+
+    sync_autobiographical_events(db, "creator")
+
+    links = db.execute(
+        "SELECT source_event_id, target_event_id FROM autobiographical_links WHERE user_id='creator'"
+    ).fetchall()
+    linked_sources = [
+        (
+            db.execute(
+                "SELECT source_conversation_id FROM autobiographical_events WHERE id=?",
+                (row["source_event_id"],),
+            ).fetchone()[0],
+            db.execute(
+                "SELECT source_conversation_id FROM autobiographical_events WHERE id=?",
+                (row["target_event_id"],),
+            ).fetchone()[0],
+        )
+        for row in links
+    ]
+
+    assert linked_sources == [(22, 23)]
+    db.close()

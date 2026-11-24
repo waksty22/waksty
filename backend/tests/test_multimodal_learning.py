@@ -17,6 +17,7 @@ from learning.perception_fusion import (
     init_perception_fusion_tables,
     link_temporally_cooccurring_observation,
     list_perception_fusions,
+    review_perception_fusion,
 )
 
 
@@ -233,5 +234,93 @@ def test_perception_fusion_rejects_invalid_observation_identity(
         assert db.execute(
             "SELECT COUNT(*) FROM perception_fusion_candidates"
         ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def _make_fusion_candidate(db, user_id="creator"):
+    audio = record_observation(
+        db, user_id, "audio", "J'entends le mot pomme.", "confirmed_transcription"
+    )
+    vision = record_observation(
+        db, user_id, "vision", "Une forme rouge arrondie.", "camera_snapshot"
+    )
+    candidates = link_temporally_cooccurring_observation(
+        db, user_id, audio["observation_id"]
+    )
+    assert len(candidates) == 1
+    return candidates[0]["id"]
+
+
+def test_cross_modal_review_requires_explicit_evidence_and_is_terminal(tmp_path):
+    db = open_db(tmp_path / "fusion-review.sqlite3")
+    try:
+        candidate_id = _make_fusion_candidate(db)
+        with pytest.raises(ValueError, match="preuve"):
+            review_perception_fusion(db, "creator", candidate_id, "confirm", "  ")
+
+        confirmed = review_perception_fusion(
+            db, "creator", candidate_id, "confirm",
+            "Le Créateur confirme que la pomme entendue est bien l'objet montré.",
+        )
+        assert confirmed["status"] == "confirmed"
+        assert confirmed["world_knowledge_promoted"] is False
+        assert confirmed["evidence"]["human_review"]["decision"] == "confirm"
+
+        with pytest.raises(ValueError, match="déjà été examiné"):
+            review_perception_fusion(
+                db, "creator", candidate_id, "reject",
+                "Tentative de remplacer la décision précédente.",
+            )
+
+        persisted = list_perception_fusions(db, "creator")
+        assert persisted[0]["status"] == "confirmed"
+        assert persisted[0]["evidence"]["human_review"]["decision"] == "confirm"
+        # A reviewed co-occurrence remains evidence, not an automatically
+        # created entity or learned word-to-image association.
+        assert db.execute(
+            "SELECT COUNT(*) FROM word_visual_associations"
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_cross_modal_review_isolated_between_users(tmp_path):
+    db = open_db(tmp_path / "fusion-review-isolation.sqlite3")
+    try:
+        candidate_id = _make_fusion_candidate(db)
+        with pytest.raises(ValueError, match="introuvable"):
+            review_perception_fusion(
+                db, "another-user", candidate_id, "confirm",
+                "L'autre utilisateur ne peut pas examiner ce candidat.",
+            )
+        assert list_perception_fusions(db, "creator")[0]["status"] == "candidate"
+        assert list_perception_fusions(db, "another-user") == []
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    ("decision", "evidence"),
+    [
+        ("maybe", "Une décision non prise en charge."),
+        ("confirm", ""),
+        ("reject", "   "),
+        ("reject", "x" * 1001),
+        (None, "Une preuve suffisamment détaillée."),
+        ("confirm", None),
+    ],
+)
+def test_cross_modal_review_rejects_invalid_decisions_and_evidence(
+    tmp_path, decision, evidence
+):
+    db = open_db(tmp_path / "fusion-review-invalid.sqlite3")
+    try:
+        candidate_id = _make_fusion_candidate(db)
+        with pytest.raises(ValueError):
+            review_perception_fusion(
+                db, "creator", candidate_id, decision, evidence
+            )
+        assert list_perception_fusions(db, "creator")[0]["status"] == "candidate"
     finally:
         db.close()

@@ -20,7 +20,7 @@ def _now() -> str:
 
 
 def _finite(value: Any, name: str, minimum: float, maximum: float) -> float:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} invalide.")
     try:
         number = float(value)
@@ -32,7 +32,11 @@ def _finite(value: Any, name: str, minimum: float, maximum: float) -> float:
 
 
 def _text(value: Any, name: str, limit: int, required: bool = False) -> str:
-    result = str(value or "").strip()
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{name} doit être du texte.")
+    result = value.strip()
     if required and not result:
         raise ValueError(f"{name} est obligatoire.")
     if len(result) > limit:
@@ -136,6 +140,7 @@ def start_location_session(
 def stop_location_session(
     db: sqlite3.Connection, user_id: str, session_id: str
 ) -> dict[str, Any]:
+    session_id = _text(session_id, "Session", 80, True)
     row = db.execute(
         "SELECT * FROM spatial_sessions WHERE session_id=? AND user_id=?",
         (session_id, user_id),
@@ -157,6 +162,7 @@ def record_location(
     altitude_m: Any = None, heading_deg: Any = None, speed_mps: Any = None,
     recorded_at: str = ""
 ) -> dict[str, Any]:
+    session_id = _text(session_id, "Session", 80, True)
     session = db.execute(
         """SELECT session_id FROM spatial_sessions
            WHERE session_id=? AND user_id=? AND consented=1 AND ended_at IS NULL""",
@@ -224,12 +230,12 @@ def _distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
 def record_place_observation(
     db: sqlite3.Connection, user_id: str, description: str,
     latitude: Any = None, longitude: Any = None,
-    label: str = "", visual_signature: str = "", confidence: Any = 0.35,
+    label: str = "", visual_signature: str = "", confidence: Any = 0.0,
     session_id: str = ""
 ) -> dict[str, Any]:
     description = _text(description, "Description visuelle", 4000, True)
     label = _text(label, "Nom du lieu", 120)
-    raw_signature = str(visual_signature or description).strip()[:1000]
+    raw_signature = description if visual_signature is None or visual_signature == "" else visual_signature
     signature = _text(raw_signature, "Signature visuelle", 1000) or description.casefold()[:1000]
     conf = _finite(confidence, "Confiance", 0, 1)
     lat = None if latitude is None else _finite(latitude, "Latitude", -90, 90)

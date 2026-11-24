@@ -3952,6 +3952,13 @@ def _safe_dict(value):
         return value.dict()
     return {}
 
+async def _json_object(request: Request) -> dict:
+    """Decode a request body and reject arrays/scalars before route field access."""
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Un objet JSON est attendu.")
+    return data
+
 def _model_value(model, name, default=None):
     if isinstance(model, dict):
         return model.get(name, default)
@@ -4594,12 +4601,12 @@ async def api_world_map(auth=Depends(require_auth)):
 @app.post("/api/world/location/session")
 async def api_start_location_session(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             session = start_location_session(
                 db, user_id, data.get("consented") is True,
-                str(data.get("device_label", ""))
+                data.get("device_label", "")
             )
         return {"ok": True, "session": session}
     except ValueError as exc:
@@ -4609,11 +4616,11 @@ async def api_start_location_session(request: Request, auth=Depends(require_auth
 @app.post("/api/world/location/session/stop")
 async def api_stop_location_session(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = stop_location_session(
-                db, user_id, str(data.get("session_id", ""))
+                db, user_id, data.get("session_id", "")
             )
         return {"ok": True, "session": result}
     except ValueError as exc:
@@ -4623,15 +4630,15 @@ async def api_stop_location_session(request: Request, auth=Depends(require_auth)
 @app.post("/api/world/location")
 async def api_record_world_location(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = record_location(
-                db, user_id, str(data.get("session_id", "")),
+                db, user_id, data.get("session_id", ""),
                 data.get("latitude"), data.get("longitude"),
                 data.get("accuracy_m"), data.get("altitude_m"),
                 data.get("heading_deg"), data.get("speed_mps"),
-                str(data.get("recorded_at", "")),
+                data.get("recorded_at", ""),
             )
         return {"ok": True, "location": result}
     except ValueError as exc:
@@ -4641,16 +4648,16 @@ async def api_record_world_location(request: Request, auth=Depends(require_auth)
 @app.post("/api/world/places/observe")
 async def api_record_place_observation(request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             place = record_place_observation(
-                db, user_id, str(data.get("description", "")),
+                db, user_id, data.get("description", ""),
                 data.get("latitude"), data.get("longitude"),
-                str(data.get("label", "")),
-                str(data.get("visual_signature", "")),
-                data.get("confidence", 0.35),
-                str(data.get("session_id", "")),
+                data.get("label", ""),
+                data.get("visual_signature", ""),
+                data.get("confidence", 0.0),
+                data.get("session_id", ""),
             )
         return {"ok": True, "place": place}
     except ValueError as exc:
@@ -4660,12 +4667,12 @@ async def api_record_place_observation(request: Request, auth=Depends(require_au
 @app.post("/api/world/places/{place_id}/confirm")
 async def api_confirm_world_place(place_id: str, request: Request, auth=Depends(require_auth)):
     user_id = _authenticated_user(auth)
-    data = await request.json()
+    data = await _json_object(request)
     try:
         with db_connection() as db:
             result = confirm_place_identity(
                 db, user_id, place_id,
-                str(data.get("label", "")), str(data.get("evidence", "")),
+                data.get("label", ""), data.get("evidence", ""),
             )
         return {"ok": True, "place": result}
     except ValueError as exc:
@@ -5177,7 +5184,7 @@ async def api_vision_analyze(
                 db, user_id, answer,
                 data.get("latitude"), data.get("longitude"),
                 str(data.get("place_label", "")), answer, 0.35,
-                str(data.get("session_id", "")),
+                data.get("session_id", ""),
             )
             db.commit()
 

@@ -49,7 +49,7 @@ def test_audit_excludes_malformed_confidence_instead_of_using_neutral_default():
 def test_audit_reports_insufficient_confidence_when_every_value_is_malformed():
     db = make_db()
     insert_trace(db, "unknown")
-    insert_trace(db, float("nan"))
+    insert_trace(db, float("inf"))
 
     result = run_metacognitive_audit(db, "creator")
 

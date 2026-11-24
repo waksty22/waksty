@@ -97,6 +97,9 @@ from learning.sensory import (
 from learning.live_visual_observation import (
     build_live_visual_observation,
     build_gemini_visual_observation,
+    build_live_visual_analysis_observation,
+    is_explicit_live_visual_question,
+    live_visual_frame_is_fresh,
     live_visual_observation_due,
 )
 from learning.object_learning import (
@@ -6067,6 +6070,9 @@ async def websocket_endpoint(
         "last_visual_observation_at": 0.0,
         "live_session_id": secrets.token_urlsafe(12),
         "visual_frame_sequence": 0,
+        "last_visual_analysis_frame_sequence": 0,
+        "last_camera_mime_type": "image/jpeg",
+        "last_camera_frame_at": 0.0,
         "repeatable_words": set(),
         "brain_snapshot_fingerprint": "",
         "brain_refresh_version": 0,
@@ -6247,6 +6253,8 @@ async def websocket_endpoint(
                                 }
                             }
                         }
+                        live_turn_state["last_camera_mime_type"] = mime_type
+                        live_turn_state["last_camera_frame_at"] = time.monotonic()
                         # Keep session/frame provenance for each persisted receipt.
                         # The image itself is never written to the memory database.
                         live_turn_state["visual_frame_sequence"] += 1
@@ -6490,6 +6498,59 @@ async def websocket_endpoint(
                             })
 
                         confirmed_user_text = live_turn_state["user"].strip()
+                        current_frame_sequence = live_turn_state["visual_frame_sequence"]
+                        previous_analysis_sequence = live_turn_state[
+                            "last_visual_analysis_frame_sequence"
+                        ]
+                        if (
+                            assistant_text
+                            and current_frame_sequence > previous_analysis_sequence
+                            and is_explicit_live_visual_question(confirmed_user_text)
+                            and live_visual_frame_is_fresh(
+                                time.monotonic(),
+                                live_turn_state["last_camera_frame_at"],
+                            )
+                        ):
+                            visual_analysis = build_live_visual_analysis_observation(
+                                assistant_text,
+                                GEMINI_LIVE_MODEL,
+                                confirmed_user_text,
+                                live_turn_state["live_session_id"],
+                                current_frame_sequence,
+                                live_turn_state["last_camera_mime_type"],
+                            )
+                            if visual_analysis is not None:
+                                try:
+                                    with db_connection() as visual_db:
+                                        saved_visual_analysis = record_observation(
+                                            visual_db,
+                                            user_id,
+                                            visual_analysis["modality"],
+                                            visual_analysis["content"],
+                                            visual_analysis["source"],
+                                            confidence=visual_analysis["confidence"],
+                                            metadata=visual_analysis["metadata"],
+                                        )
+                                        link_temporally_cooccurring_observation(
+                                            visual_db,
+                                            user_id,
+                                            saved_visual_analysis["observation_id"],
+                                        )
+                                        visual_db.commit()
+                                    live_turn_state[
+                                        "last_visual_analysis_frame_sequence"
+                                    ] = current_frame_sequence
+                                    log.info(
+                                        "[GEMINI LIVE] Analyse visuelle explicitement demandée "
+                                        "enregistrée (session=%s, frame=%s)",
+                                        live_turn_state["live_session_id"],
+                                        current_frame_sequence,
+                                    )
+                                except Exception:
+                                    log.exception(
+                                        "[GEMINI LIVE] Échec de persistance de l'analyse visuelle"
+                                    )
+
                         if confirmed_user_text:
                             try:
                                 live_emotions = update_emotions_once(

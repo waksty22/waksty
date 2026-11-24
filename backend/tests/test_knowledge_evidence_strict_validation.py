@@ -71,3 +71,35 @@ def test_perception_review_accepts_real_integer_id_only_after_lookup():
     assert result["status"] == "confirmed"
     assert result["world_knowledge_promoted"] is False
     db.close()
+
+
+
+def test_invalid_assessment_score_is_not_fabricated_as_zero():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE memories_v19 (
+            id INTEGER PRIMARY KEY, user_id TEXT, category TEXT, content TEXT,
+            source_type TEXT, confidence REAL, importance INTEGER,
+            created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE autobiographical_events (
+            id INTEGER PRIMARY KEY, user_id TEXT, actor TEXT, event_type TEXT,
+            content TEXT, happened_at TEXT, source_conversation_id INTEGER
+        );
+        CREATE TABLE competency_tests (
+            id INTEGER PRIMARY KEY, user_id TEXT, test_name TEXT, passed,
+            score, details TEXT, tested_at TEXT
+        );
+        INSERT INTO competency_tests
+            (id,user_id,test_name,passed,score,details,tested_at)
+        VALUES
+            (1,'creator','vocabulaire',1,'score inconnu',
+             '{"source":"supervised_assessment","supervisor_approved":true}',
+             '2026-11-24T00:00:00+00:00');
+    """)
+    result = retrieve_acquired_knowledge(db, "creator")
+    assessment = result["items"][0]
+    assert assessment["status"] == "supervised_assessment_not_validated"
+    assert assessment["score"] is None
+    db.close()

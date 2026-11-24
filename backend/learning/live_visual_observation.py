@@ -5,6 +5,7 @@ that the image was semantically understood.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 LIVE_VISUAL_OBSERVATION_INTERVAL_SECONDS = 5.0
@@ -20,9 +21,16 @@ def live_visual_observation_due(now: Any, last_recorded_at: Any) -> bool:
         or not isinstance(last_recorded_at, (int, float))
     ):
         return False
-    if now < 0 or last_recorded_at < 0:
+    try:
+        current = float(now)
+        previous = float(last_recorded_at)
+    except (OverflowError, TypeError, ValueError):
         return False
-    return now - last_recorded_at >= LIVE_VISUAL_OBSERVATION_INTERVAL_SECONDS
+    if not math.isfinite(current) or not math.isfinite(previous):
+        return False
+    if current < 0 or previous < 0 or current < previous:
+        return False
+    return current - previous >= LIVE_VISUAL_OBSERVATION_INTERVAL_SECONDS
 
 
 def build_live_visual_observation(
@@ -131,10 +139,16 @@ def live_visual_frame_is_fresh(
         for value in values
     ):
         return False
-    if now < 0 or last_frame_at <= 0 or max_age_seconds <= 0:
+    try:
+        current, previous, max_age = (float(value) for value in values)
+    except (OverflowError, TypeError, ValueError):
         return False
-    age = now - last_frame_at
-    return 0 <= age <= max_age_seconds
+    if not all(math.isfinite(value) for value in (current, previous, max_age)):
+        return False
+    if current < 0 or previous <= 0 or max_age <= 0 or current < previous:
+        return False
+    age = current - previous
+    return age <= max_age
 
 
 def is_explicit_live_visual_question(question: Any) -> bool:

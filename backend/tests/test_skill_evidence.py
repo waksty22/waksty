@@ -1,9 +1,14 @@
+import json
+import sqlite3
 import sys
+from contextlib import contextmanager
+
 import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from cognition.engine import calculate_cognitive_profile
 from cognition.skill_evidence import build_validated_skill_data, normalize_evidence_text
 
 
@@ -338,3 +343,80 @@ def test_malformed_branch_definition_is_ignored_safely():
     profile, count = build_validated_skill_data([row], catalog=catalog)
     assert profile == {}
     assert count == 0
+
+
+
+def _install_competency_test_database(monkeypatch, tmp_path, *, create_table=True):
+    database_path = tmp_path / "cognitive-profile.sqlite3"
+    connection = sqlite3.connect(database_path)
+    try:
+        if create_table:
+            connection.execute(
+                """
+                CREATE TABLE competency_tests (
+                    id INTEGER PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    test_name TEXT NOT NULL,
+                    passed INTEGER NOT NULL,
+                    score REAL NOT NULL,
+                    details TEXT NOT NULL,
+                    tested_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO competency_tests
+                    (user_id, test_name, passed, score, details, tested_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "creator",
+                    "mots:vocabulaire",
+                    1,
+                    90.0,
+                    json.dumps({
+                        "source": "supervised_assessment",
+                        "supervisor_approved": True,
+                        "evidence": "Chappie a correctement répété dix mots distincts.",
+                    }),
+                    "2026-11-24T10:00:00Z",
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    @contextmanager
+    def database_connection():
+        db = sqlite3.connect(database_path)
+        db.row_factory = sqlite3.Row
+        try:
+            yield db
+        finally:
+            db.close()
+
+    import server
+
+    monkeypatch.setattr(server, "db_connection", database_connection)
+
+
+def test_calculate_cognitive_profile_uses_validated_competency_evidence(
+    monkeypatch, tmp_path
+):
+    _install_competency_test_database(monkeypatch, tmp_path)
+
+    profile = calculate_cognitive_profile("creator", force_recompute=True)
+
+    assert profile["global_maturity"] > 0
+    assert profile["development"]["developed_branches"] == 1
+    assert profile["systems"]["mots"]["sub_branches"]["vocabulaire"]["level"] > 0
+
+
+def test_calculate_cognitive_profile_does_not_hide_schema_errors(
+    monkeypatch, tmp_path
+):
+    _install_competency_test_database(monkeypatch, tmp_path, create_table=False)
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        calculate_cognitive_profile("creator", force_recompute=True)

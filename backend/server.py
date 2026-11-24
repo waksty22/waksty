@@ -1458,8 +1458,8 @@ class GoalRequest(BaseModel):
 class GoalStepRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    goal_id: Optional[StrictInt] = None
-    step_id: Optional[StrictInt] = None
+    goal_id: Optional[StrictInt] = Field(default=None, gt=0)
+    step_id: Optional[StrictInt] = Field(default=None, gt=0)
     completed: StrictBool = True
     evidence: str = Field(default="Progression validée", min_length=1, max_length=2000)
 

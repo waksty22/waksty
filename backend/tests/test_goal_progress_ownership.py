@@ -96,3 +96,9 @@ def test_empty_goal_progress_stays_zero_and_active(goals_db):
     result = server.update_goal_progress(goals_db, "creator", goal_id)
     assert result["progress"] == 0.0
     assert result["status"] == "active"
+
+
+@pytest.mark.parametrize("bad_limit", [True, False, 1.5, "10", 0, 31])
+def test_memory_search_request_rejects_coerced_or_out_of_range_limits(bad_limit):
+    with pytest.raises(ValidationError):
+        server.MemorySearchRequest(query="souvenir", limit=bad_limit)

@@ -8,6 +8,7 @@ from memory.autobiographical import (
     init_autobiographical_tables,
     sync_autobiographical_events,
     search_autobiographical_events,
+    list_autobiographical_events,
 )
 
 
@@ -175,4 +176,76 @@ def test_autobiographical_search_uses_complete_tokens_not_substrings():
     assert len(results) == 1
     assert results[0]["id"] == 2
     assert results[0]["matched_terms"] == ["art"]
+    db.close()
+
+
+import pytest
+
+
+@pytest.mark.parametrize("bad_limit", [True, False, 1.5, "10", 0, -1])
+def test_autobiographical_memory_rejects_coerced_or_invalid_limits(bad_limit):
+    from memory.autobiographical import (
+        find_related_autobiographical_events,
+        list_autobiographical_events,
+        sync_autobiographical_events,
+    )
+
+    db = make_db()
+    with pytest.raises(ValueError):
+        sync_autobiographical_events(db, "creator", limit=bad_limit)
+    with pytest.raises(ValueError):
+        list_autobiographical_events(db, "creator", limit=bad_limit)
+    with pytest.raises(ValueError):
+        search_autobiographical_events(db, "creator", "souvenir", limit=bad_limit)
+    with pytest.raises(ValueError):
+        find_related_autobiographical_events(db, "creator", 1, limit=bad_limit)
+    assert db.execute("SELECT COUNT(*) FROM autobiographical_events").fetchone()[0] == 0
+    db.close()
+
+
+@pytest.mark.parametrize("bad_id", [True, False, 1.5, "1", 0, -1])
+def test_autobiographical_memory_rejects_coerced_identifiers(bad_id):
+    from memory.autobiographical import (
+        find_related_autobiographical_events,
+        list_autobiographical_events,
+    )
+
+    db = make_db()
+    add_event(db, 1, "creator", "user", "Un souvenir vérifiable.")
+    with pytest.raises(ValueError):
+        list_autobiographical_events(db, "creator", before_id=bad_id)
+    with pytest.raises(ValueError):
+        find_related_autobiographical_events(db, "creator", bad_id)
+    db.close()
+
+
+@pytest.mark.parametrize("bad_query", [123, True, [], {}])
+def test_autobiographical_search_rejects_non_text_queries(bad_query):
+    db = make_db()
+    with pytest.raises(ValueError, match="texte"):
+        search_autobiographical_events(db, "creator", bad_query)
+    db.close()
+
+
+@pytest.mark.parametrize("bad_user", [None, 123, True, "", "   ", "x" * 81])
+def test_autobiographical_memory_rejects_invalid_user_ids(bad_user):
+    from memory.autobiographical import autobiographical_statistics
+
+    db = make_db()
+    with pytest.raises(ValueError, match="utilisateur"):
+        sync_autobiographical_events(db, bad_user)
+    with pytest.raises(ValueError, match="utilisateur"):
+        list_autobiographical_events(db, bad_user)
+    with pytest.raises(ValueError, match="utilisateur"):
+        search_autobiographical_events(db, bad_user, "souvenir")
+    with pytest.raises(ValueError, match="utilisateur"):
+        autobiographical_statistics(db, bad_user)
+    db.close()
+
+
+def test_autobiographical_sync_rejects_coerced_commit_flag():
+    db = make_db()
+    with pytest.raises(ValueError, match="booléen"):
+        sync_autobiographical_events(db, "creator", commit=1)
+    assert db.execute("SELECT COUNT(*) FROM autobiographical_events").fetchone()[0] == 0
     db.close()

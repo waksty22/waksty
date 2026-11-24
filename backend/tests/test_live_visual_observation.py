@@ -88,6 +88,9 @@ class LiveVisualObservationTests(unittest.TestCase):
         self.assertFalse(live_visual_observation_due(True, 0.0))
         self.assertFalse(live_visual_observation_due(2.0, 3.0))
         self.assertFalse(live_visual_observation_due(-1.0, 0.0))
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            self.assertFalse(live_visual_observation_due(invalid, 0.0))
+            self.assertFalse(live_visual_observation_due(10.0, invalid))
 
 
     def test_gemini_analysis_is_stored_with_explicit_unverified_provenance(self):
@@ -289,6 +292,11 @@ class LiveVisualObservationTests(unittest.TestCase):
         self.assertFalse(live_visual_frame_is_fresh(9.0, 10.0))
         self.assertFalse(live_visual_frame_is_fresh(20.0, 0.0))
         self.assertFalse(live_visual_frame_is_fresh(True, 10.0))
+        self.assertFalse(live_visual_frame_is_fresh(20.0, 10.0, float("inf")))
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            self.assertFalse(live_visual_frame_is_fresh(invalid, 10.0))
+            self.assertFalse(live_visual_frame_is_fresh(20.0, invalid))
+            self.assertFalse(live_visual_frame_is_fresh(20.0, 10.0, invalid))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from learning.live_visual_observation import (
     build_gemini_visual_observation,
     build_live_visual_analysis_observation,
     is_explicit_live_visual_question,
+    live_visual_frame_is_fresh,
     live_visual_observation_due,
 )
 
@@ -244,6 +245,15 @@ class LiveVisualObservationTests(unittest.TestCase):
         )
         for args in invalid_cases:
             self.assertIsNone(build_live_visual_analysis_observation(*args))
+
+
+    def test_live_visual_analysis_requires_a_fresh_camera_frame(self):
+        self.assertTrue(live_visual_frame_is_fresh(20.0, 10.0))
+        self.assertTrue(live_visual_frame_is_fresh(25.0, 10.0))
+        self.assertFalse(live_visual_frame_is_fresh(25.01, 10.0))
+        self.assertFalse(live_visual_frame_is_fresh(9.0, 10.0))
+        self.assertFalse(live_visual_frame_is_fresh(20.0, 0.0))
+        self.assertFalse(live_visual_frame_is_fresh(True, 10.0))
 
 
 if __name__ == "__main__":

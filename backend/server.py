@@ -5144,12 +5144,28 @@ async def api_vision_analyze(
         or data.get("image_base64")
     )
     image_bytes = _decode_data_url(image_value, MAX_CAMERA_IMAGE_BYTES)
-    question = str(
+    question_value = (
         data.get("question") or data.get("prompt")
         or "Observe cette image et relève uniquement les éléments visuellement perceptibles."
-    ).strip()
+    )
+    if not isinstance(question_value, str):
+        raise HTTPException(status_code=422, detail="La question visuelle doit être du texte.")
+    question = question_value.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="La question visuelle ne peut pas être vide.")
     if len(question) > 1000:
         raise HTTPException(status_code=400, detail="Question trop longue.")
+
+    place_label = data.get("place_label", "")
+    session_id = data.get("session_id", "")
+    if place_label is None:
+        place_label = ""
+    if session_id is None:
+        session_id = ""
+    if not isinstance(place_label, str):
+        raise HTTPException(status_code=422, detail="Le nom du lieu doit être du texte.")
+    if not isinstance(session_id, str):
+        raise HTTPException(status_code=422, detail="L'identifiant de session doit être du texte.")
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=503, detail="Clé Gemini non configurée.")
 
@@ -5216,8 +5232,8 @@ async def api_vision_analyze(
             place_observation = record_place_observation(
                 db, user_id, answer,
                 data.get("latitude"), data.get("longitude"),
-                str(data.get("place_label", "")), answer, 0.35,
-                data.get("session_id", ""),
+                place_label, answer, 0.0,
+                session_id,
             )
             db.commit()
 

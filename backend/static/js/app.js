@@ -130,18 +130,83 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.loadSensoryObservations = async function() {
         const token = getToken();
+        const output = document.getElementById("sensoryHistory");
+        if (!output) return;
         try {
             const data = await apiCall("/api/senses/observations", {
                 headers: { "Authorization": "Bearer " + token }
             });
-            const output = document.getElementById("sensoryHistory");
-            if (output) output.textContent = (data.observations || []).map(item =>
-                "[" + item.modality + "] " + item.content
-            ).join("\n\n") || "Aucune expérience sensorielle enregistrée.";
+            output.replaceChildren();
+            const observations = Array.isArray(data.observations) ? data.observations : [];
+            if (!observations.length) {
+                output.textContent = "Aucune expérience sensorielle enregistrée.";
+            } else {
+                observations.forEach(item => {
+                    const card = document.createElement("div");
+                    card.className = "panel";
+                    card.style.marginTop = "10px";
+
+                    const heading = document.createElement("h5");
+                    const modality = item.modality === "vision" ? "Vision" : "Audio";
+                    heading.textContent = modality + " · " + String(item.source || "source inconnue");
+                    card.appendChild(heading);
+
+                    const content = document.createElement("p");
+                    content.textContent = String(item.content || "Observation vide.");
+                    card.appendChild(content);
+
+                    const metadata = item.metadata && typeof item.metadata === "object"
+                        ? item.metadata : {};
+                    if (item.modality === "vision") {
+                        const provenance = document.createElement("p");
+                        provenance.className = "muted";
+                        const details = [];
+                        if (metadata.model) details.push("Modèle : " + String(metadata.model));
+                        if (metadata.session_id) details.push("Session : " + String(metadata.session_id));
+                        if (Number.isSafeInteger(metadata.frame_sequence)) {
+                            details.push("Trame : " + String(metadata.frame_sequence));
+                        }
+                        if (metadata.semantic_analysis_performed === true) {
+                            details.push("Analyse sémantique effectuée");
+                        } else {
+                            details.push("Réception technique uniquement");
+                        }
+                        if (metadata.human_review_required === true) {
+                            details.push("Validation humaine requise");
+                        }
+                        provenance.textContent = details.join(" · ");
+                        card.appendChild(provenance);
+
+                        if (
+                            metadata.semantic_analysis_performed === true
+                            && metadata.human_review_required === true
+                            && metadata.is_learned_fact === false
+                            && typeof item.observation_id === "string"
+                            && item.observation_id
+                        ) {
+                            const select = document.createElement("button");
+                            select.type = "button";
+                            select.className = "secondary";
+                            select.textContent = "Sélectionner pour associer un mot";
+                            select.addEventListener("click", () => {
+                                const field = document.getElementById("visionObservationId");
+                                const status = document.getElementById("visionObservationStatus");
+                                if (field) field.value = item.observation_id;
+                                if (status) {
+                                    status.textContent =
+                                        "Observation " + item.observation_id
+                                        + " sélectionnée. Enseigne ou vérifie le mot avant de l'associer.";
+                                }
+                            });
+                            card.appendChild(select);
+                        }
+                    }
+                    output.appendChild(card);
+                });
+            }
             if (window.loadPerceptionFusions) await window.loadPerceptionFusions();
         } catch (error) {
-            const output = document.getElementById("sensoryHistory");
-            if (output) output.textContent = "Erreur : " + error.message;
+            output.textContent = "Erreur : " + error.message;
         }
     };
 

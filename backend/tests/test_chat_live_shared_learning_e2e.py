@@ -492,8 +492,11 @@ def test_live_camera_frame_reaches_provider_and_receipt_enters_shared_brain(
     refreshed_context = json.dumps(refresh_payloads[-1], ensure_ascii=False)
     assert "OBSERVATIONS SENSORIELLES" in refreshed_context
     assert "live_camera_frame_received_by_server" in refreshed_context
+    assert "gemini_live_visual_analysis" in refreshed_context
+    assert "Je peux décrire ce que la caméra me transmet." in refreshed_context
     assert image_data not in refreshed_context
     assert "semantic_analysis_performed" in refreshed_context
+    assert "human_review_required" in refreshed_context
 
 
 def test_live_camera_frame_is_not_saved_as_analysis_for_nonvisual_question(

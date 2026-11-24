@@ -1416,7 +1416,7 @@ class MemorySearchRequest(BaseModel):
 
     user_id: str = "creator"  
     query: str = Field(default="", max_length=500)  
-    limit: int = Field(default=10, ge=1, le=30)
+    limit: StrictInt = Field(default=10, ge=1, le=30)
 
 class TursoMigrationApplyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

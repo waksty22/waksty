@@ -286,7 +286,16 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
         encoded_rows: list[str] = []
         omitted_count = 0
         for index, row in enumerate(rows):
-            encoded = json.dumps(row, ensure_ascii=False, default=str)
+            try:
+                encoded = json.dumps(
+                    row, ensure_ascii=False, allow_nan=False, default=str
+                )
+            except (TypeError, ValueError, OverflowError):
+                # Python's JSON encoder otherwise emits non-standard NaN and
+                # Infinity tokens. A corrupt row must not poison the shared
+                # context consumed by both Chat and Live.
+                omitted_count += 1
+                continue
             candidate_rows = encoded_rows + [encoded]
             section = f"{title}:\n[" + ",\n".join(candidate_rows) + "]"
             candidate_parts = parts + [section, stats_section]
@@ -294,7 +303,7 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
             if candidate_length <= MAX_CONTEXT_CHARS - 120:
                 encoded_rows.append(encoded)
             else:
-                omitted_count = len(rows) - index
+                omitted_count += len(rows) - index
                 break
 
         if encoded_rows:

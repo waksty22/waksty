@@ -20,7 +20,7 @@ def _now() -> str:
 
 
 def _finite(value: Any, name: str, minimum: float, maximum: float) -> float:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} invalide.")
     try:
         number = float(value)
@@ -32,7 +32,11 @@ def _finite(value: Any, name: str, minimum: float, maximum: float) -> float:
 
 
 def _text(value: Any, name: str, limit: int, required: bool = False) -> str:
-    result = str(value or "").strip()
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{name} doit être du texte.")
+    result = value.strip()
     if required and not result:
         raise ValueError(f"{name} est obligatoire.")
     if len(result) > limit:
@@ -224,7 +228,7 @@ def _distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
 def record_place_observation(
     db: sqlite3.Connection, user_id: str, description: str,
     latitude: Any = None, longitude: Any = None,
-    label: str = "", visual_signature: str = "", confidence: Any = 0.35,
+    label: str = "", visual_signature: str = "", confidence: Any = 0.0,
     session_id: str = ""
 ) -> dict[str, Any]:
     description = _text(description, "Description visuelle", 4000, True)

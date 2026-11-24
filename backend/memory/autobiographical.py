@@ -159,20 +159,6 @@ def sync_autobiographical_events(
                 AND between_turn.id > user_message.id
                 AND between_turn.id < assistant_message.id
           )
-          AND NOT EXISTS (
-              SELECT 1
-              FROM conversations previous
-              WHERE previous.user_id=user_message.user_id
-                AND previous.id < user_message.id
-                AND previous.role='user'
-                AND NOT EXISTS (
-                    SELECT 1
-                    FROM conversations between_previous
-                    WHERE between_previous.user_id=user_message.user_id
-                      AND between_previous.id > previous.id
-                      AND between_previous.id < user_message.id
-                )
-          )
         """,
         (user_id,),
     )

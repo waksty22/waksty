@@ -3395,13 +3395,9 @@ async def run_brain(
     # Une conversation n'est pas une preuve d'apprentissage.
     # Les compétences progressent uniquement après validation explicite.
 
+    # Retrieve context before generation, but do not persist a cognitive
+    # doubt trace until the assistant reply has been prepared and saved.
     relevant = retrieve_memories(user_id, message, 6)
-    record_memory_relevance_doubt_trace(
-        user_id,
-        message,
-        channel="chat",
-        relevant_memories=relevant,
-    )
 
     with db_connection() as db:  
         rows = db.execute(  
@@ -3551,6 +3547,21 @@ async def run_brain(
         reply,
         source="conversation",
     )
+
+    # Match Gemini Live semantics: only a completed, persisted chat turn
+    # may create a memory-relevance doubt trace. A trace failure must not
+    # turn an otherwise successful response into a failed chat request.
+    try:
+        record_memory_relevance_doubt_trace(
+            user_id,
+            message,
+            channel="chat",
+            relevant_memories=relevant,
+        )
+    except Exception:
+        log.exception(
+            "[CHAT] Échec d'enregistrement du doute fondé sur la mémoire"
+        )
 
     return {
         "reply": reply,

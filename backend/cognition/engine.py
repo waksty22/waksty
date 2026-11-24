@@ -50,6 +50,7 @@ import time
 from typing import Any, Dict, Optional
 
 from cognition.catalog import COGNITIVE_CATALOG
+from cognition.skill_evidence import build_validated_skill_data
 
 
 # ============================================================
@@ -1207,26 +1208,27 @@ def calculate_cognitive_profile(
     Fonction utilitaire globale pour calculer ou récupérer le profil cognitif.
     Permet de résoudre l'importation attendue par server.py.
     """
+    user_id = _normalize_user_id(user_id)
+
     if db_skills_data is None:
-        # Récupération automatique depuis la base de données si aucun dictionnaire n'est passé
-        from server import db_connection # type: ignore
-        try:
-            with db_connection() as db:
-                rows = db.execute(
-                    "SELECT skill_name, level, xp, evidence FROM skills WHERE user_id=?",
-                    (user_id,)
-                ).fetchall()
-                db_skills_data = {}
-                for row in rows:
-                    db_skills_data[row["skill_name"]] = {
-                        "default": {
-                            "level": row["level"],
-                            "xp": row["xp"],
-                            "confidence": 0.8
-                        }
-                    }
-        except Exception:
-            db_skills_data = {}
+        # Build profiles only from supervised, validated branch assessments.
+        # The legacy skills table is an aggregate summary, not branch evidence,
+        # and has no XP column. Do not hide database errors as an empty profile.
+        from server import db_connection  # type: ignore
+
+        with db_connection() as db:
+            rows = db.execute(
+                """
+                SELECT test_name, passed, score, details, tested_at
+                FROM competency_tests
+                WHERE user_id = ? AND passed = 1
+                ORDER BY tested_at ASC, id ASC
+                """,
+                (user_id,),
+            ).fetchall()
+        db_skills_data, _assessment_count = build_validated_skill_data(
+            [dict(row) for row in rows]
+        )
 
     return cognitive_engine.compute_cognitive_profile(
         user_id,

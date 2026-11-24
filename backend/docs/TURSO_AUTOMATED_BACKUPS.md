@@ -63,4 +63,60 @@ Il n'existe pas encore de procédure/outil général validé pour restaurer l'ar
 
 ### Dernière sauvegarde observée
 
-Le 19 novembre 2026, le workflow de sauvegarde a terminé avec succès : 42 tables et 81 lignes ont été exportées dans l'archive chiffrée, puis la vérification après empaquetage a réussi. L'artefact GitHub Actions observé était conservé jusqu'au 17 février 2027. Cette réussite ne change pas les limites de restauration décrites ci-dessus.
+Le 24 novembre 2026, l'exécution observée du workflow de sauvegarde a terminé avec succès : 42 tables et 108 lignes ont été exportées dans une archive chiffrée de 57 093 octets. La vérification après empaquetage a réussi et l'artefact était annoncé comme conservé jusqu'au 22 février 2027. Cette réussite ne change pas les limites de restauration décrites ci-dessus.
+
+
+## Procédure opérateur de restauration vers une base de récupération
+
+Cette procédure est un **exercice de reprise**, pas une autorisation de restaurer la production. Elle ne doit être exécutée qu'après préparation d'une base Turso de récupération indépendante.
+
+### 1. Préparer une cible distincte
+
+- Créer une nouvelle base Turso dédiée à la récupération, vide et indépendante.
+- Relever son hostname exact depuis Turso ; ne pas le déduire du nom de la base.
+- Vérifier que ce hostname est différent de celui de production `chappie-db` et de celui de la base de test E2E isolée.
+- Préparer un jeton d'accès limité à cette base de récupération.
+- Ne jamais réutiliser le jeton de production comme identifiant de connexion de destination.
+- Conserver l'URL de production uniquement comme valeur de comparaison d'identité, sans ouvrir de transaction d'écriture dessus.
+
+**Arrêt immédiat** si la cible n'est pas vide, si son hostname est ambigu, si elle correspond à la production ou si les secrets de récupération ne sont pas dédiés.
+
+### 2. Sélectionner et contrôler l'artefact
+
+- Choisir un run GitHub Actions précis et noter son identifiant.
+- Télécharger l'artefact `chappie-turso-backup-<run_id>` depuis ce run, pas depuis un artefact au nom similaire.
+- Vérifier que le ZIP contient exactement le fichier chiffré et son sidecar `.sha256`.
+- Vérifier le checksum du fichier chiffré, puis son authentification AES-GCM et son déchiffrement avec `BACKUP_ENCRYPTION_KEY`.
+- Exécuter la vérification logique locale avant toute connexion à la base de récupération.
+- Ne jamais afficher ni transmettre la clé de chiffrement dans les journaux ou dans une demande d'assistance.
+
+### 3. Restaurer uniquement dans la cible de récupération
+
+Le point d'entrée de restauration est `restore_encrypted_logical_backup` dans `backend/storage/logical_backup.py`, avec une transaction ouverte via le transport Hrana et l'adaptateur `HranaRestoreConnection`.
+
+Les trois identités doivent être renseignées explicitement :
+- `target_identity` : hostname réellement obtenu de la connexion de récupération ;
+- `expected_target_identity` : hostname exact confirmé par l'opérateur avant l'opération ;
+- `production_identity` : hostname de production utilisé uniquement pour refuser toute égalité avec la cible.
+
+Les deux premières identités doivent être strictement égales ; la cible doit être différente de la production. La fonction refuse aussi toute base cible contenant déjà des objets applicatifs. L'opération doit rester dans une seule transaction ; en cas d'erreur, effectuer un rollback et ne pas recommencer sur une cible dont l'état n'a pas été inspecté.
+
+### 4. Vérifier après restauration
+
+Conserver un rapport horodaté comprenant au minimum :
+- identifiant du run et nom de l'artefact ;
+- SHA-256 du fichier chiffré ;
+- hostname de la base de récupération (jamais de jeton) ;
+- résultat de l'authentification et de la vérification logique ;
+- nombre de tables et nombre total de lignes restaurées ;
+- vérification des clés étrangères ;
+- résultats des lectures applicatives en lecture seule sur les tables essentielles ;
+- résultat du rollback si une étape échoue.
+
+Comparer les compteurs restaurés au résumé de l'archive. Contrôler les contraintes et les lectures applicatives avec les outils de diagnostic en mode lecture seule. Une restauration réussie techniquement ne signifie pas que l'application doit être basculée vers cette base.
+
+### 5. Conditions avant toute automatisation
+
+Aucun workflow automatisé de restauration distante de l'artefact quotidien n'est encore déclaré opérationnel. Avant d'en créer un, il faudra disposer de secrets dédiés à la base de récupération, d'un hostname attendu obligatoire, d'une confirmation explicite de l'opérateur, d'un précontrôle de base vide et d'une protection empêchant toute destination de production. Le workflow de test E2E existant ne remplace pas cet exercice réel.
+
+**Interdictions permanentes pour les exercices :** ne pas utiliser `chappie-db` comme cible ; ne pas lancer de reset ; ne pas restaurer dans la base de test partagée sans autorisation spécifique ; ne pas basculer l'application vers la base de récupération automatiquement.

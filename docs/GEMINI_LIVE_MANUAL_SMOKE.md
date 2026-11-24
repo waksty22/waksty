@@ -40,7 +40,21 @@ This checklist verifies the real Gemini Live provider, microphone path, audio re
 - [ ] Confirm the tool call is received, executed once, and its result is returned to Gemini and the UI.
 - [ ] Do not test a tool that creates, deletes, resets, or modifies memories, goals, settings, or database records during this smoke test.
 
-## 4. Turn completion and persistence
+## 4. Live camera and visual-analysis provenance
+
+- [ ] Grant camera permission in the staging browser and start the Live camera stream.
+- [ ] Confirm the client sends camera frames to the same Live session; do not save image bytes in the memory database.
+- [ ] While a recent frame is being sent, ask explicitly: "Que vois-tu ?" or "Décris ce que tu vois."
+- [ ] Confirm Gemini Live returns its spoken/text response and the completed turn is recorded.
+- [ ] Refresh the sensory-observation list and verify exactly one `gemini_live_visual_analysis` observation for the completed visual question.
+- [ ] Verify its provenance includes the Live model, session ID, frame sequence, MIME type, question, and `gemini_live_output_transcription` channel.
+- [ ] Verify `semantic_analysis_performed=true`, `human_review_required=true`, `semantic_understanding_confirmed=false`, `is_learned_fact=false`, `image_bytes_persisted=false`, and confidence remains 0 (uncalibrated).
+- [ ] Confirm the post-turn shared-brain refresh contains the visual observation and provenance but not image bytes.
+- [ ] With the camera still active, ask an ordinary greeting. Confirm no new `gemini_live_visual_analysis` observation is created for that non-visual question.
+- [ ] Stop the camera, wait more than 15 seconds, then ask another visual question. Confirm no analysis is persisted from the stale frame.
+- [ ] In the UI, select the visual observation and submit a concrete evidence description only after the word has reached the required imitation stage. Confirm the association is recorded without automatically promoting the word to understood/usable or creating a world fact.
+
+## 5. Turn completion and persistence
 
 - [ ] Complete one Live turn containing a second unique test word.
 - [ ] Confirm the user transcript and assistant response appear once in conversation history.
@@ -49,7 +63,7 @@ This checklist verifies the real Gemini Live provider, microphone path, audio re
 - [ ] Confirm the completed Live word is present in the new Live context and can be retrieved through written Chat.
 - [ ] Confirm reconnect does not duplicate the prior conversation turn or learning event.
 
-## 5. Interrupted turn must remain history-only
+## 6. Interrupted turn must remain history-only
 
 - [ ] Begin speaking a third unique word, then interrupt or close the Live session before turn completion.
 - [ ] Confirm the partial transcript may remain in conversation history with interrupted provenance.
@@ -57,7 +71,7 @@ This checklist verifies the real Gemini Live provider, microphone path, audio re
 - [ ] Confirm the interrupted turn does not create a new mood event, affective snapshot, or confirmed audio sensory observation.
 - [ ] Reconnect with a fresh ticket. Confirm the completed words remain available but the interrupted word is absent from the learned vocabulary/context.
 
-## 6. Isolation, logs and cleanup
+## 7. Isolation, logs and cleanup
 
 - [ ] Verify that a separate isolated test identity cannot see the staging owner's vocabulary or transcript.
 - [ ] Review Render logs for setup, WebSocket, provider, and persistence errors.

@@ -143,3 +143,19 @@ def test_live_can_imitate_a_word_first_heard_in_the_same_confirmed_turn(
     )
     assert any(item.get("type") == "audio_stream" for item in messages)
     assert not any(item.get("type") == "speech_blocked" for item in messages)
+
+
+
+def test_live_does_not_emit_audio_when_conversation_persistence_fails(
+    monkeypatch, tmp_path
+):
+    import server
+
+    def fail_conversation_save(*args, **kwargs):
+        raise RuntimeError("synthetic persistence failure")
+
+    monkeypatch.setattr(server, "save_conversation_turn", fail_conversation_save)
+    messages = run_live_turn(monkeypatch, tmp_path, "bonjour")
+
+    assert not any(item.get("type") == "audio_stream" for item in messages)
+    assert not any(item.get("type") == "text" for item in messages)

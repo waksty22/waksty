@@ -3143,8 +3143,8 @@ def execute_tool(
                 raise ValueError("Le contenu du souvenir doit être du texte.")
             if not isinstance(category, str):
                 raise ValueError("La catégorie doit être du texte.")
-            if isinstance(importance, bool) or not isinstance(importance, int):
-                raise ValueError("L’importance doit être un entier.")
+            if isinstance(importance, bool) or not isinstance(importance, int) or not 1 <= importance <= 5:
+                raise ValueError("L’importance doit être un entier compris entre 1 et 5.")
             if not isinstance(source_type, str):
                 raise ValueError("La provenance doit être du texte.")
             if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):

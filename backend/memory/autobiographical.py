@@ -154,6 +154,13 @@ def sync_autobiographical_events(
           AND user_message.role='user'
           AND NOT EXISTS (
               SELECT 1
+              FROM conversations previous_same_user
+              WHERE previous_same_user.id=user_message.id - 1
+                AND previous_same_user.user_id=user_message.user_id
+                AND previous_same_user.role='user'
+          )
+          AND NOT EXISTS (
+              SELECT 1
               FROM conversations between_turn
               WHERE between_turn.user_id=user_message.user_id
                 AND between_turn.id > user_message.id

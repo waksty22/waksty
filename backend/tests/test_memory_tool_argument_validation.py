@@ -23,6 +23,8 @@ def test_execute_tool_rejects_non_object_arguments():
         {"category": []},
         {"importance": True},
         {"importance": "3"},
+        {"importance": 0},
+        {"importance": 6},
         {"source_type": {}},
         {"confidence": "0.8"},
         {"confidence": True},

@@ -6,6 +6,8 @@ from learning.live_visual_observation import (
     LIVE_VISUAL_OBSERVATION_INTERVAL_SECONDS,
     build_live_visual_observation,
     build_gemini_visual_observation,
+    build_live_visual_analysis_observation,
+    is_explicit_live_visual_question,
     live_visual_observation_due,
 )
 
@@ -197,6 +199,51 @@ class LiveVisualObservationTests(unittest.TestCase):
         self.assertFalse(saved[0]["metadata"]["semantic_understanding_confirmed"])
         self.assertTrue(saved[0]["metadata"]["human_review_required"])
         self.assertFalse(saved[0]["metadata"]["image_bytes_persisted"])
+
+
+    def test_live_visual_question_requires_explicit_visual_intent(self):
+        self.assertTrue(is_explicit_live_visual_question("Que vois-tu ?"))
+        self.assertTrue(is_explicit_live_visual_question("Décris-moi cette image."))
+        self.assertTrue(is_explicit_live_visual_question("What do you see?"))
+        self.assertFalse(is_explicit_live_visual_question("Bonjour Chappie."))
+        self.assertFalse(is_explicit_live_visual_question("Comment vas-tu ?"))
+        self.assertFalse(is_explicit_live_visual_question(""))
+
+    def test_live_visual_analysis_has_session_frame_and_review_provenance(self):
+        observation = build_live_visual_analysis_observation(
+            "Une forme rouge est visible à gauche.",
+            "gemini-3.1-flash-live-preview",
+            "Que vois-tu ?",
+            "session-123",
+            12,
+            "image/jpeg",
+        )
+        self.assertIsNotNone(observation)
+        self.assertEqual(observation["modality"], "vision")
+        self.assertEqual(observation["source"], "gemini_live_visual_analysis")
+        self.assertEqual(observation["confidence"], 0.0)
+        metadata = observation["metadata"]
+        self.assertEqual(metadata["session_id"], "session-123")
+        self.assertEqual(metadata["frame_sequence"], 12)
+        self.assertEqual(metadata["analysis_channel"], "gemini_live_output_transcription")
+        self.assertTrue(metadata["semantic_analysis_performed"])
+        self.assertFalse(metadata["semantic_understanding_confirmed"])
+        self.assertTrue(metadata["human_review_required"])
+        self.assertFalse(metadata["image_bytes_persisted"])
+        self.assertFalse(metadata["is_learned_fact"])
+
+    def test_live_visual_analysis_rejects_missing_or_invalid_provenance(self):
+        invalid_cases = (
+            ("", "gemini-live", "Que vois-tu ?", "session", 1, "image/jpeg"),
+            ("description", "", "Que vois-tu ?", "session", 1, "image/jpeg"),
+            ("description", "gemini-live", "Bonjour", "session", 1, "image/jpeg"),
+            ("description", "gemini-live", "Que vois-tu ?", "", 1, "image/jpeg"),
+            ("description", "gemini-live", "Que vois-tu ?", "session", 0, "image/jpeg"),
+            ("description", "gemini-live", "Que vois-tu ?", "session", True, "image/jpeg"),
+            ("description", "gemini-live", "Que vois-tu ?", "session", 1, "image/webp"),
+        )
+        for args in invalid_cases:
+            self.assertIsNone(build_live_visual_analysis_observation(*args))
 
 
 if __name__ == "__main__":

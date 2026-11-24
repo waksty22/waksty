@@ -31,15 +31,16 @@ def _text(value: Any, field: str, limit: int = MAX_TEXT) -> str:
 
 
 def _confidence(value: Any, field: str = "Confiance") -> float:
-    if isinstance(value, bool):
+    # Do not accept numeric strings or booleans as measured confidence.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} invalide.")
     try:
-        value = float(value)
+        number = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{field} invalide.") from exc
-    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
         raise ValueError(f"{field} doit être une valeur finie comprise entre 0 et 1.")
-    return value
+    return number
 
 
 def _user_id(value: Any) -> str:

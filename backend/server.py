@@ -2211,20 +2211,44 @@ def retrieve_memories(
             (user_id, limit),  
         ).fetchall()  
 
-        fallback_results = []  
+        fallback_results = []
 
-        for row in rows:  
-            item = dict(row)  
+        for row in rows:
+            item = dict(row)
 
-            try:  
-                item["tags"] = json.loads(item["tags"])  
-            except Exception:  
-                item["tags"] = []  
+            # Legacy rows have no trustworthy provenance metadata. Validate
+            # their stored fields and keep them explicitly unverified rather
+            # than presenting them to the brain as user-taught facts.
+            if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool):
+                continue
+            if not isinstance(item.get("content"), str) or not item["content"].strip():
+                continue
+            if not isinstance(item.get("category"), str):
+                continue
+            importance = item.get("importance")
+            if isinstance(importance, bool) or not isinstance(importance, int) or not 1 <= importance <= 5:
+                continue
+            access_count = item.get("access_count")
+            if isinstance(access_count, bool) or not isinstance(access_count, int) or access_count < 0:
+                continue
+            if any(
+                item.get(field) is not None and not isinstance(item.get(field), str)
+                for field in ("created_at", "updated_at")
+            ):
+                continue
 
-            item["source_type"] = "taught"  
-            item["confidence"] = 0.8  
-
-            fallback_results.append(item)  
+            try:
+                parsed_tags = json.loads(item.get("tags") or "[]")
+            except (ValueError, TypeError):
+                parsed_tags = []
+            safe_tags = (
+                [tag for tag in parsed_tags if isinstance(tag, str)]
+                if isinstance(parsed_tags, list) else []
+            )
+            item["tags"] = list(dict.fromkeys(["legacy_source_unverified", *safe_tags]))
+            item["source_type"] = "inferred"
+            item["confidence"] = 0.5
+            fallback_results.append(item)
 
         return fallback_results
 

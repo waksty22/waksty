@@ -464,3 +464,41 @@ def test_episodic_retrieval_matches_complete_tokens_not_substrings():
     assert results[0]["content"] == "L'art est un sujet différent."
     assert results[0]["relevance_score"] > 0
     db.close()
+
+
+
+def test_legacy_retrieval_fallback_never_promotes_unverified_rows_to_taught(monkeypatch):
+    from contextlib import contextmanager
+    import server
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+    db.execute("""
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, category TEXT NOT NULL,
+            content TEXT NOT NULL, importance INTEGER NOT NULL, tags TEXT NOT NULL,
+            access_count INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+    """)
+    db.executemany(
+        "INSERT INTO memories VALUES (?, 'creator', 'general', ?, 4, ?, 0, 't0', 't1')",
+        [
+            (1, "Souvenir historique non vérifié", json.dumps(["ancien"])),
+            (2, sqlite3.Binary(b"contenu corrompu"), "[]"),
+        ],
+    )
+
+    @contextmanager
+    def fake_db_connection():
+        yield db
+
+    monkeypatch.setattr(server, "db_connection", fake_db_connection)
+    results = server.retrieve_memories("creator", "", 5)
+
+    assert len(results) == 1
+    assert results[0]["content"] == "Souvenir historique non vérifié"
+    assert results[0]["source_type"] == "inferred"
+    assert results[0]["confidence"] == 0.5
+    assert "legacy_source_unverified" in results[0]["tags"]
+    db.close()

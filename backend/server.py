@@ -3193,7 +3193,9 @@ def execute_tool(
             return result
 
         if name == "search_autobiographical_events":
-            query = str(args.get("query", ""))[:200]
+            query = args.get("query", "")
+            if not isinstance(query, str):
+                raise ValueError("La recherche doit être du texte.")
             with db_connection() as autobiography_db:
                 sync_autobiographical_events(autobiography_db, user_id)
                 events = search_autobiographical_events(

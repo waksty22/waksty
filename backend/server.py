@@ -5781,7 +5781,7 @@ async def api_propose_causal_hypothesis(
     try:
         with db_connection() as db:
             result = propose_hypothesis(
-                db, user_id, int(data.get("observation_id")),
+                db, user_id, data.get("observation_id"),
                 data.get("statement"), data.get("predicted_effect"),
                 data.get("confidence", 0.3),
             )
@@ -5799,7 +5799,7 @@ async def api_plan_causal_experiment(
     try:
         with db_connection() as db:
             result = plan_experiment(
-                db, user_id, int(data.get("hypothesis_id")),
+                db, user_id, data.get("hypothesis_id"),
                 data.get("environment"), data.get("procedure"),
                 data.get("prediction"), data.get("supervisor_approved") is True,
             )

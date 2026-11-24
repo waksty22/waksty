@@ -50,3 +50,21 @@ def test_live_visual_observations_can_be_selected_for_supervised_word_associatio
     assert "innerHTML" not in sensory_ui
     assert 'id="sensoryHistory"' in html
     assert 'id="visionObservationId"' in html
+
+
+
+def test_word_visual_association_requires_user_supplied_evidence():
+    backend = Path(__file__).resolve().parents[1]
+    source = (backend / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    html = (backend / "static" / "index.html").read_text(encoding="utf-8")
+    start = source.index("window.associateVisionWord")
+    end = source.index("window.loadSensoryObservations", start)
+    association_ui = source[start:end]
+
+    assert 'getElementById("visionEvidence")' in association_ui
+    assert "evidence.length > 500" in association_ui
+    assert "evidence: evidence" in association_ui
+    assert "validée manuellement par le créateur" not in association_ui
+    assert 'id="visionEvidence"' in html
+    assert 'maxlength="500"' in html
+    assert "Preuve visuelle observée" in html

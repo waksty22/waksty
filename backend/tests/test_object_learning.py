@@ -329,3 +329,25 @@ def test_lower_confidence_object_observation_cannot_replace_stronger_evidence(db
         "confidence": pytest.approx(0.9),
         "evidence": "Enseignement détaillé du créateur.",
     }
+
+
+@pytest.mark.parametrize("confidence", ["0.8", "1", "0", True, None, {}, []])
+def test_object_property_rejects_coerced_confidence_without_writing(db, confidence):
+    add_recognized_object(db, "pomme")
+    with pytest.raises(ValueError, match="Confiance|confiance"):
+        teach_object_property(
+            db, "creator", "pomme", "couleur", "rouge",
+            confidence=confidence,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_properties").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("confidence", ["0.8", "1", "0", True, None, {}, []])
+def test_object_experience_rejects_coerced_confidence_without_writing(db, confidence):
+    add_recognized_object(db, "balle")
+    with pytest.raises(ValueError, match="Confiance|confiance"):
+        record_object_experience(
+            db, "creator", "balle", "lancer", "la balle roule",
+            confidence=confidence,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_experiences").fetchone()[0] == 0

@@ -135,3 +135,30 @@ def test_place_observation_cannot_attach_another_users_or_closed_session(db):
             db, "creator", "Un autre bâtiment.",
             48.1, -2.8,
         )
+
+
+def test_spatial_text_fields_reject_implicit_string_coercion(db):
+    for bad in (7, True, [], {}):
+        with pytest.raises(ValueError, match="texte"):
+            start_location_session(db, "creator", True, bad)
+    session = start_location_session(db, "creator", True)
+    with pytest.raises(ValueError, match="Description visuelle doit être du texte"):
+        record_place_observation(db, "creator", 123, session_id=session["session_id"])
+    with pytest.raises(ValueError, match="Nom du lieu doit être du texte"):
+        record_place_observation(db, "creator", "Une place", label=123)
+    with pytest.raises(ValueError, match="Signature visuelle doit être du texte"):
+        record_place_observation(db, "creator", "Une place", visual_signature=123)
+
+
+def test_spatial_numeric_fields_reject_numeric_strings(db):
+    session = start_location_session(db, "creator", True)
+    sid = session["session_id"]
+    with pytest.raises(ValueError, match="Latitude invalide"):
+        record_location(db, "creator", sid, "48.1", -2.8)
+    with pytest.raises(ValueError, match="Confiance invalide"):
+        record_place_observation(db, "creator", "Un lieu", confidence="0.9")
+
+
+def test_missing_place_confidence_defaults_to_unrated_zero(db):
+    place = record_place_observation(db, "creator", "Description sans score")
+    assert place["confidence"] == 0.0

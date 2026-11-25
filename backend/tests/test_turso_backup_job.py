@@ -270,7 +270,7 @@ def test_turso_backup_http_endpoint_returns_verified_archive(monkeypatch):
                 encrypted_path.suffix + ".sha256"
             )
             encrypted_path.write_bytes(encrypted)
-            checksum_path.write_text(digest + "  " + encrypted_path.name + "\\n")
+            checksum_path.write_text(digest + "  " + encrypted_path.name + "\n")
             verification = verify_encrypted_logical_backup(
                 encrypted_path, "test-only-backup-key-not-production"
             )

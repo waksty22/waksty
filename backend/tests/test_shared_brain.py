@@ -524,3 +524,43 @@ def test_query_prioritizes_older_relevant_spatial_places_and_linked_gps_samples(
     assert relevant["statistics"]["totals"]["place_memories"] == 13
     assert all(row["user_id"] == "creator" for row in relevant["place_memories"])
     db.close()
+
+
+def test_query_prioritizes_older_autobiographical_experiences_for_live_shared_context():
+    db = make_db()
+    db.executescript("""
+        CREATE TABLE autobiographical_events (
+            id INTEGER PRIMARY KEY, user_id TEXT, source_conversation_id INTEGER,
+            actor TEXT, event_type TEXT, content TEXT, happened_at TEXT,
+            importance INTEGER, created_at TEXT
+        );
+    """)
+    db.execute(
+        "INSERT INTO autobiographical_events VALUES "
+        "(1,'creator',1,'user','user_statement',"
+        "'J ai appris a reconnaître la mairie en pierre près du vieux pont',"
+        "'2000-01-01',4,'2000-01-01')"
+    )
+    for index in range(12):
+        db.execute(
+            "INSERT INTO autobiographical_events VALUES (?,?,?,?,?,?,?,?,?)",
+            (index + 2, "creator", index + 2, "user", "user_statement",
+             f"Conversation récente sans rapport numéro {index}",
+             f"2026-11-{index+1:02d}", 2, f"2026-11-{index+1:02d}"),
+        )
+    db.execute(
+        "INSERT INTO autobiographical_events VALUES "
+        "(99,'other-user',99,'user','user_statement','mairie en pierre',"
+        "'2099-01-01',5,'2099-01-01')"
+    )
+
+    recent = get_shared_brain_snapshot(db, "creator", limit=8)
+    assert all(row["id"] != 1 for row in recent["autobiographical_events"])
+
+    relevant = get_shared_brain_snapshot(
+        db, "creator", limit=8, query="où se trouve la mairie en pierre"
+    )
+    assert relevant["autobiographical_events"][0]["id"] == 1
+    assert all(row["user_id"] == "creator" for row in relevant["autobiographical_events"])
+    assert relevant["statistics"]["totals"]["autobiographical_events"] == 13
+    db.close()

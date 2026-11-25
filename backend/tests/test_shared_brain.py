@@ -87,6 +87,30 @@ def test_snapshot_reads_are_consistent_and_caller_transactions_are_preserved():
     db.close()
 
 
+def test_query_prioritizes_older_relevant_vocabulary_over_recent_sample():
+    db = make_db()
+    db.execute(
+        "INSERT INTO personal_vocabulary VALUES "
+        "(1,'creator','trésor','objet précieux','understood',3,'validation','t0','2000-01-01')"
+    )
+    for index in range(12):
+        db.execute(
+            "INSERT INTO personal_vocabulary VALUES "
+            "(?,'creator',?,'','heard',1,'exposition','t0',?)",
+            (index + 2, f"motrecent{index}", f"2026-11-{index + 1:02d}"),
+        )
+
+    recent_snapshot = get_shared_brain_snapshot(db, "creator", limit=8)
+    assert all(row["word"] != "trésor" for row in recent_snapshot["vocabulary"])
+
+    relevant_snapshot = get_shared_brain_snapshot(
+        db, "creator", limit=8, query="Parle-moi du tresor"
+    )
+    assert relevant_snapshot["vocabulary"][0]["word"] == "trésor"
+    assert relevant_snapshot["statistics"]["totals"]["vocabulary"] == 13
+    db.close()
+
+
 def test_snapshot_unifies_persisted_modules_without_promoting_observations():
     db = make_db()
     db.execute(

@@ -2800,7 +2800,9 @@ def get_identity_context(user_id: str, query: str = "") -> str:
         documented_preferences = list_preferences(development_db, user_id, limit=12)
 
     with db_connection() as shared_db:
-        shared_snapshot = get_shared_brain_snapshot(shared_db, user_id, limit=8)
+        shared_snapshot = get_shared_brain_snapshot(
+            shared_db, user_id, limit=8, query=query
+        )
     shared_brain_context = format_shared_brain_context(shared_snapshot)
 
     with db_connection() as knowledge_db:

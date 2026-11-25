@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -70,12 +72,53 @@ def _rows(
     order_by: str,
     user_id: str,
     limit: int,
+    query: str = "",
 ) -> list[dict[str, Any]]:
     try:
-        rows = db.execute(
-            f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
-            (user_id, limit),
-        ).fetchall()
+        # Chat can ask about vocabulary learned long ago. Keep the shared
+        # snapshot bounded, but rank exact query-token matches ahead of the
+        # usual recent sample so older words remain visible to the model.
+        query_terms: list[str] = []
+        if table == "personal_vocabulary" and isinstance(query, str):
+            stop_words = {
+                "avec", "dans", "des", "est", "les", "mais", "mon", "pour",
+                "que", "qui", "sur", "une", "vous", "the", "and", "for",
+                "from", "that", "this", "what", "when", "where",
+            }
+            raw_terms = re.findall(
+                r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+            )
+            query_terms = list(dict.fromkeys(
+                "".join(
+                    char for char in unicodedata.normalize("NFKD", token)
+                    if not unicodedata.combining(char)
+                )
+                for token in raw_terms
+                if len(token) >= 3 and token not in stop_words
+            ))[:12]
+        if query_terms:
+            placeholders = ",".join("?" for _ in query_terms)
+            folded_word = "LOWER(word)"
+            for accented, plain in (
+                ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"),
+                ("ç", "c"), ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+                ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
+                ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"),
+                ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
+                ("ÿ", "y"),
+            ):
+                folded_word = f"REPLACE({folded_word}, '{accented}', '{plain}')"
+            rows = db.execute(
+                f"SELECT * FROM {table} WHERE user_id=? "
+                f"ORDER BY CASE WHEN {folded_word} IN ({placeholders}) "
+                f"THEN 0 ELSE 1 END, {order_by} LIMIT ?",
+                (user_id, *query_terms, limit),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
     except sqlite3.OperationalError as exc:
         # Missing optional tables are expected during legacy migrations.
         # Missing columns, locks, and other operational failures must surface:
@@ -190,6 +233,7 @@ def get_shared_brain_snapshot(
     db: sqlite3.Connection,
     user_id: str,
     limit: int = DEFAULT_LIMIT,
+    query: str = "",
 ) -> dict[str, Any]:
     """Return one compact snapshot of all persisted cognitive systems."""
     if not isinstance(user_id, str):
@@ -210,7 +254,10 @@ def get_shared_brain_snapshot(
     # mode can give each SELECT a different snapshot while another writer runs.
     with _consistent_read_snapshot(db):
         for key, (table, order_by) in TABLES.items():
-            data[key] = _rows(db, table, order_by, user_id, limit)
+            data[key] = _rows(
+                db, table, order_by, user_id, limit,
+                query=query if key == "vocabulary" else "",
+            )
             totals[key] = _count(db, table, user_id)
 
     vocabulary_states = {

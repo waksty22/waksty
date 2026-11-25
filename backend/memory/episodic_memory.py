@@ -506,30 +506,103 @@ def search_episodic_memories(
     query = query.strip()[:MAX_SEARCH_LENGTH]
     limit = _normalize_limit(limit, 1, 30)
 
+    terms = _memory_search_terms(query) if query else []
     columns = """
         SELECT id, user_id, category, content, importance, source_type,
                confidence, tags, access_count, created_at, updated_at
         FROM memories_v19
         WHERE user_id = ?
     """
-    if not query:
+    if not terms:
         cursor = db.execute(
             columns + " ORDER BY importance DESC, access_count DESC, updated_at DESC LIMIT ?",
             (user_id, limit),
         )
         rows = cursor.fetchall()
     else:
-        # Load a bounded user-scoped candidate pool, then normalize accents
-        # in Python. SQLite/libSQL lower() is not reliably Unicode-aware.
-        cursor = db.execute(
+        # Keep a recent candidate pool for fallback, but scan the user's
+        # complete history in small pages for query matches. Python performs
+        # Unicode accent folding; a deeply nested SQL REPLACE expression is
+        # not portable to libSQL and can overflow its parser.
+        recent_cursor = db.execute(
             columns + " ORDER BY importance DESC, updated_at DESC LIMIT 2000",
             (user_id,),
         )
-        rows = cursor.fetchall()
+        recent_rows = [
+            _row_to_dict(row, recent_cursor)
+            for row in recent_cursor.fetchall()
+        ]
+
+        matching_rows: list[dict[str, Any]] = []
+        offset = 0
+        page_size = 500
+        while True:
+            page_cursor = db.execute(
+                columns + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                (user_id, page_size, offset),
+            )
+            page = page_cursor.fetchall()
+            if not page:
+                break
+            for raw_row in page:
+                item = _row_to_dict(raw_row, page_cursor)
+                content = item.get("content")
+                category = item.get("category")
+                if not isinstance(content, str) or not isinstance(category, str):
+                    continue
+                try:
+                    parsed_tags = json.loads(item.get("tags") or "[]")
+                    tags = (
+                        [tag for tag in parsed_tags if isinstance(tag, str)]
+                        if isinstance(parsed_tags, list) else []
+                    )
+                except (ValueError, TypeError):
+                    tags = []
+                searchable = " ".join(
+                    [content, category, " ".join(tags)]
+                ).casefold()
+                folded = unicodedata.normalize("NFKD", searchable)
+                folded = "".join(
+                    char for char in folded if not unicodedata.combining(char)
+                )
+                tokens = set(re.findall(r"[a-z0-9]{2,}", folded))
+                if set(terms) & tokens:
+                    matching_rows.append(item)
+                    continue
+                # Preserve the existing exact-phrase fallback for queries
+                # whose terms were filtered as stop words.
+                normalized_phrase = unicodedata.normalize(
+                    "NFKD", query.casefold()
+                )
+                normalized_phrase = "".join(
+                    char for char in normalized_phrase
+                    if not unicodedata.combining(char)
+                )
+                phrase_tokens = re.findall(r"[a-z0-9]{2,}", normalized_phrase)
+                token_list = re.findall(r"[a-z0-9]{2,}", folded)
+                if phrase_tokens and any(
+                    token_list[index:index + len(phrase_tokens)] == phrase_tokens
+                    for index in range(len(token_list) - len(phrase_tokens) + 1)
+                ):
+                    matching_rows.append(item)
+            offset += len(page)
+
+        # Historical matches take priority, then recent memories are retained
+        # as fallback. IDs ensure a record is never ranked twice.
+        merged_rows: dict[int, dict[str, Any]] = {}
+        for item in matching_rows:
+            row_id = item.get("id")
+            if isinstance(row_id, int) and not isinstance(row_id, bool):
+                merged_rows[row_id] = item
+        for item in recent_rows:
+            row_id = item.get("id")
+            if isinstance(row_id, int) and not isinstance(row_id, bool):
+                merged_rows.setdefault(row_id, item)
+        rows = list(merged_rows.values())
+        cursor = recent_cursor
 
     results: list[dict[str, Any]] = []
     normalized_query = query.casefold()
-    terms = _memory_search_terms(query) if query else []
     for row in rows:
         item = _row_to_dict(row, cursor)
         # Defensive read boundary: damaged rows must not crash ranking or

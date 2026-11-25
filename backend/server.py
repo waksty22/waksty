@@ -1895,11 +1895,10 @@ def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
     }
 
 def update_emotions_once(
-    ensure_user_state_initialized(user_id)
     user_id: str,
     message: str,
 ) -> dict[str, float]:
-
+    ensure_user_state_initialized(user_id)
     em = get_emotions(user_id)  
     analyze_user_intent(user_id, message)  
 

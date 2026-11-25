@@ -12,8 +12,9 @@ on:
 permissions:
   contents: read
 
+# Serialize every workflow that writes to the shared isolated Turso test database.
 concurrency:
-  group: chappie-full-schema-isolated-e2e
+  group: chappie-isolated-turso-backup-restore
   cancel-in-progress: false
 
 jobs:

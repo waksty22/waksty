@@ -22,6 +22,10 @@ from storage.logical_backup import (  # noqa: E402
 )
 
 
+BACKUP_CIPHERTEXT_NAME = "chappie-turso-backup.json.enc"
+BACKUP_CHECKSUM_NAME = BACKUP_CIPHERTEXT_NAME + ".sha256"
+
+
 def _extract_expected_archive_members(
     archive: zipfile.ZipFile,
     destination: Path,
@@ -60,16 +64,14 @@ def create_backup_archive(
     try:
         with tempfile.TemporaryDirectory(prefix="chappie-turso-job-") as work:
             root = Path(work)
-            encrypted_path = root / "chappie-turso-backup.json.enc"
+            encrypted_path = root / BACKUP_CIPHERTEXT_NAME
             report = export_encrypted_logical_backup(
                 connection,
                 encrypted_path,
                 encryption_key,
                 manage_snapshot=manage_snapshot,
             )
-            checksum_path = encrypted_path.with_suffix(
-                encrypted_path.suffix + ".sha256"
-            )
+            checksum_path = root / BACKUP_CHECKSUM_NAME
 
             with zipfile.ZipFile(
                 temporary_archive, mode="w", compression=zipfile.ZIP_STORED
@@ -82,8 +84,8 @@ def create_backup_archive(
             verify_dir.mkdir()
             with zipfile.ZipFile(temporary_archive, mode="r") as archive:
                 expected = {
-                    encrypted_path.name,
-                    checksum_path.name,
+                    BACKUP_CIPHERTEXT_NAME,
+                    BACKUP_CHECKSUM_NAME,
                 }
                 _extract_expected_archive_members(
                     archive, verify_dir, expected

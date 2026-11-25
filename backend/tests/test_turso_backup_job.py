@@ -277,3 +277,32 @@ def test_turso_backup_http_endpoint_returns_verified_archive(monkeypatch):
         assert verification["valid"] is True
     finally:
         database.close()
+
+
+
+def test_isolated_restore_probe_extracts_the_shared_verified_archive_contract(tmp_path):
+    from scripts.test_turso_backup_restore_e2e import (
+        extract_verified_backup_archive,
+    )
+    from storage.logical_backup import verify_encrypted_logical_backup
+
+    db = _database()
+    key = "test-only-backup-key-not-production"
+    archive_path = tmp_path / "isolated-probe.zip"
+    destination = tmp_path / "unpacked"
+    try:
+        report = create_backup_archive(db, archive_path, key)
+        assert report["verified_after_packaging"] is True
+
+        encrypted_path = extract_verified_backup_archive(
+            archive_path, destination
+        )
+        assert encrypted_path.name == "chappie-turso-backup.json.enc"
+        verification = verify_encrypted_logical_backup(encrypted_path, key)
+        assert verification["valid"] is True
+        assert sorted(path.name for path in destination.iterdir()) == [
+            "chappie-turso-backup.json.enc",
+            "chappie-turso-backup.json.enc.sha256",
+        ]
+    finally:
+        db.close()

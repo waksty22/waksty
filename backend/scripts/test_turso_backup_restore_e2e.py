@@ -18,7 +18,12 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from scripts.backup_turso import create_backup_archive
+from scripts.backup_turso import (
+    BACKUP_CHECKSUM_NAME,
+    BACKUP_CIPHERTEXT_NAME,
+    _extract_expected_archive_members,
+    create_backup_archive,
+)
 from storage.hrana_backup import HranaTransactionConnection
 from storage.hrana_http import HranaHttpClient, database_identity, open_guarded_restore_transaction
 from storage.hrana_backup import HranaRestoreConnection
@@ -40,6 +45,23 @@ FIXTURE_SQL = (
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
+
+
+
+
+def extract_verified_backup_archive(
+    archive_path: Path,
+    destination: Path,
+) -> Path:
+    """Extract only the shared, verified archive members used by the builder."""
+    destination.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        _extract_expected_archive_members(
+            archive,
+            destination,
+            {BACKUP_CIPHERTEXT_NAME, BACKUP_CHECKSUM_NAME},
+        )
+    return destination / BACKUP_CIPHERTEXT_NAME
 
 
 def open_client(url: str, token: str) -> HranaHttpClient:
@@ -154,11 +176,9 @@ def main() -> int:
             require(report.get("table_count") == 3 and report.get("total_rows") == 5,
                     "Unexpected fixture backup counts.")
 
-            with zipfile.ZipFile(archive_path, "r") as archive:
-                expected_names = {"chappie-turso.json.enc", "chappie-turso.json.enc.sha256"}
-                require(set(archive.namelist()) == expected_names, "Unexpected backup archive contents.")
-                archive.extractall(root / "unpacked")
-            encrypted_file = root / "unpacked" / "chappie-turso.json.enc"
+            encrypted_file = extract_verified_backup_archive(
+                archive_path, root / "unpacked"
+            )
             verification = verify_encrypted_logical_backup(encrypted_file, test_key)
             require(verification.get("valid") is True, "Encrypted backup failed independent verification.")
 
@@ -179,6 +199,10 @@ def main() -> int:
                 expected_target_identity=EXPECTED_HOST,
                 production_identity=production,
             )
+            # Once restore starts, the target may contain partial fixture schema
+            # if a remote commit/rollback response is ambiguous. Always run the
+            # exact-name cleanup in the outer finally block after this point.
+            fixtures_created = True
             try:
                 restored = restore_encrypted_logical_backup(
                     HranaRestoreConnection(restore_tx),

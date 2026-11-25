@@ -3088,7 +3088,9 @@ def build_untrusted_identity_context_message(user_id: str, query: str = "") -> d
     world_context = build_world_model_context(user_id)
     max_chars = 24000
     context = _truncate_context_at_section_boundary(context, max_chars - len(world_context) - 2)
-    context = context + "\n\n" + world_context
+    # Keep the historical-context envelope as the final section for backward
+    # compatibility with consumers and tests that inspect its closing marker.
+    context = world_context + "\n\n" + context
     return {
         "role": "user",
         "parts": [{

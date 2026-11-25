@@ -548,6 +548,41 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    window.loadObjectExperienceEpisodes = async function() {
+        const select = document.getElementById("experienceEpisode");
+        const status = document.getElementById("experienceEpisodeStatus");
+        if (!select) return;
+        const selected = select.value;
+        try {
+            const data = await apiCall("/api/autobiography/timeline?limit=30", {
+                headers: { "Authorization": "Bearer " + getToken() }
+            });
+            const events = Array.isArray(data.events) ? data.events : [];
+            select.replaceChildren();
+            const none = document.createElement("option");
+            none.value = "";
+            none.textContent = "Aucun épisode lié";
+            select.appendChild(none);
+            for (const event of events) {
+                if (!Number.isSafeInteger(event.id) || event.id < 1) continue;
+                const option = document.createElement("option");
+                option.value = String(event.id);
+                const actor = event.actor === "assistant" ? "Chappie" : "Créateur";
+                const excerpt = String(event.content || "").replace(/\\s+/g, " ").trim().slice(0, 90);
+                option.textContent = "#" + event.id + " · " + actor + " · " + excerpt;
+                select.appendChild(option);
+            }
+            if (selected && [...select.options].some(option => option.value === selected)) {
+                select.value = selected;
+            }
+            if (status) status.textContent = events.length
+                ? "Sélection facultative : seuls les épisodes de ton compte sont proposés."
+                : "Aucun épisode disponible pour le moment.";
+        } catch (error) {
+            if (status) status.textContent = "Impossible de charger les épisodes : " + error.message;
+        }
+    };
+
     window.recordObjectExperience = async function() {
         const word = document.getElementById("experienceWord")?.value?.trim();
         const action = document.getElementById("experienceAction")?.value?.trim();
@@ -557,13 +592,25 @@ document.addEventListener("DOMContentLoaded", () => {
             return alert("Renseigne l'objet, l'action et le résultat observé.");
         }
         try {
+            const episodeValue = document.getElementById("experienceEpisode")?.value || "";
+            const episodeId = episodeValue ? Number(episodeValue) : null;
+            if (episodeValue && (!Number.isSafeInteger(episodeId) || episodeId < 1)) {
+                throw new Error("Épisode autobiographique invalide.");
+            }
             const result = await apiCall("/api/learning/object-experience", {
                 method: "POST",
                 headers: { "Authorization": "Bearer " + getToken() },
-                body: { word, action, outcome, confidence: 0.6 }
+                body: {
+                    word, action, outcome, confidence: 0.6,
+                    ...(episodeId ? { autobiographical_event_id: episodeId } : {})
+                }
             });
             if (status) status.textContent = "Expérience mémorisée pour "
-                + result.experience.word + ". Elle n'est pas encore une règle générale.";
+                + result.experience.word
+                + (result.experience.autobiographical_event_id
+                    ? " · liée à l'épisode #" + result.experience.autobiographical_event_id
+                    : "")
+                + ". Elle n'est pas encore une règle générale.";
             await window.loadKnownObjects();
         } catch (error) {
             if (status) status.textContent = "Non enregistrée : " + error.message;
@@ -1832,6 +1879,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.loadSupervisedAgenda();
         window.loadPersonalLearningGoals();
         window.loadAcquiredKnowledge();
+        window.loadObjectExperienceEpisodes();
         window.loadSkills();
     }
 });

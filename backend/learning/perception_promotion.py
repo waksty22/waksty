@@ -116,6 +116,8 @@ def promote_confirmed_perception_fusion(
     stored_evidence["semantic_promotion"] = {
         "object_label": object_label,
         "object_entity_id": object_id,
+        "audio_observation_id": candidate["audio_observation_id"],
+        "vision_observation_id": candidate["vision_observation_id"],
         "relation_ids": relation_ids,
         "evidence": evidence,
         "promoted": True,

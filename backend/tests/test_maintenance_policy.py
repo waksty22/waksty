@@ -130,3 +130,26 @@ def test_dream_api_calls_synchronous_generator_without_await(monkeypatch):
         "success": True,
         "dream": {"dream": "Rêve de creator", "simulated": True},
     }
+
+
+def test_memory_reflection_label_preserves_epistemic_provenance():
+    import server
+
+    assert server._memory_reflection_label({"source_type": "taught"}) == (
+        "un souvenir appris ou confirmé"
+    )
+    assert server._memory_reflection_label({"source_type": "confirmed"}) == (
+        "un souvenir appris ou confirmé"
+    )
+    assert server._memory_reflection_label({"source_type": "observed"}) == (
+        "une observation enregistrée"
+    )
+    assert server._memory_reflection_label({"source_type": "inferred"}) == (
+        "une piste non vérifiée"
+    )
+    assert server._memory_reflection_label({"source_type": "unknown"}) == (
+        "un élément dont la provenance est inconnue"
+    )
+    assert server._memory_reflection_label(None) == (
+        "une idée sans souvenir enregistré"
+    )

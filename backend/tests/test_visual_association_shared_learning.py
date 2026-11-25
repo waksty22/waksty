@@ -147,3 +147,50 @@ def test_live_visual_association_route_rejects_missing_evidence_without_mutation
         ).fetchone()[0]
     assert state == "imitated"
     assert count == 0
+
+def test_query_retrieves_old_visual_association_and_its_observation_past_recent_window(
+    isolated_visual_learning_db,
+):
+    observation_id = prepare_imitated_word_and_live_visual_observation()
+    with server.db_connection() as db:
+        # Keep the target association and its observation older than a flood
+        # of unrelated, newer visual experiences.
+        db.execute(
+            "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+            ("2000-01-01T00:00:00+00:00", observation_id),
+        )
+        db.execute(
+            "INSERT INTO word_visual_associations "
+            "(user_id, word, observation_id, evidence, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("creator", "coq", observation_id,
+             "Le créateur confirme visuellement le coq.", "2000-01-01T00:00:00+00:00"),
+        )
+        for index in range(12):
+            newer = record_observation(
+                db, "creator", "vision",
+                f"Observation visuelle sans rapport numéro {index}.",
+                "test_unrelated_visual", confidence=0.0,
+            )
+            db.execute(
+                "INSERT INTO word_visual_associations "
+                "(user_id, word, observation_id, evidence, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("creator", f"objet{index:02d}", newer["observation_id"],
+                 "Association de test sans rapport.", f"2099-01-{index + 1:02d}T00:00:00+00:00"),
+            )
+        db.commit()
+
+        snapshot = get_shared_brain_snapshot(db, "creator", limit=8, query="Parle-moi du coq")
+
+    assert any(
+        row["observation_id"] == observation_id and row["word"] == "coq"
+        for row in snapshot["word_visual_associations"]
+    )
+    assert any(
+        row["observation_id"] == observation_id
+        and "oiseau à plumes" in row["content"]
+        for row in snapshot["sensory_observations"]
+    )
+    assert len(snapshot["word_visual_associations"]) <= 8
+    assert len(snapshot["sensory_observations"]) <= 8

@@ -3059,6 +3059,54 @@ def build_world_model_context(
     object_properties: list[dict[str, Any]] = []
     object_experiences: list[dict[str, Any]] = []
     cross_modal_fusions: list[dict[str, Any]] = []
+
+    def _query_matches(
+        db: Any,
+        table: str,
+        selected_columns: str,
+        searchable_columns: tuple[str, ...],
+        timestamp_column: str,
+        limit: int,
+    ) -> list[Any]:
+        """Fetch old as well as recent records matching the current question."""
+        if not query_terms:
+            return []
+        term_clauses: list[str] = []
+        where_parameters: list[str] = []
+        score_terms: list[str] = []
+        score_parameters: list[str] = []
+        for term in sorted(query_terms):
+            column_clauses = [
+                f"LOWER(COALESCE({column}, '')) LIKE ?"
+                for column in searchable_columns
+            ]
+            patterns = [f"%{term}%" for _ in searchable_columns]
+            term_expression = "(" + " OR ".join(column_clauses) + ")"
+            term_clauses.append(term_expression)
+            where_parameters.extend(patterns)
+            score_terms.append(f"CASE WHEN {term_expression} THEN 1 ELSE 0 END")
+            score_parameters.extend(patterns)
+        sql = (
+            f"SELECT {selected_columns} FROM {table} "
+            f"WHERE user_id=? AND ({' OR '.join(term_clauses)}) "
+            f"ORDER BY ({' + '.join(score_terms)}) DESC, "
+            f"{timestamp_column} DESC, id DESC LIMIT ?"
+        )
+        return db.execute(
+            sql, [user_id, *where_parameters, *score_parameters, limit]
+        ).fetchall()
+
+    def _merge_query_matches(
+        recent_rows: list[Any], matching_rows: list[Any], key: str
+    ) -> list[Any]:
+        """Prioritize matching history, then retain recent context without duplicates."""
+        merged: dict[Any, Any] = {}
+        for row in matching_rows:
+            merged[row[key]] = row
+        for row in recent_rows:
+            merged.setdefault(row[key], row)
+        return list(merged.values())
+
     with db_connection() as db:
         available_tables = {
             row[0] for row in db.execute(
@@ -3127,6 +3175,46 @@ def build_world_model_context(
             ).fetchall()
         else:
             fusion_rows = []
+
+        if query_terms and {"world_entities", "world_relations"}.issubset(available_tables):
+            entity_matches = _query_matches(
+                db, "world_entities",
+                "id, entity_type, properties_json, source_type, confidence, last_observed_at",
+                ("id", "entity_type", "properties_json"), "last_observed_at", 500,
+            )
+            relation_matches = _query_matches(
+                db, "world_relations",
+                "id, subject_id, predicate, object_id, source_type, confidence, updated_at",
+                ("subject_id", "predicate", "object_id"), "updated_at", 500,
+            )
+            entity_rows = _merge_query_matches(entity_rows, entity_matches, "id")
+            relation_rows = _merge_query_matches(relation_rows, relation_matches, "id")
+            if "object_properties" in available_tables:
+                property_matches = _query_matches(
+                    db, "object_properties",
+                    "id, object_id, property_key, property_value, source_type, confidence, evidence, updated_at",
+                    ("object_id", "property_key", "property_value", "evidence"),
+                    "updated_at", 750,
+                )
+                property_rows = _merge_query_matches(property_rows, property_matches, "id")
+            if "object_experiences" in available_tables:
+                experience_matches = _query_matches(
+                    db, "object_experiences",
+                    "id, object_id, action, outcome, evidence, source_type, confidence, created_at",
+                    ("object_id", "action", "outcome", "evidence"),
+                    "created_at", 500,
+                )
+                experience_rows = _merge_query_matches(
+                    experience_rows, experience_matches, "id"
+                )
+        if query_terms and "perception_fusion_candidates" in available_tables:
+            fusion_matches = _query_matches(
+                db, "perception_fusion_candidates",
+                "id, audio_observation_id, vision_observation_id, time_delta_seconds, status, evidence_json, created_at",
+                ("audio_observation_id", "vision_observation_id", "status", "evidence_json"),
+                "created_at", 250,
+            )
+            fusion_rows = _merge_query_matches(fusion_rows, fusion_matches, "id")
 
     for row in entity_rows:
         item = dict(row)

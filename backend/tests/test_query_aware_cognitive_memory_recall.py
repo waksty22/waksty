@@ -1,4 +1,5 @@
 """Query-aware recall of older episodic and supervised cognitive records."""
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -158,7 +159,7 @@ def test_query_ranks_older_records_across_cognitive_domains():
     assert affective_snapshot["affective_history"][0]["event_label"] == (
         "réaction à la panne du robot"
     )
-    assert affective_snapshot["affective_history"][0]["state"]["curiosity"] == 85
+    assert json.loads(affective_snapshot["affective_history"][0]["state_json"])["curiosity"] == 85
 
     skill_snapshot = get_shared_brain_snapshot(
         db, "creator", limit=2, query="navigation spatiale"

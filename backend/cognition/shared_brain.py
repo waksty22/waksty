@@ -86,7 +86,7 @@ def _rows(
             }
             query_terms = list(dict.fromkeys(
                 token for token in re.findall(
-                    r"[\\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+                    r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
                 )
                 if len(token) >= 3 and token not in stop_words
             ))[:12]

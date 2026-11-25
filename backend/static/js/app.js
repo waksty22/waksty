@@ -568,7 +568,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const option = document.createElement("option");
                 option.value = String(event.id);
                 const actor = event.actor === "assistant" ? "Chappie" : "Créateur";
-                const excerpt = String(event.content || "").replace(/\\s+/g, " ").trim().slice(0, 90);
+                const excerpt = String(event.content || "").replace(/\s+/g, " ").trim().slice(0, 90);
                 option.textContent = "#" + event.id + " · " + actor + " · " + excerpt;
                 select.appendChild(option);
             }

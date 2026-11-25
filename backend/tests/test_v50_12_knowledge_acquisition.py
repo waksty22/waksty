@@ -127,6 +127,78 @@ def test_user_isolation_and_query_relevance():
     db.close()
 
 
+def test_query_retrieval_finds_old_memories_experiences_and_assessments():
+    db = make_db()
+    seed(db)
+
+    # Push the seeded relevant records beyond all previous recent-only windows.
+    for index in range(305):
+        stamp = f"2026-11-25T{index:06d}"
+        db.execute(
+            """INSERT INTO memories_v19 VALUES
+               (?, 'creator', 'general', 'Observation récente sans rapport',
+                'confirmed', 0.9, 5, ?, ?)""",
+            (1000 + index, stamp, stamp),
+        )
+        db.execute(
+            """INSERT INTO autobiographical_events VALUES
+               (?, 'creator', 'user', 'unrelated',
+                'Événement récent sans rapport', ?, NULL)""",
+            (1000 + index, stamp),
+        )
+    for index in range(205):
+        db.execute(
+            """INSERT INTO competency_tests VALUES
+               (?, 'creator', 'tete:recent', 0, 20, '{}', ?)""",
+            (1000 + index, f"2026-11-{index % 28 + 1:02d}"),
+        )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "montre", limit=12)
+    items = result["items"]
+
+    assert any(
+        item["kind"] == "memory"
+        and item["content"] == "Le cadran de cette montre a été confirmé"
+        and item["status"] == "confirmed_memory"
+        for item in items
+    )
+    assert any(
+        item["kind"] == "experience"
+        and "a montré une montre" in item["content"]
+        for item in items
+    )
+    assert any(
+        item["kind"] == "skill_assessment"
+        and item.get("skill") == "tete:reconnaissance_objets"
+        and item["status"] == "supervised_skill_validated"
+        for item in items
+    )
+    db.close()
+
+
+def test_query_retrieval_folds_accents_for_older_memories():
+    db = make_db()
+    db.execute(
+        """INSERT INTO memories_v19 VALUES
+           (1, 'creator', 'general', 'Le café est encore chaud',
+            'confirmed', 0.9, 5, '2026-01-01', '2026-01-01')"""
+    )
+    for index in range(305):
+        stamp = f"2026-11-25T{index:06d}"
+        db.execute(
+            """INSERT INTO memories_v19 VALUES
+               (?, 'creator', 'general', 'Note récente sans rapport',
+                'observed', 0.5, 6, ?, ?)""",
+            (1000 + index, stamp, stamp),
+        )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "CAFE")
+    assert any(item["content"] == "Le café est encore chaud" for item in result["items"])
+    db.close()
+
+
 def test_retrieval_does_not_change_any_source_rows():
     db = make_db()
     seed(db)

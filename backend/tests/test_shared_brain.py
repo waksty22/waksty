@@ -769,3 +769,45 @@ def test_spatial_memory_context_fails_closed_without_consent_ledger():
     assert build_spatial_memory_context(db, "creator", "Paris") == ""
     db.close()
 
+
+
+def test_live_shared_brain_tool_reads_latest_persisted_snapshot_each_call(monkeypatch):
+    from contextlib import nullcontext
+    import server
+
+    db = make_db()
+    monkeypatch.setattr(server, "db_connection", lambda: nullcontext(db))
+
+    db.execute(
+        "INSERT INTO personal_vocabulary VALUES "
+        "(1,'creator','bonjour','','heard',1,'audio','t0','t1')"
+    )
+    first = server.execute_tool("get_shared_brain_state", {}, "creator")
+    assert [item["word"] for item in first["vocabulary"]] == ["bonjour"]
+
+    # A new learning event is committed while the same Live session remains open.
+    db.execute(
+        "INSERT INTO personal_vocabulary VALUES "
+        "(2,'creator','merci','','heard',1,'audio','t1','t2')"
+    )
+    db.commit()
+
+    second = server.execute_tool("get_shared_brain_state", {}, "creator")
+    assert {item["word"] for item in second["vocabulary"]} == {"bonjour", "merci"}
+    assert second["statistics"]["totals"]["vocabulary"] == 2
+    db.close()
+
+
+def test_live_system_policy_requires_refresh_before_relying_on_session_snapshot():
+    import server
+
+    policy = server.IDENTITY_SYSTEM_INSTRUCTION.casefold()
+    assert "instantané qui peut devenir obsolète" in policy
+    assert "appelle l'outil get_shared_brain_state avant de répondre" in policy
+    assert "n'affirme jamais un apprentissage absent de cet état" in policy
+    declarations = server.TOOLS[0]["functionDeclarations"]
+    refresh_tool = next(
+        tool for tool in declarations
+        if tool.get("name") == "get_shared_brain_state"
+    )
+    assert "OBLIGATOIRE avant toute réponse" in refresh_tool["description"]

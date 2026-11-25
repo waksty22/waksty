@@ -451,3 +451,76 @@ def test_query_terms_split_french_elisions_and_normalize_accents():
     terms = _query_terms("Parle-moi de l'Éléphant")
     assert "elephant" in terms
     assert "l'elephant" not in terms
+
+
+def test_query_prioritizes_older_relevant_spatial_places_and_linked_gps_samples():
+    db = make_db()
+    db.executescript("""
+        CREATE TABLE spatial_sessions (
+            session_id TEXT PRIMARY KEY, user_id TEXT, device_label TEXT,
+            consented INTEGER, started_at TEXT, ended_at TEXT, created_at TEXT
+        );
+        CREATE TABLE spatial_visits (
+            id INTEGER PRIMARY KEY, user_id TEXT, session_id TEXT,
+            latitude REAL, longitude REAL, accuracy_m REAL, altitude_m REAL,
+            heading_deg REAL, speed_mps REAL, recorded_at TEXT, source TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE place_memories (
+            place_id TEXT PRIMARY KEY, user_id TEXT, label TEXT, description TEXT,
+            visual_signature TEXT, session_id TEXT, latitude REAL, longitude REAL,
+            confidence REAL, identity_status TEXT, candidate_place_id TEXT,
+            similarity_score REAL, confirmation_evidence TEXT, confirmed_at TEXT,
+            first_seen_at TEXT, last_seen_at TEXT, observations_count INTEGER,
+            created_at TEXT, updated_at TEXT
+        );
+    """)
+    db.execute(
+        "INSERT INTO spatial_sessions VALUES "
+        "('old-session','creator','phone',1,'2000-01-01',NULL,'2000-01-01')"
+    )
+    db.execute(
+        "INSERT INTO place_memories VALUES "
+        "('old-place','creator','Mairie','Grand bâtiment en pierre près de la place',"
+        "'mairie pierre tour','old-session',48.1,-2.8,0.6,'confirmed',NULL,0.9,"
+        "'Nom vérifié par le créateur','2000-01-02','2000-01-01','2000-01-02',2,"
+        "'2000-01-01','2000-01-02')"
+    )
+    db.execute(
+        "INSERT INTO spatial_visits VALUES "
+        "(1,'creator','old-session',48.1,-2.8,10,NULL,NULL,NULL,'2000-01-02',"
+        "'browser_geolocation','2000-01-02')"
+    )
+    for index in range(12):
+        sid = f"recent-session-{index}"
+        db.execute(
+            "INSERT INTO spatial_sessions VALUES (?,?,?,1,?,NULL,?)",
+            (sid, "creator", "phone", f"2026-11-{index+1:02d}", f"2026-11-{index+1:02d}"),
+        )
+        db.execute(
+            "INSERT INTO place_memories VALUES (?,?,?,?,?,?,NULL,NULL,0.2,"
+            "'unconfirmed',NULL,0.0,'',NULL,?,?,1,?,?)",
+            (f"recent-place-{index}", "creator", "Lieu récent",
+             f"Description sans rapport {index}", "lieu récent",
+             sid, f"2026-11-{index+1:02d}", f"2026-11-{index+1:02d}",
+             f"2026-11-{index+1:02d}", f"2026-11-{index+1:02d}"),
+        )
+        db.execute(
+            "INSERT INTO spatial_visits VALUES (?,?,?,?,?,10,NULL,NULL,NULL,?,?,?)",
+            (index+2, "creator", sid, 47.0, -2.0,
+             f"2026-11-{index+1:02d}", "browser_geolocation",
+             f"2026-11-{index+1:02d}"),
+        )
+
+    recent = get_shared_brain_snapshot(db, "creator", limit=8)
+    assert all(row["place_id"] != "old-place" for row in recent["place_memories"])
+
+    relevant = get_shared_brain_snapshot(
+        db, "creator", limit=8, query="où se trouve la mairie en pierre"
+    )
+    assert relevant["place_memories"][0]["place_id"] == "old-place"
+    assert relevant["spatial_sessions"][0]["session_id"] == "old-session"
+    assert relevant["spatial_visits"][0]["session_id"] == "old-session"
+    assert relevant["statistics"]["totals"]["place_memories"] == 13
+    assert all(row["user_id"] == "creator" for row in relevant["place_memories"])
+    db.close()

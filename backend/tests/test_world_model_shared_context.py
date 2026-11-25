@@ -246,20 +246,34 @@ def test_world_model_context_rejects_invalid_size():
 
 def test_shared_world_model_tool_searches_relevant_records_for_both_channels(monkeypatch):
     db = _world_db()
-    # Add newer unrelated records so the requested older object must be ranked,
-    # not merely returned because it happens to be the newest database row.
-    for index in range(30):
+    # Add enough newer unrelated records to push the older clock outside every
+    # previous recency-only SQL window (entities/relations: 200, properties: 300,
+    # fusion candidates: 100).
+    for index in range(225):
         object_id = f"object:lamp{index}"
+        stamp = f"2026-11-25T01:{index:06d}Z"
         db.execute(
             "INSERT INTO world_entities VALUES (?,?,?,?,?,?,?)",
-            (object_id, "creator", "object", "{}", "observed", 0.4,
-             f"2026-11-25T00:{index:02d}:00Z"),
+            (object_id, "creator", "object", "{}", "observed", 0.4, stamp),
         )
+        db.execute(
+            "INSERT INTO world_relations VALUES (?,?,?,?,?,?,?,?)",
+            (100 + index, "creator", object_id, "near", "object:wall",
+             "observed", 0.4, stamp),
+        )
+        db.execute(
+            "INSERT INTO perception_fusion_candidates VALUES (?,?,?,?,?,?,?,?)",
+            (100 + index, "creator", f"audio:noise{index}", f"vision:scene{index}",
+             0.2, "candidate", json.dumps({"audio_excerpt": "noise"}),
+             stamp),
+        )
+    for index in range(350):
+        object_id = f"object:lamp{index}"
+        stamp = f"2026-11-25T02:{index:06d}Z"
         db.execute(
             "INSERT INTO object_properties VALUES (?,?,?,?,?,?,?,?,?)",
             (10 + index, "creator", object_id, "matiere", "plastique",
-             "observed", 0.4, "Unrelated recent observation",
-             f"2026-11-25T00:{index:02d}:00Z"),
+             "observed", 0.4, "Unrelated recent observation", stamp),
         )
     db.commit()
 
@@ -279,6 +293,8 @@ def test_shared_world_model_tool_searches_relevant_records_for_both_channels(mon
     header, encoded = result["world_model_context"].split("\n", 1)
     payload = json.loads(encoded)
     assert "NON FIABLES" in header
+    assert payload["entities"][0]["id"] == "object:clock"
+    assert payload["relations"][0]["subject"] == "object:clock"
     assert payload["object_properties"][0]["object"] == "object:clock"
     assert payload["object_properties"][0]["value"] == "red"
     assert payload["object_properties"][0]["provenance"] == "confirmed"

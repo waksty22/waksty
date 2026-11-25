@@ -3133,7 +3133,7 @@ def build_world_model_context(
                 (user_id, entity_limit),
             ).fetchall()
             relation_rows = db.execute(
-                """SELECT subject_id, predicate, object_id, source_type,
+                """SELECT id, subject_id, predicate, object_id, source_type,
                           confidence, updated_at
                    FROM world_relations WHERE user_id=?
                    ORDER BY updated_at DESC, id DESC LIMIT ?""",

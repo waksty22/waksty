@@ -6,9 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from world.spatial_memory import init_spatial_tables
+
 from cognition.shared_brain import (
     format_shared_brain_context,
     get_shared_brain_snapshot,
+    build_spatial_memory_context,
     merge_live_transcript,
 )
 
@@ -660,3 +663,61 @@ def test_shared_brain_fails_closed_when_spatial_consent_ledger_is_missing():
     assert snapshot["statistics"]["totals"]["spatial_visits"] == 0
     assert snapshot["statistics"]["totals"]["place_memories"] == 0
     db.close()
+
+
+def test_spatial_memory_context_is_query_aware_consent_filtered_and_minimal():
+    db = make_db()
+    init_spatial_tables(db)
+    db.executemany(
+        """INSERT INTO spatial_sessions
+           (session_id,user_id,device_label,consented,started_at,created_at)
+           VALUES (?,?,?,?,?,?)""",
+        [
+            ("allowed", "creator", "phone", 1, "2026-11-20", "2026-11-20"),
+            ("denied", "creator", "phone", 0, "2026-11-21", "2026-11-21"),
+        ],
+    )
+    for place_id, session_id, label in (
+        ("p1", "allowed", "Musée de Paris"),
+        ("p2", "denied", "Appartement privé Paris"),
+    ):
+        db.execute(
+            """INSERT INTO place_memories
+               (place_id,user_id,label,description,visual_signature,session_id,
+                latitude,longitude,confidence,identity_status,first_seen_at,
+                last_seen_at,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (place_id, "creator", label, "Façade observée", "pierre paris",
+             session_id, 48.85, 2.35, 0.7, "candidate", "2026-11-20",
+             "2026-11-20", "2026-11-20", "2026-11-20"),
+        )
+    context = build_spatial_memory_context(db, "creator", "Parle du musée à Paris")
+    payload = json.loads(context)
+    assert payload["consent_required"] is True
+    assert [row["place_id"] for row in payload["place_memories"]] == ["p1"]
+    assert "Appartement privé" not in context
+    assert "latitude" not in context and "longitude" not in context
+    db.close()
+
+
+def test_spatial_memory_context_fails_closed_without_consent_ledger():
+    db = make_db()
+    db.execute(
+        """CREATE TABLE place_memories (
+            place_id TEXT PRIMARY KEY, user_id TEXT, label TEXT,
+            description TEXT, visual_signature TEXT, session_id TEXT,
+            confidence REAL, identity_status TEXT, confirmation_evidence TEXT,
+            confirmed_at TEXT, first_seen_at TEXT, last_seen_at TEXT,
+            observations_count INTEGER, created_at TEXT, updated_at TEXT
+        )"""
+    )
+    db.execute(
+        """INSERT INTO place_memories
+           (place_id,user_id,label,description,visual_signature,session_id,
+            confidence,identity_status,first_seen_at,last_seen_at,created_at,updated_at)
+           VALUES ('p1','creator','Paris','Lieu','pierre',NULL,0.5,
+                   'candidate','t0','t1','t0','t1')"""
+    )
+    assert build_spatial_memory_context(db, "creator", "Paris") == ""
+    db.close()
+

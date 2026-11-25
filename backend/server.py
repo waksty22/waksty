@@ -160,6 +160,7 @@ from memory.knowledge_acquisition import (
 from cognition.shared_brain import (
     get_shared_brain_snapshot,
     format_shared_brain_context,
+    build_spatial_memory_context,
     merge_live_transcript,
 )
 from storage.turso_compat import inspect_turso_driver
@@ -3675,10 +3676,17 @@ def execute_tool(
             context = build_world_model_context(
                 user_id, max_chars=5000, query=query[:1000]
             )
+            # Audio-only Live turns may not receive the pre-turn text refresh.
+            # Retrieve the same consent-filtered place memories on demand.
+            with db_connection() as spatial_db:
+                spatial_context = build_spatial_memory_context(
+                    spatial_db, user_id, query[:1000], max_chars=3200
+                )
             return {
-                "found": bool(context),
+                "found": bool(context or spatial_context),
                 "query": query[:1000],
                 "world_model_context": context,
+                "spatial_memory_context": spatial_context,
                 "read_only": True,
                 "user_scoped": True,
                 "matching_is_not_proof_of_understanding": True,

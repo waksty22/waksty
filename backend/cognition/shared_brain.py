@@ -203,9 +203,6 @@ def _rows(
                     for _ in query_terms
                 )
                 parameters = tuple(
-                    term for _ in query_terms for term in query_terms[:0]
-                )
-                parameters = tuple(
                     term for term in query_terms for _column in searchable
                 )
                 rows = db.execute(
@@ -289,23 +286,6 @@ def _rows(
                 "SELECT 1 FROM spatial_sessions AS consent_session "
                 "WHERE consent_session.session_id=place_memories.session_id "
                 "AND consent_session.user_id=place_memories.user_id "
-                "AND consent_session.consented=1) "
-                f"ORDER BY {order_by} LIMIT ?",
-                (user_id, limit),
-            ).fetchall()
-        elif table == "spatial_sessions":
-            rows = db.execute(
-                "SELECT * FROM spatial_sessions WHERE user_id=? AND consented=1 "
-                f"ORDER BY {order_by} LIMIT ?",
-                (user_id, limit),
-            ).fetchall()
-        elif table == "spatial_visits":
-            rows = db.execute(
-                "SELECT spatial_visits.* FROM spatial_visits "
-                "WHERE spatial_visits.user_id=? AND EXISTS ("
-                "SELECT 1 FROM spatial_sessions AS consent_session "
-                "WHERE consent_session.session_id=spatial_visits.session_id "
-                "AND consent_session.user_id=spatial_visits.user_id "
                 "AND consent_session.consented=1) "
                 f"ORDER BY {order_by} LIMIT ?",
                 (user_id, limit),
@@ -680,3 +660,46 @@ def merge_live_transcript(existing: str, incoming: str) -> str:
         if left_boundary and right_boundary:
             return " ".join((old + " " + new[size:]).split())
     return (old + " " + new).strip()
+
+
+def build_spatial_memory_context(
+    db: sqlite3.Connection,
+    user_id: str,
+    query: str,
+    max_chars: int = 3200,
+) -> str:
+    """Return bounded, consent-filtered semantic place memories for Live tools."""
+    if not isinstance(query, str) or not query.strip():
+        return ""
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 256:
+        raise ValueError("La limite du contexte spatial doit être un entier >= 256.")
+    snapshot = get_shared_brain_snapshot(
+        db, user_id, limit=5, query=query[:1000]
+    )
+    records = []
+    for row in snapshot.get("place_memories", []):
+        records.append({
+            key: row.get(key)
+            for key in (
+                "place_id", "label", "description", "visual_signature",
+                "confidence", "identity_status", "similarity_score",
+                "confirmation_evidence", "confirmed_at",
+                "first_seen_at", "last_seen_at", "observations_count",
+            )
+            if key in row
+        })
+    payload = {
+        "read_only": True,
+        "user_scoped": True,
+        "consent_required": True,
+        "identity_is_not_inferred_from_gps": True,
+        "place_memories": [],
+    }
+    for record in records:
+        candidate = {**payload, "place_memories": [*payload["place_memories"], record]}
+        if len(json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))) > max_chars:
+            break
+        payload["place_memories"].append(record)
+    if not payload["place_memories"]:
+        return ""
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

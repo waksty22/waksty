@@ -520,9 +520,10 @@ def search_episodic_memories(
         )
         rows = cursor.fetchall()
     else:
-        # Keep a recent candidate pool for fallback, but also search old rows
-        # directly in SQL so a relevant memory cannot disappear behind the
-        # 2,000-row recency window. Accent folding mirrors the Python matcher.
+        # Keep a recent candidate pool for fallback, but scan the user's
+        # complete history in small pages for query matches. Python performs
+        # Unicode accent folding; a deeply nested SQL REPLACE expression is
+        # not portable to libSQL and can overflow its parser.
         recent_cursor = db.execute(
             columns + " ORDER BY importance DESC, updated_at DESC LIMIT 2000",
             (user_id,),
@@ -532,51 +533,62 @@ def search_episodic_memories(
             for row in recent_cursor.fetchall()
         ]
 
-        def folded_sql(column: str) -> str:
-            expression = f"LOWER(COALESCE({column}, ''))"
-            for source, target in (
-                ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"), ("ã", "a"),
-                ("ç", "c"),
-                ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
-                ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
-                ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"), ("õ", "o"),
-                ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
-                ("ý", "y"), ("ÿ", "y"), ("œ", "oe"), ("æ", "ae"),
-            ):
-                expression = f"REPLACE({expression}, '{source}', '{target}')"
-            return expression
+        matching_rows: list[dict[str, Any]] = []
+        offset = 0
+        page_size = 500
+        while True:
+            page_cursor = db.execute(
+                columns + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                (user_id, page_size, offset),
+            )
+            page = page_cursor.fetchall()
+            if not page:
+                break
+            for raw_row in page:
+                item = _row_to_dict(raw_row, page_cursor)
+                content = item.get("content")
+                category = item.get("category")
+                if not isinstance(content, str) or not isinstance(category, str):
+                    continue
+                try:
+                    parsed_tags = json.loads(item.get("tags") or "[]")
+                    tags = (
+                        [tag for tag in parsed_tags if isinstance(tag, str)]
+                        if isinstance(parsed_tags, list) else []
+                    )
+                except (ValueError, TypeError):
+                    tags = []
+                searchable = " ".join(
+                    [content, category, " ".join(tags)]
+                ).casefold()
+                folded = unicodedata.normalize("NFKD", searchable)
+                folded = "".join(
+                    char for char in folded if not unicodedata.combining(char)
+                )
+                tokens = set(re.findall(r"[a-z0-9]{2,}", folded))
+                if set(terms) & tokens:
+                    matching_rows.append(item)
+                    continue
+                # Preserve the existing exact-phrase fallback for queries
+                # whose terms were filtered as stop words.
+                normalized_phrase = unicodedata.normalize(
+                    "NFKD", query.casefold()
+                )
+                normalized_phrase = "".join(
+                    char for char in normalized_phrase
+                    if not unicodedata.combining(char)
+                )
+                phrase_tokens = re.findall(r"[a-z0-9]{2,}", normalized_phrase)
+                token_list = re.findall(r"[a-z0-9]{2,}", folded)
+                if phrase_tokens and any(
+                    token_list[index:index + len(phrase_tokens)] == phrase_tokens
+                    for index in range(len(token_list) - len(phrase_tokens) + 1)
+                ):
+                    matching_rows.append(item)
+            offset += len(page)
 
-        searchable_columns = tuple(
-            folded_sql(column) for column in ("content", "category", "tags")
-        )
-        term_clauses: list[str] = []
-        where_parameters: list[str] = []
-        score_terms: list[str] = []
-        score_parameters: list[str] = []
-        for term in terms:
-            expression = "(" + " OR ".join(
-                f"{column} LIKE ?" for column in searchable_columns
-            ) + ")"
-            patterns = [f"%{term}%" for _ in searchable_columns]
-            term_clauses.append(expression)
-            where_parameters.extend(patterns)
-            score_terms.append(f"CASE WHEN {expression} THEN 1 ELSE 0 END")
-            score_parameters.extend(patterns)
-
-        matching_cursor = db.execute(
-            columns
-            + " AND (" + " OR ".join(term_clauses) + ")"
-            + " ORDER BY (" + " + ".join(score_terms) + ") DESC, "
-            + "importance DESC, updated_at DESC, id DESC LIMIT 2000",
-            (user_id, *where_parameters, *score_parameters),
-        )
-        matching_rows = [
-            _row_to_dict(row, matching_cursor)
-            for row in matching_cursor.fetchall()
-        ]
-
-        # Matching historical records take priority; recent records remain
-        # available as fallback, with stable IDs preventing duplicates.
+        # Historical matches take priority, then recent memories are retained
+        # as fallback. IDs ensure a record is never ranked twice.
         merged_rows: dict[int, dict[str, Any]] = {}
         for item in matching_rows:
             row_id = item.get("id")
@@ -587,7 +599,7 @@ def search_episodic_memories(
             if isinstance(row_id, int) and not isinstance(row_id, bool):
                 merged_rows.setdefault(row_id, item)
         rows = list(merged_rows.values())
-        cursor = matching_cursor
+        cursor = recent_cursor
 
     results: list[dict[str, Any]] = []
     normalized_query = query.casefold()

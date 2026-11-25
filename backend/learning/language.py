@@ -36,6 +36,17 @@ def normalize_word(value: str) -> str:
     return word
 
 
+def _lexical_parts(token: str) -> tuple[str, ...]:
+    """Remove French elision clitics so l'éléphant is learned as éléphant."""
+    normalized = token.casefold().replace("’", "'")
+    match = re.match(r"^(?:jusqu|lorsqu|puisqu|quoiqu|quelqu|qu|[ldjmtsnc])'(.+)$", normalized)
+    return (match.group(1),) if match and match.group(1) else (normalized,)
+
+
+def _token_is_known(token: str, known_words: set[str]) -> bool:
+    return all(part in known_words for part in _lexical_parts(token))
+
+
 def init_language_tables(db: sqlite3.Connection) -> None:
     db.executescript("""
         CREATE TABLE IF NOT EXISTS personal_vocabulary (
@@ -111,15 +122,18 @@ def record_heard_text(
     tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
     recorded: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for token in tokens[:max_tokens]:
+    for token in tokens:
         try:
-            word = normalize_word(token)
+            parts = tuple(normalize_word(part) for part in _lexical_parts(token))
         except ValueError:
             continue
-        if word in seen:
-            continue
-        seen.add(word)
-        recorded.append(record_heard_word(db, user_id, word, evidence))
+        for word in parts:
+            if word in seen:
+                continue
+            if len(recorded) >= max_tokens:
+                return recorded
+            seen.add(word)
+            recorded.append(record_heard_word(db, user_id, word, evidence))
     return recorded
 
 
@@ -349,7 +363,7 @@ def text_uses_only_allowed_words(text: str, allowed_words: set[str]) -> bool:
     tokens = re.findall(
         r"[\wÀ-ÖØ-öø-ÿ'-]+", text.casefold(), flags=re.UNICODE
     )
-    return bool(tokens) and all(token in allowed_words for token in tokens)
+    return bool(tokens) and all(_token_is_known(token, allowed_words) for token in tokens)
 
 
 def gate_spoken_text(
@@ -369,7 +383,7 @@ def gate_spoken_text(
     emitted_words = 0
     for token in tokens:
         if re.fullmatch(r"[\wÀ-ÖØ-öø-ÿ'-]+", token, flags=re.UNICODE):
-            if token.casefold() in usable_words and (
+            if _token_is_known(token, usable_words) and (
                 max_words is None or emitted_words < max_words
             ):
                 output.append(token)

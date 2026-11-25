@@ -2991,7 +2991,7 @@ def build_world_model_context(
         raise ValueError("La limite du modèle du monde est invalide.")
     if not isinstance(query, str) or len(query) > 1000:
         raise ValueError("La recherche du modèle du monde doit être un texte de 1000 caractères maximum.")
-    query_terms = set(re.findall(r"[^\\W_]{2,}", query.casefold()))
+    query_terms = set(re.findall(r"[^\W_]{2,}", query.casefold()))
     entity_limit, relation_limit = (200, 200) if query_terms else (20, 30)
     property_limit, experience_limit = (300, 200) if query_terms else (40, 20)
 
@@ -3128,7 +3128,7 @@ def build_world_model_context(
             serialized = json.dumps(
                 item, ensure_ascii=False, allow_nan=False, separators=(",", ":")
             ).casefold()
-            item_terms = set(re.findall(r"[^\\W_]{2,}", serialized))
+            item_terms = set(re.findall(r"[^\W_]{2,}", serialized))
             return len(query_terms & item_terms)
 
         # Put matching records first so a recent but unrelated object cannot

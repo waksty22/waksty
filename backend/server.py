@@ -3006,6 +3006,8 @@ def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
         if not {"world_entities", "world_relations"}.issubset(available_tables):
             entity_rows = []
             relation_rows = []
+            property_rows = []
+            experience_rows = []
         else:
             entity_rows = db.execute(
                 """SELECT id, entity_type, properties_json, source_type,

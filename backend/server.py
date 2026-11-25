@@ -2627,21 +2627,20 @@ def build_live_query_brain_refresh_message(
 
 
 def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> bool:
-    """Persist only confirmed text transcripts when a Live session ends unexpectedly."""
+    """Persist the user's partial transcript, never an unfinished assistant reply."""
     raw_user_text = turn_state.get("user")
-    raw_assistant_text = turn_state.get("assistant")
     user_text = raw_user_text.strip() if isinstance(raw_user_text, str) else ""
-    assistant_text = (
-        raw_assistant_text.strip()
-        if isinstance(raw_assistant_text, str)
-        else ""
-    )
-    if not user_text and not assistant_text:
+    # Provider output may be cut off at any token when a Live session fails.
+    # Keeping it as an assistant conversation would make an unfinished answer
+    # look like a completed autobiographical response during later recall.
+    if not user_text:
+        turn_state["user"] = ""
+        turn_state["assistant"] = ""
         turn_state["audio"] = []
         turn_state["audio_chars"] = 0
         return False
     save_conversation_turn(
-        user_id, user_text, assistant_text, source="gemini_live_interrupted"
+        user_id, user_text, "", source="gemini_live_interrupted"
     )
     turn_state["user"] = ""
     turn_state["assistant"] = ""

@@ -173,7 +173,7 @@ def test_interrupted_live_turn_persists_history_without_promoting_learning(
     assert captured == [(
         "creator",
         "Transcription utilisateur confirmée.",
-        "Réponse déjà transcrite.",
+        "",
         "gemini_live_interrupted",
     )]
     assert learning_calls == []

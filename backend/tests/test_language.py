@@ -580,4 +580,4 @@ def test_french_elisions_respect_newborn_known_word_gate():
     assert text_uses_only_allowed_words("L'éléphant regarde.", known)
     assert not text_uses_only_allowed_words("L'éléphant danse.", known)
     assert gate_spoken_text("L'éléphant regarde.", known) == "L'éléphant regarde."
-    assert gate_spoken_text("L'éléphant danse.", known) == "L'éléphant"
+    assert gate_spoken_text("L'éléphant danse.", known) == "L'éléphant."

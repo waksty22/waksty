@@ -30,7 +30,7 @@ def normalize_word(value: str) -> str:
     if not isinstance(value, str):
         raise ValueError("Le mot doit être une chaîne de caractères.")
     word = value.strip().casefold()
-    word = re.sub(r"^[^\wÀ-ÖØ-öø-ÿ'-]+|[^\wÀ-ÖØ-öø-ÿ'-]+$", "", word)
+    word = re.sub(r"^[^\wÀ-ÖØ-öø-ÿ’'-]+|[^\wÀ-ÖØ-öø-ÿ’'-]+$", "", word)
     if not word or len(word) > MAX_WORD_LENGTH or len(word.split()) != 1:
         raise ValueError("Saisis un seul mot (80 caractères maximum).")
     return word
@@ -119,7 +119,7 @@ def record_heard_text(
         raise ValueError("La preuve d'exposition doit être du texte.")
     if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
         raise ValueError("La limite de mots doit être un entier positif.")
-    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
+    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ’'-]+", text, flags=re.UNICODE)
     recorded: list[dict[str, Any]] = []
     seen: set[str] = set()
     for token in tokens:
@@ -150,7 +150,7 @@ def record_explicit_word_teaching(
         raise ValueError("La preuve d'enseignement doit être du texte.")
     pattern = re.compile(
         r"(?:(?:le\s+)?mot\s+)?"
-        r"(?P<word>[A-Za-zÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ'-]{0,79})"
+        r"(?P<word>[A-Za-zÀ-ÖØ-öø-ÿ][\wÀ-ÖØ-öø-ÿ’'-]{0,79})"
         r"\s+(?:signifie|veut\s+dire|désigne|correspond\s+à)\s+"
         r"(?P<meaning>[^.!?;\n]{2,500})",
         flags=re.IGNORECASE | re.UNICODE,
@@ -361,7 +361,7 @@ def text_uses_only_allowed_words(text: str, allowed_words: set[str]) -> bool:
     if not isinstance(text, str):
         return False
     tokens = re.findall(
-        r"[\wÀ-ÖØ-öø-ÿ'-]+", text.casefold(), flags=re.UNICODE
+        r"[\wÀ-ÖØ-öø-ÿ’'-]+", text.casefold(), flags=re.UNICODE
     )
     return bool(tokens) and all(_token_is_known(token, allowed_words) for token in tokens)
 
@@ -378,11 +378,11 @@ def gate_spoken_text(
         raise ValueError("La limite de mots doit être un entier positif.")
     if not isinstance(text, str) or not usable_words:
         return ""
-    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ'-]+|[^\wÀ-ÖØ-öø-ÿ'-]+", text, flags=re.UNICODE)
+    tokens = re.findall(r"[\wÀ-ÖØ-öø-ÿ’'-]+|[^\wÀ-ÖØ-öø-ÿ’'-]+", text, flags=re.UNICODE)
     output: list[str] = []
     emitted_words = 0
     for token in tokens:
-        if re.fullmatch(r"[\wÀ-ÖØ-öø-ÿ'-]+", token, flags=re.UNICODE):
+        if re.fullmatch(r"[\wÀ-ÖØ-öø-ÿ’'-]+", token, flags=re.UNICODE):
             if _token_is_known(token, usable_words) and (
                 max_words is None or emitted_words < max_words
             ):

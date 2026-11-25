@@ -509,7 +509,7 @@ def test_shared_brain_prioritizes_old_object_experience_linked_to_matching_episo
         record_object_experience(
             db, "creator", "balle", f"action récente {index}",
             f"résultat récent {index}",
-            evidence="aucun lien avec le meuble",
+            evidence="preuve neutre",
         )
     db.commit()
 

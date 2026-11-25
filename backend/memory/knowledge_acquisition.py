@@ -318,6 +318,7 @@ def format_acquired_knowledge_context(
         "Statuts : confirmed_memory = souvenir confirmé ; "
         "taught_not_independently_verified = enseigné mais non vérifié seul ; "
         "observed_not_understood = observé sans preuve de compréhension ; "
+        "hypothesis_unverified = hypothèse non vérifiée ; "
         "experience_only_not_proof_of_learning = expérience autobiographique, "
         "pas preuve d'apprentissage ; observed_not_understood = observation non comprise ; "
         "supervised_skill_validated = compétence "

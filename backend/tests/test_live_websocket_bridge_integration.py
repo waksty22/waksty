@@ -130,7 +130,7 @@ def live_bridge(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_shared_brain_snapshot",
-        lambda _db, _user, limit=8: {
+        lambda _db, _user, limit=8, query=None: {
             "snapshot_version": "34.0",
             "statistics": {"totals": {}},
             "vocabulary": [{"word": "bonjour", "state": "usable"}],
@@ -276,10 +276,8 @@ def test_websocket_bridge_does_not_retry_or_duplicate_learning_after_storage_err
     assert calls["emotions"] == [("creator", "Bonjour")]
     assert len(calls["affective"]) == 1
     assert calls["links"] == []
-    assert calls["learning"] == [("creator", "Bonjour")]
-    assert calls["conversations"] == [
-        ("creator", "Bonjour", "", {"source": "gemini_live"})
-    ]
+    assert calls["learning"] == []
+    assert calls["conversations"] == []
     assert "Échec mémorisation tour confirmé" in caplog.text
 
 
@@ -537,7 +535,7 @@ def test_websocket_bridge_refreshes_persisted_brain_before_releasing_next_turn(
     ]
     snapshot_calls = []
 
-    def read_snapshot(_db, _user, limit=8):
+    def read_snapshot(_db, _user, limit=8, query=None):
         snapshot_calls.append(limit)
         return snapshots.pop(0)
 
@@ -566,7 +564,7 @@ def test_websocket_bridge_refreshes_persisted_brain_before_releasing_next_turn(
     refresh_text = refresh_messages[0]["turns"][0]["parts"][0]["text"]
     assert "MISE À JOUR DU CERVEAU PARTAGÉ" in refresh_text
     assert "merci" in refresh_text
-    assert snapshot_calls == [1, 1]
+    assert snapshot_calls == [8, 8]
     assert any(item.get("type") == "turn_complete" for item in _client.sent)
 
 
@@ -576,7 +574,7 @@ def test_websocket_bridge_closes_instead_of_continuing_with_stale_brain_context(
     run, calls, client = live_bridge
     snapshot_reads = 0
 
-    def fail_refresh(_db, _user, limit=8):
+    def fail_refresh(_db, _user, limit=8, query=None):
         nonlocal snapshot_reads
         snapshot_reads += 1
         if snapshot_reads == 1:
@@ -623,12 +621,14 @@ def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(
 ):
     run, _calls, client = live_bridge
     snapshots = [
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 0}}, "vocabulary": []},
         {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 1}}, "vocabulary": []},
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 2}}, "vocabulary": []},
         {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 2}}, "vocabulary": []},
     ]
     monkeypatch.setattr(
         server, "get_shared_brain_snapshot",
-        lambda _db, _user, limit=8: snapshots.pop(0),
+        lambda _db, _user, limit=8, query=None: snapshots.pop(0),
     )
     client.coordinate_refresh = True
     client.incoming_payloads = [

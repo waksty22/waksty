@@ -23,6 +23,26 @@ def test_query_ranks_older_records_across_cognitive_domains():
     init_causal_learning_tables(db)
     init_supervised_learning_tables(db)
     init_development_tables(db)
+    db.executescript("""
+        CREATE TABLE skills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            level REAL NOT NULL DEFAULT 0.0,
+            evidence TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, skill_name)
+        );
+        CREATE TABLE competency_tests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            test_name TEXT NOT NULL,
+            passed INTEGER NOT NULL,
+            score REAL NOT NULL,
+            details TEXT NOT NULL DEFAULT '',
+            tested_at TEXT NOT NULL
+        );
+    """)
 
     # Old but relevant records must outrank several newer unrelated records.
     db.execute(
@@ -87,6 +107,29 @@ def test_query_ranks_older_records_across_cognitive_domains():
                    'explicit_statement',0.9,'2025-01-01')"""
     )
 
+    db.execute(
+        """INSERT INTO skills (user_id,skill_name,level,evidence,updated_at)
+           VALUES ('creator','navigation spatiale',0.2,'repérage ancien du robot','2025-01-01')"""
+    )
+    for index in range(4):
+        db.execute(
+            """INSERT INTO skills (user_id,skill_name,level,evidence,updated_at)
+               VALUES ('creator',?,0.9,'preuve récente',?)""",
+            (f"compétence récente {index}", f"2026-01-0{index+1}"),
+        )
+    db.execute(
+        """INSERT INTO competency_tests
+           (user_id,test_name,passed,score,details,tested_at)
+           VALUES ('creator','robot:navigation',1,72,'test ancien de navigation spatiale','2025-01-01')"""
+    )
+    for index in range(4):
+        db.execute(
+            """INSERT INTO competency_tests
+               (user_id,test_name,passed,score,details,tested_at)
+               VALUES ('creator',?,1,99,'test sans rapport',?)""",
+            (f"recent:other-{index}", f"2026-01-0{index+1}"),
+        )
+
     snapshot = get_shared_brain_snapshot(db, "creator", limit=3, query="vélo rouge")
 
     assert "vélo rouge" in snapshot["memories"][0]["content"]
@@ -94,6 +137,11 @@ def test_query_ranks_older_records_across_cognitive_domains():
     assert "vélo rouge" in snapshot["imitation_examples"][0]["behavior"]
     assert "vélo rouge" in snapshot["decision_journal"][0]["question"]
     assert "vélo rouge" in snapshot["preference_evidence"][0]["preference"]
+    skill_snapshot = get_shared_brain_snapshot(
+        db, "creator", limit=2, query="navigation spatiale"
+    )
+    assert skill_snapshot["skills"][0]["skill_name"] == "navigation spatiale"
+    assert skill_snapshot["competency_tests"][0]["test_name"] == "robot:navigation"
 
     # Query-ranked results remain scoped to the requesting user.
     db.execute(

@@ -1486,132 +1486,117 @@ def _skill_table_columns(db: Any) -> set[str]:
     }
 
 
-def get_emotions(user_id: str) -> dict[str, Any]:
+def ensure_user_state_initialized(user_id: str) -> None:
+    """Create minimum per-user state at an explicit orchestration boundary."""
     user_id = valid_user(user_id)
     now = utc_now()
+    default_skills = [
+        ("tete", "🧠 La Tête (Réflexion & Calme)"),
+        ("mots", "🗣️ Les Mots (Vocabulaire & Second degré)"),
+        ("lien", "🤝 Le Lien (Empathie & Intentions)"),
+        ("mains", "💻 Les Mains (Logique & Code)"),
+        ("ame", "🎨 L'Âme (Musique & Création)"),
+        ("sens", "👀 Les Sens (Caméra & Voix)"),
+    ]
+    with db_connection() as db:
+        required_defaults = [
+            ("emotional_state",
+             """INSERT OR IGNORE INTO emotional_state
+                (user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+             (user_id, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, now)),
+            ("relationships",
+             """INSERT OR IGNORE INTO relationships
+                (user_id, trust, affection, dependence, updated_at)
+                VALUES (?, ?, ?, ?, ?)""",
+             (user_id, 0.0, 0.0, 0.0, now)),
+            ("user_intentions",
+             """INSERT OR IGNORE INTO user_intentions
+                (user_id, current_intent, confidence, details, updated_at)
+                VALUES (?, ?, ?, ?, ?)""",
+             (user_id, "éveil sensoriel", 0.1,
+              "Aucune connaissance personnelle validée.", now)),
+            ("maintenance_state",
+             """INSERT OR IGNORE INTO maintenance_state
+                (user_id, last_active_at, last_dream_at, updated_at)
+                VALUES (?, ?, ?, ?)""",
+             (user_id, now, "", now)),
+        ]
+        for table, insert_sql, values in required_defaults:
+            exists = db.execute(
+                f"SELECT 1 FROM {table} WHERE user_id=? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if not exists:
+                db.execute(insert_sql, values)
 
-    default_skills = [  
-        ("tete", "🧠 La Tête (Réflexion & Calme)"),  
-        ("mots", "🗣️ Les Mots (Vocabulaire & Second degré)"),  
-        ("lien", "🤝 Le Lien (Empathie & Intentions)"),  
-        ("mains", "💻 Les Mains (Logique & Code)"),  
-        ("ame", "🎨 L'Âme (Musique & Création)"),  
-        ("sens", "👀 Les Sens (Caméra & Voix)"),  
-    ]  
+        existing_skills = {
+            str(row[0]) for row in db.execute(
+                "SELECT skill_name FROM skills WHERE user_id=?", (user_id,)
+            ).fetchall()
+        }
+        missing_skills = [
+            (skill_id, label) for skill_id, label in default_skills
+            if skill_id not in existing_skills
+        ]
+        if missing_skills:
+            skill_columns = _skill_table_columns(db)
+            if "xp" in skill_columns:
+                skill_insert_sql = """INSERT OR IGNORE INTO skills
+                    (user_id, skill_name, level, xp, evidence, updated_at)
+                    VALUES (?, ?, 0.0, 0.0, ?, ?)"""
+            else:
+                skill_insert_sql = """INSERT OR IGNORE INTO skills
+                    (user_id, skill_name, level, evidence, updated_at)
+                    VALUES (?, ?, 0.0, ?, ?)"""
+            for skill_id, label in missing_skills:
+                db.execute(skill_insert_sql, (user_id, skill_id, label, now))
 
-    with db_connection() as db:  
-        db.execute(  
-            """  
-            INSERT OR IGNORE INTO emotional_state  
-            (user_id, joy, fear, curiosity, frustration, sadness, energy, updated_at)  
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)  
-            """,  
-            (user_id, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, now),  
-        )  
-
-        db.execute(  
-            """  
-            INSERT OR IGNORE INTO relationships  
-            (user_id, trust, affection, dependence, updated_at)  
-            VALUES (?, ?, ?, ?, ?)  
-            """,  
-            (user_id, 0.0, 0.0, 0.0, now),  
-        )  
-
-        db.execute(  
-            """  
-            INSERT OR IGNORE INTO user_intentions  
-            (user_id, current_intent, confidence, details, updated_at)  
-            VALUES (?, ?, ?, ?, ?)  
-            """,  
-            (  
-                user_id,  
-                "éveil sensoriel",  
-                0.1,  
-                "Aucune connaissance personnelle validée.",  
-                now,  
-            ),  
-        )  
-
-        skill_columns = _skill_table_columns(db)
-        if "xp" in skill_columns:
-            skill_insert_sql = """
-                INSERT OR IGNORE INTO skills
-                (user_id, skill_name, level, xp, evidence, updated_at)
-                VALUES (?, ?, 0.0, 0.0, ?, ?)
-            """
-        else:
-            # Existing Turso schemas may intentionally omit the legacy XP column.
-            # Supervised branch assessments, not aggregate XP, drive cognitive maturity.
-            skill_insert_sql = """
-                INSERT OR IGNORE INTO skills
-                (user_id, skill_name, level, evidence, updated_at)
-                VALUES (?, ?, 0.0, ?, ?)
-            """
-        for skill_id, label in default_skills:
-            db.execute(skill_insert_sql, (user_id, skill_id, label, now))
-
-        db.execute(  
-            """  
-            INSERT OR IGNORE INTO maintenance_state  
-            (user_id, last_active_at, last_dream_at, updated_at)  
-            VALUES (?, ?, ?, ?)  
-            """,  
-            (user_id, now, "", now),  
-        )  
-
-        row = db.execute(  
-            "SELECT * FROM emotional_state WHERE user_id=?",  
-            (user_id,),  
-        ).fetchone()  
-
-        db.commit()  
-
-    return dict(row)
+def get_emotions(user_id: str) -> dict[str, Any]:
+    """Read emotional state without initializing or writing rows."""
+    user_id = valid_user(user_id)
+    with db_connection() as db:
+        row = db.execute(
+            "SELECT * FROM emotional_state WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+    if row:
+        return dict(row)
+    return {
+        "user_id": user_id, "joy": 0.0, "fear": 0.0, "curiosity": 0.0,
+        "frustration": 0.0, "sadness": 0.0, "energy": 100.0,
+        "updated_at": utc_now(),
+    }
 
 def get_relationship(user_id: str) -> dict[str, Any]:
-    get_emotions(user_id)
-
-    with db_connection() as db:  
-        row = db.execute(  
-            """  
-            SELECT trust, affection, dependence, updated_at  
-            FROM relationships  
-            WHERE user_id=?  
-            """,  
-            (user_id,),  
-        ).fetchone()  
-
-    return dict(row) if row else {  
-        "trust": 50.0,  
-        "affection": 20.0,  
-        "dependence": 0.0,  
-        "updated_at": utc_now(),  
+    user_id = valid_user(user_id)
+    with db_connection() as db:
+        row = db.execute(
+            """SELECT trust, affection, dependence, updated_at
+               FROM relationships WHERE user_id=?""",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else {
+        "trust": 50.0, "affection": 20.0, "dependence": 0.0,
+        "updated_at": utc_now(),
     }
 
 def get_user_intention(user_id: str) -> dict[str, Any]:
-    get_emotions(user_id)
-
-    with db_connection() as db:  
-        row = db.execute(  
-            """  
-            SELECT current_intent, confidence, details, updated_at  
-            FROM user_intentions  
-            WHERE user_id=?  
-            """,  
-            (user_id,),  
-        ).fetchone()  
-
-    return dict(row) if row else {  
-        "current_intent": "discussion libre",  
-        "confidence": 0.5,  
-        "details": "Non défini",  
-        "updated_at": utc_now(),  
+    user_id = valid_user(user_id)
+    with db_connection() as db:
+        row = db.execute(
+            """SELECT current_intent, confidence, details, updated_at
+               FROM user_intentions WHERE user_id=?""",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else {
+        "current_intent": "discussion libre", "confidence": 0.5,
+        "details": "Non défini", "updated_at": utc_now(),
     }
 
 def get_skills_summary(user_id: str) -> dict[str, Any]:
     """Build maturity only from branch-level assessments approved by the supervisor."""
-    get_emotions(user_id)
+    user_id = valid_user(user_id)
     with db_connection() as db:
         skill_columns = _skill_table_columns(db)
         xp_expression = "xp" if "xp" in skill_columns else "0.0 AS xp"
@@ -1910,6 +1895,7 @@ def analyze_user_intent(user_id: str, message: str) -> dict[str, Any]:
     }
 
 def update_emotions_once(
+    ensure_user_state_initialized(user_id)
     user_id: str,
     message: str,
 ) -> dict[str, float]:
@@ -2717,6 +2703,7 @@ def build_autobiographical_context(
 
 
 def get_identity_context(user_id: str, query: str = "") -> str:
+    ensure_user_state_initialized(user_id)
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
     intent = get_user_intention(user_id)
@@ -4224,6 +4211,7 @@ def _memory_reflection_label(memory: Optional[dict[str, Any]]) -> str:
 
 
 def generate_dream(user_id: str) -> dict[str, Any]:
+    ensure_user_state_initialized(user_id)
     user_id = valid_user(user_id)
 
     memories = retrieve_memories(  
@@ -4307,6 +4295,7 @@ def generate_dream(user_id: str) -> dict[str, Any]:
     }
 
 def generate_rumination(user_id: str) -> dict[str, Any]:
+    ensure_user_state_initialized(user_id)
     user_id = valid_user(user_id)
 
     memories = retrieve_memories(  
@@ -4964,6 +4953,7 @@ async def api_record_skill_assessment(request: Request, auth=Depends(require_aut
             ).fetchone()
         if linked_step is None:
             raise HTTPException(status_code=403, detail="L'étape doit appartenir à ton objectif et comporter une preuve déjà enregistrée.")
+    ensure_user_state_initialized(user_id)
     details = {
         "source": "supervised_assessment",
         "supervisor_approved": True,

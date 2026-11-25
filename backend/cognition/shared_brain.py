@@ -320,7 +320,7 @@ def _rows(
                 "memories_v19", "object_properties", "causal_observations",
                 "causal_hypotheses", "causal_experiments", "imitation_examples",
                 "imitation_attempts", "decision_journal", "preference_evidence",
-                "skills", "competency_tests",
+                "skills", "competency_tests", "affective_history",
             }:
                 # Search only fixed, schema-verified text fields. This brings
                 # older episodic memories and supervised cognitive records into

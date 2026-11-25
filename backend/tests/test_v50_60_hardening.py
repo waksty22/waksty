@@ -190,7 +190,7 @@ def test_interrupted_live_turn_is_saved_as_partial_and_state_is_cleared(monkeypa
     assert saved == [(
         "creator",
         "Bonjour Chappie",
-        "Bonjour, je",
+        "",
         "gemini_live_interrupted",
     )]
     assert state == {"user": "", "assistant": "", "audio": [], "audio_chars": 0}

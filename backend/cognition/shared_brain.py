@@ -152,7 +152,12 @@ def _rows(
                     f"INSTR({folded_evidence}, ?) > 0" for _ in query_terms
                 )
                 rows = db.execute(
-                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"SELECT * FROM {table} AS place WHERE place.user_id=? "
+                    "AND (place.session_id IS NULL OR EXISTS ("
+                    "SELECT 1 FROM spatial_sessions AS consent_session "
+                    "WHERE consent_session.session_id=place.session_id "
+                    "AND consent_session.user_id=place.user_id "
+                    "AND consent_session.consented=1)) "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
                     (user_id, *query_terms, limit),
@@ -243,7 +248,7 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT {selected} FROM {from_clause} "
-                    "WHERE " + ("session.user_id=?" if table == "spatial_sessions" else "visit.user_id=?") +
+                    "WHERE " + ("session.user_id=? AND session.consented=1" if table == "spatial_sessions" else "visit.user_id=? AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session WHERE consent_session.session_id=visit.session_id AND consent_session.user_id=visit.user_id AND consent_session.consented=1)") +
                     " ORDER BY CASE WHEN EXISTS ("
                     "SELECT 1 FROM place_memories AS place "
                     "WHERE place.user_id=" + ("session.user_id " if table == "spatial_sessions" else "visit.user_id ") +
@@ -272,6 +277,33 @@ def _rows(
                     f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
+        elif table == "spatial_sessions":
+            rows = db.execute(
+                "SELECT * FROM spatial_sessions WHERE user_id=? AND consented=1 "
+                "ORDER BY started_at DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "spatial_visits":
+            rows = db.execute(
+                "SELECT visit.* FROM spatial_visits AS visit "
+                "JOIN spatial_sessions AS consent_session "
+                "ON consent_session.session_id=visit.session_id "
+                "AND consent_session.user_id=visit.user_id "
+                "WHERE visit.user_id=? AND consent_session.consented=1 "
+                "ORDER BY visit.recorded_at DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "place_memories":
+            rows = db.execute(
+                "SELECT place.* FROM place_memories AS place "
+                "WHERE place.user_id=? AND (place.session_id IS NULL OR EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=place.session_id "
+                "AND consent_session.user_id=place.user_id "
+                "AND consent_session.consented=1)) "
+                "ORDER BY place.last_seen_at DESC LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
         else:
             rows = db.execute(
                 f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
@@ -297,10 +329,22 @@ def _rows(
         ):
             # A partially upgraded legacy database may have GPS samples but
             # not yet have the place-observation table used for semantic ranking.
-            rows = db.execute(
-                f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
-                (user_id, limit),
-            ).fetchall()
+            if table == "spatial_sessions":
+                rows = db.execute(
+                    "SELECT * FROM spatial_sessions WHERE user_id=? AND consented=1 "
+                    "ORDER BY started_at DESC LIMIT ?",
+                    (user_id, limit),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT visit.* FROM spatial_visits AS visit "
+                    "JOIN spatial_sessions AS consent_session "
+                    "ON consent_session.session_id=visit.session_id "
+                    "AND consent_session.user_id=visit.user_id "
+                    "WHERE visit.user_id=? AND consent_session.consented=1 "
+                    "ORDER BY visit.recorded_at DESC LIMIT ?",
+                    (user_id, limit),
+                ).fetchall()
         elif table == "sensory_observations" and _is_missing_table_error(
             exc, "word_visual_associations"
         ):

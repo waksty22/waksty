@@ -167,7 +167,7 @@ def test_shared_world_model_tool_searches_relevant_records_for_both_channels(mon
     assert result["read_only"] is True
     assert result["user_scoped"] is True
     assert result["matching_is_not_proof_of_understanding"] is True
-    header, encoded = result["world_model_context"].split("\\n", 1)
+    header, encoded = result["world_model_context"].split("\n", 1)
     payload = json.loads(encoded)
     assert "NON FIABLES" in header
     assert payload["object_properties"][0]["object"] == "object:clock"

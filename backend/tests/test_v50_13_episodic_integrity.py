@@ -112,6 +112,50 @@ def test_decay_does_not_treat_malformed_timestamp_as_old():
 
 
 
+def test_search_finds_old_relevant_memory_beyond_candidate_window():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(
+            db, "owner", "Le café préféré du Créateur est torréfié léger",
+            importance=1, source_type="confirmed", confidence=0.95,
+        )
+        db.execute(
+            "UPDATE memories_v19 SET updated_at=?, created_at=? WHERE user_id=?",
+            ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "owner"),
+        )
+
+        recent_rows = [
+            (
+                "owner", "general", f"Souvenir récent sans rapport {index}",
+                5, "observed", 0.8, "[]", 0,
+                f"2026-11-25T00:{index:06d}+00:00",
+                f"2026-11-25T00:{index:06d}+00:00",
+            )
+            for index in range(2005)
+        ]
+        db.executemany(
+            """INSERT INTO memories_v19
+               (user_id, category, content, importance, source_type, confidence,
+                tags, access_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            recent_rows,
+        )
+        db.commit()
+
+        results = search_episodic_memories(db, "owner", "CAFE", limit=5)
+        old_memory = next(
+            item for item in results
+            if item["content"] == "Le café préféré du Créateur est torréfié léger"
+        )
+        assert old_memory["source_type"] == "confirmed"
+        assert old_memory["relevance_score"] > 0
+        assert old_memory["access_count"] == 1
+    finally:
+        db.close()
+
+
 def test_search_does_not_overflow_maximum_sqlite_access_counter():
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row

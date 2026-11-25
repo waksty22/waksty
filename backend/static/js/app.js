@@ -1149,10 +1149,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const reply = typeof data?.reply === "string" ? data.reply.trim() : "";
             if (!reply) {
-                throw new Error(
-                    data?.detail ||
-                    "Chappie n'a renvoyé aucune parole. Ton message est conservé : tu peux réessayer."
-                );
+                const detail = typeof data?.detail === "string" ? data.detail.trim() : "";
+                if (detail) throw new Error(detail);
+
+                // Silence is a valid newborn state, not a transport failure.
+                // Keep the user's message available while Chappie learns usable words.
+                if (outDiv) {
+                    outDiv.textContent =
+                        "Je n'ai pas encore appris de mot que je peux utiliser pour répondre. " +
+                        "Tu peux m'enseigner un mot dans l'espace d'apprentissage.";
+                }
+                return;
             }
 
             if (outDiv) {

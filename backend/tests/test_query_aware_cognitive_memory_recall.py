@@ -44,6 +44,21 @@ def test_query_ranks_older_records_across_cognitive_domains():
         );
     """)
 
+    # Emotional episodes are historical evidence, not a current state.
+    db.execute(
+        """INSERT INTO affective_history
+           (user_id,source,event_label,state_json,created_at)
+           VALUES ('creator','conversation','réaction à la panne du robot',
+                   '{"curiosity":85,"frustration":20}','2025-01-01')"""
+    )
+    for index in range(5):
+        db.execute(
+            """INSERT INTO affective_history
+               (user_id,source,event_label,state_json,created_at)
+               VALUES ('creator','conversation',?,'{"curiosity":10}',?)""",
+            (f"interaction neutre {index}", f"2026-01-0{index+1}"),
+        )
+
     # Old but relevant records must outrank several newer unrelated records.
     db.execute(
         """INSERT INTO memories_v19
@@ -137,6 +152,14 @@ def test_query_ranks_older_records_across_cognitive_domains():
     assert "vélo rouge" in snapshot["imitation_examples"][0]["behavior"]
     assert "vélo rouge" in snapshot["decision_journal"][0]["question"]
     assert "vélo rouge" in snapshot["preference_evidence"][0]["preference"]
+    affective_snapshot = get_shared_brain_snapshot(
+        db, "creator", limit=2, query="panne robot"
+    )
+    assert affective_snapshot["affective_history"][0]["event_label"] == (
+        "réaction à la panne du robot"
+    )
+    assert affective_snapshot["affective_history"][0]["state"]["curiosity"] == 85
+
     skill_snapshot = get_shared_brain_snapshot(
         db, "creator", limit=2, query="navigation spatiale"
     )

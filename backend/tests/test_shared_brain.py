@@ -374,3 +374,80 @@ def test_shared_brain_context_skips_non_finite_json_records():
     assert [row["id"] for row in records] == [1, 3]
     assert "CONTEXTE PARTIEL" in context
     assert "NaN" not in match.group(1)
+
+def test_query_retrieves_old_world_model_and_fusion_evidence_with_accent_folding():
+    db = make_db()
+    db.executescript("""
+        CREATE TABLE world_entities (
+            id TEXT PRIMARY KEY, user_id TEXT, entity_type TEXT,
+            properties_json TEXT, source_type TEXT, confidence REAL,
+            last_observed_at TEXT
+        );
+        CREATE TABLE world_relations (
+            id INTEGER PRIMARY KEY, user_id TEXT, subject_id TEXT,
+            predicate TEXT, object_id TEXT, source_type TEXT,
+            confidence REAL, updated_at TEXT
+        );
+        CREATE TABLE perception_fusion_candidates (
+            id INTEGER PRIMARY KEY, user_id TEXT, audio_observation_id TEXT,
+            vision_observation_id TEXT, time_delta_seconds REAL, status TEXT,
+            evidence_json TEXT, created_at TEXT
+        );
+    """)
+    db.execute(
+        "INSERT INTO world_entities VALUES "
+        "('elephant-old','creator','object','{\"label\":\"Éléphant\"}',"
+        "'confirmed',1.0,'2000-01-01')"
+    )
+    db.execute(
+        "INSERT INTO world_entities VALUES "
+        "('elephant-other-user','alice','object','{\"label\":\"Éléphant\"}',"
+        "'confirmed',1.0,'2099-01-01')"
+    )
+    db.execute(
+        "INSERT INTO world_relations VALUES "
+        "(1,'creator','elephant-old','confirmed_by_vision','obs-old',"
+        "'confirmed',1.0,'2000-01-01')"
+    )
+    db.execute(
+        "INSERT INTO perception_fusion_candidates VALUES "
+        "(1,'creator','audio-old','vision-old',0.2,'confirmed',"
+        "'{\"human_review\":{\"evidence\":\"Le Créateur confirme l’Éléphant\"}}',"
+        "'2000-01-01')"
+    )
+    for index in range(12):
+        entity_id = f"recent-{index}"
+        db.execute(
+            "INSERT INTO world_entities VALUES (?,?,?,?,?,?,?)",
+            (entity_id, "creator", "object", '{"label":"objet récent"}',
+             "observed", 0.2, f"2099-01-{index + 1:02d}"),
+        )
+        db.execute(
+            "INSERT INTO world_relations VALUES (?,?,?,?,?,?,?,?)",
+            (index + 2, "creator", entity_id, "near", f"place-{index}",
+             "observed", 0.2, f"2099-01-{index + 1:02d}"),
+        )
+        db.execute(
+            "INSERT INTO perception_fusion_candidates VALUES "
+            "(?,?,?,?,?,?,?,?)",
+            (index + 2, "creator", f"audio-{index}", f"vision-{index}",
+             0.1, "candidate", '{"audio_excerpt":"bruit sans rapport"}',
+             f"2099-01-{index + 1:02d}"),
+        )
+
+    snapshot = get_shared_brain_snapshot(db, "creator", limit=8, query="Parle-moi de l'elephant")
+    assert snapshot["world_entities"][0]["id"] == "elephant-old"
+    assert snapshot["world_relations"][0]["id"] == 1
+    assert snapshot["perception_fusions"][0]["id"] == 1
+    assert all(row["id"] != "elephant-other-user" for row in snapshot["world_entities"])
+    assert len(snapshot["world_entities"]) <= 8
+    assert len(snapshot["world_relations"]) <= 8
+    assert len(snapshot["perception_fusions"]) <= 8
+    db.close()
+
+def test_query_terms_split_french_elisions_and_normalize_accents():
+    from cognition.shared_brain import _query_terms
+
+    terms = _query_terms("Parle-moi de l'Éléphant")
+    assert "elephant" in terms
+    assert "l'elephant" not in terms

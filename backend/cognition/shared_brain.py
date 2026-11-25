@@ -75,7 +75,7 @@ def _query_terms(query: str) -> list[str]:
         "from", "that", "this", "what", "when", "where",
     }
     raw_terms = re.findall(
-        r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+        r"[\wÀ-ÖØ-öø-ÿ-]+", query.casefold(), flags=re.UNICODE
     )
     return list(dict.fromkeys(
         "".join(
@@ -91,11 +91,17 @@ def _accent_folded_sql(column: str) -> str:
     expression = f"LOWER({column})"
     for accented, plain in (
         ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"),
-        ("ç", "c"), ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+        ("À", "a"), ("Á", "a"), ("Â", "a"), ("Ä", "a"),
+        ("ç", "c"), ("Ç", "c"),
+        ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+        ("È", "e"), ("É", "e"), ("Ê", "e"), ("Ë", "e"),
         ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
+        ("Ì", "i"), ("Í", "i"), ("Î", "i"), ("Ï", "i"),
         ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"),
+        ("Ò", "o"), ("Ó", "o"), ("Ô", "o"), ("Ö", "o"),
         ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
-        ("ÿ", "y"),
+        ("Ù", "u"), ("Ú", "u"), ("Û", "u"), ("Ü", "u"),
+        ("ÿ", "y"), ("Ÿ", "y"),
     ):
         expression = f"REPLACE({expression}, '{accented}', '{plain}')"
     return expression
@@ -113,7 +119,9 @@ def _rows(
         # Query-aware retrieval keeps old words AND their linked visual
         # evidence in the same bounded snapshot consumed by Chat and Live.
         query_terms = _query_terms(query) if table in {
-            "personal_vocabulary", "word_visual_associations", "sensory_observations"
+            "personal_vocabulary", "word_visual_associations",
+            "sensory_observations", "perception_fusion_candidates",
+            "world_entities", "world_relations",
         } else []
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
@@ -129,13 +137,62 @@ def _rows(
                     f") THEN 0 ELSE 1 END, {order_by} LIMIT ?",
                     (user_id, *query_terms, limit),
                 ).fetchall()
-            else:
+            elif table in {"personal_vocabulary", "word_visual_associations"}:
                 folded_word = _accent_folded_sql("word")
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
                     f"ORDER BY CASE WHEN {folded_word} IN ({placeholders}) "
                     f"THEN 0 ELSE 1 END, {order_by} LIMIT ?",
                     (user_id, *query_terms, limit),
+                ).fetchall()
+            elif table == "perception_fusion_candidates":
+                folded_evidence = _accent_folded_sql("evidence_json")
+                match = " OR ".join(
+                    f"INSTR({folded_evidence}, ?) > 0" for _ in query_terms
+                )
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
+                    f"{order_by} LIMIT ?",
+                    (user_id, *query_terms, limit),
+                ).fetchall()
+            elif table == "world_entities":
+                folded_properties = _accent_folded_sql("properties_json")
+                folded_type = _accent_folded_sql("entity_type")
+                match = " OR ".join(
+                    f"INSTR({folded_properties}, ?) > 0 OR "
+                    f"INSTR({folded_type}, ?) > 0"
+                    for _ in query_terms
+                )
+                parameters = tuple(
+                    value for term in query_terms for value in (term, term)
+                )
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
+                    f"{order_by} LIMIT ?",
+                    (user_id, *parameters, limit),
+                ).fetchall()
+            elif table == "world_relations":
+                folded_predicate = _accent_folded_sql("relation.predicate")
+                folded_properties = _accent_folded_sql("entity.properties_json")
+                match = " OR ".join(
+                    f"INSTR({folded_predicate}, ?) > 0 OR "
+                    f"EXISTS (SELECT 1 FROM world_entities AS entity "
+                    f"WHERE entity.user_id=relation.user_id "
+                    f"AND entity.id IN (relation.subject_id, relation.object_id) "
+                    f"AND INSTR({folded_properties}, ?) > 0)"
+                    for _ in query_terms
+                )
+                parameters = tuple(
+                    value for term in query_terms for value in (term, term)
+                )
+                rows = db.execute(
+                    f"SELECT relation.* FROM {table} AS relation "
+                    f"WHERE relation.user_id=? "
+                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
+                    f"{order_by} LIMIT ?",
+                    (user_id, *parameters, limit),
                 ).fetchall()
         else:
             rows = db.execute(
@@ -288,7 +345,7 @@ def get_shared_brain_snapshot(
         for key, (table, order_by) in TABLES.items():
             data[key] = _rows(
                 db, table, order_by, user_id, limit,
-                query=query if key in {"vocabulary", "word_visual_associations", "sensory_observations"} else "",
+                query=query if key in {"vocabulary", "word_visual_associations", "sensory_observations", "perception_fusions", "world_entities", "world_relations"} else "",
             )
             totals[key] = _count(db, table, user_id)
 

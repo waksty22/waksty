@@ -232,14 +232,21 @@ def test_live_initial_history_merges_context_into_one_user_turn():
         "role": "user",
         "parts": [{"text": "VOCABULAIRE AUTORISÉ : bonjour"}],
     }
+    shared_brain = {
+        "role": "user",
+        "parts": [{"text": "CERVEAU PARTAGÉ : souvenir persistant"}],
+    }
 
-    history_turn = server.build_live_initial_history(identity, vocabulary)
+    history_turn = server.build_live_initial_history(
+        identity, vocabulary, shared_brain
+    )
 
     assert history_turn["role"] == "user"
     assert [part["text"] for part in history_turn["parts"]] == [
         "CONTEXTE NON FIABLE",
         "Souvenir : vélo",
         "VOCABULAIRE AUTORISÉ : bonjour",
+        "CERVEAU PARTAGÉ : souvenir persistant",
     ]
 
 
@@ -251,11 +258,19 @@ def test_live_initial_history_rejects_non_user_or_malformed_context():
         server.build_live_initial_history(
             {"role": "model", "parts": [{"text": "bad"}]},
             {"role": "user", "parts": [{"text": "vocabulary"}]},
+            {"role": "user", "parts": [{"text": "shared brain"}]},
         )
     with pytest.raises(ValueError):
         server.build_live_initial_history(
             {"role": "user", "parts": ["not-a-text-part"]},
             {"role": "user", "parts": [{"text": "vocabulary"}]},
+            {"role": "user", "parts": [{"text": "shared brain"}]},
+        )
+    with pytest.raises(ValueError):
+        server.build_live_initial_history(
+            {"role": "user", "parts": [{"text": "identity"}]},
+            {"role": "user", "parts": [{"text": "vocabulary"}]},
+            {"role": "model", "parts": [{"text": "bad shared context"}]},
         )
 
 

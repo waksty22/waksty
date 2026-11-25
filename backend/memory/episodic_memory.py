@@ -519,13 +519,74 @@ def search_episodic_memories(
         )
         rows = cursor.fetchall()
     else:
-        # Load a bounded user-scoped candidate pool, then normalize accents
-        # in Python. SQLite/libSQL lower() is not reliably Unicode-aware.
-        cursor = db.execute(
+        # Keep a recent candidate pool for fallback, but also search old rows
+        # directly in SQL so a relevant memory cannot disappear behind the
+        # 2,000-row recency window. Accent folding mirrors the Python matcher.
+        recent_cursor = db.execute(
             columns + " ORDER BY importance DESC, updated_at DESC LIMIT 2000",
             (user_id,),
         )
-        rows = cursor.fetchall()
+        recent_rows = [
+            _row_to_dict(row, recent_cursor)
+            for row in recent_cursor.fetchall()
+        ]
+
+        def folded_sql(column: str) -> str:
+            expression = f"LOWER(COALESCE({column}, ''))"
+            for source, target in (
+                ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"), ("ã", "a"),
+                ("ç", "c"),
+                ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+                ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
+                ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"), ("õ", "o"),
+                ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
+                ("ý", "y"), ("ÿ", "y"), ("œ", "oe"), ("æ", "ae"),
+            ):
+                expression = f"REPLACE({expression}, '{source}', '{target}')"
+            return expression
+
+        searchable_columns = tuple(
+            folded_sql(column) for column in ("content", "category", "tags")
+        )
+        term_clauses: list[str] = []
+        where_parameters: list[str] = []
+        score_terms: list[str] = []
+        score_parameters: list[str] = []
+        for term in terms:
+            expression = "(" + " OR ".join(
+                f"{column} LIKE ?" for column in searchable_columns
+            ) + ")"
+            patterns = [f"%{term}%" for _ in searchable_columns]
+            term_clauses.append(expression)
+            where_parameters.extend(patterns)
+            score_terms.append(f"CASE WHEN {expression} THEN 1 ELSE 0 END")
+            score_parameters.extend(patterns)
+
+        matching_cursor = db.execute(
+            columns
+            + " AND (" + " OR ".join(term_clauses) + ")"
+            + " ORDER BY (" + " + ".join(score_terms) + ") DESC, "
+            + "importance DESC, updated_at DESC, id DESC LIMIT 2000",
+            (user_id, *where_parameters, *score_parameters),
+        )
+        matching_rows = [
+            _row_to_dict(row, matching_cursor)
+            for row in matching_cursor.fetchall()
+        ]
+
+        # Matching historical records take priority; recent records remain
+        # available as fallback, with stable IDs preventing duplicates.
+        merged_rows: dict[int, dict[str, Any]] = {}
+        for item in matching_rows:
+            row_id = item.get("id")
+            if isinstance(row_id, int) and not isinstance(row_id, bool):
+                merged_rows[row_id] = item
+        for item in recent_rows:
+            row_id = item.get("id")
+            if isinstance(row_id, int) and not isinstance(row_id, bool):
+                merged_rows.setdefault(row_id, item)
+        rows = list(merged_rows.values())
+        cursor = matching_cursor
 
     results: list[dict[str, Any]] = []
     normalized_query = query.casefold()

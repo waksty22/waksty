@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cognition.development import init_development_tables
-from cognition.shared_brain import get_shared_brain_snapshot
+from cognition.shared_brain import get_shared_brain_snapshot, format_shared_brain_context
 from learning.causal_learning import init_causal_learning_tables
 from learning.object_learning import init_object_learning_tables
 from learning.supervised_learning import init_supervised_learning_tables
@@ -160,6 +160,10 @@ def test_query_ranks_older_records_across_cognitive_domains():
         "réaction à la panne du robot"
     )
     assert json.loads(affective_snapshot["affective_history"][0]["state_json"])["curiosity"] == 85
+    affective_context = format_shared_brain_context(affective_snapshot)
+    assert "HISTORIQUE AFFECTIF" in affective_context
+    assert "réaction à la panne du robot" in affective_context
+    assert '\\"curiosity\\":85' in affective_context
 
     skill_snapshot = get_shared_brain_snapshot(
         db, "creator", limit=2, query="navigation spatiale"

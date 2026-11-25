@@ -668,6 +668,7 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
         ("competency_tests", "ÉVALUATIONS DE COMPÉTENCES — progression avec preuve supervisée"),
         ("decision_journal", "DÉCISIONS ET RÉSULTATS"),
         ("preference_evidence", "PRÉFÉRENCES EXPLICITEMENT DOCUMENTÉES"),
+        ("affective_history", "HISTORIQUE AFFECTIF — événements passés, distincts de l’état actuel"),
         ("emotional_state", "ÉTAT AFFECTIF SIMULÉ"),
         ("spatial_sessions", "SESSIONS DE LOCALISATION — consentement explicite"),
         ("spatial_visits", "POSITIONS GPS — données de session autorisée"),

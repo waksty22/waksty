@@ -2608,6 +2608,23 @@ def build_live_brain_refresh_message(
     }
 
 
+def build_live_query_brain_refresh_message(
+    db: Any,
+    user_id: str,
+    query: str,
+    refresh_version: int,
+) -> dict[str, Any] | None:
+    """Build a query-specific shared-brain update before forwarding Live text."""
+    if not isinstance(query, str) or not query.strip():
+        return None
+    snapshot = get_shared_brain_snapshot(
+        db, user_id, limit=8, query=query.strip()
+    )
+    return build_live_brain_refresh_message(
+        snapshot, [], [], refresh_version
+    )
+
+
 def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> bool:
     """Persist only confirmed text transcripts when a Live session ends unexpectedly."""
     raw_user_text = turn_state.get("user")
@@ -6947,6 +6964,26 @@ async def websocket_endpoint(
                     else:
                         # Never relay arbitrary client JSON into the provider protocol.
                         continue
+                    if pending_merged_user_text is not None:
+                        # Retrieve query-relevant long-term knowledge before
+                        # Gemini receives the user's text, not after its answer.
+                        await brain_context_ready.wait()
+                        try:
+                            with db_connection() as query_brain_db:
+                                query_refresh = build_live_query_brain_refresh_message(
+                                    query_brain_db,
+                                    user_id,
+                                    pending_merged_user_text,
+                                    live_turn_state["brain_refresh_version"] + 1,
+                                )
+                            if query_refresh is not None:
+                                await send_to_gemini(query_refresh)
+                                live_turn_state["brain_refresh_version"] += 1
+                        except Exception:
+                            log.exception(
+                                "[GEMINI LIVE] Échec du rappel contextuel avant le message utilisateur"
+                            )
+                            raise
                     await send_to_gemini(message)
                     if pending_merged_user_text is not None:
                         live_turn_state["user"] = pending_merged_user_text

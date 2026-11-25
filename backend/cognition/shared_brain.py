@@ -265,10 +265,11 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
-                    "AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
+                    "AND (place_memories.session_id IS NULL OR EXISTS ("
+                    "SELECT 1 FROM spatial_sessions AS consent_session "
                     "WHERE consent_session.session_id=place_memories.session_id "
                     "AND consent_session.user_id=place_memories.user_id "
-                    "AND consent_session.consented=1) "
+                    "AND consent_session.consented=1)) "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),
@@ -381,22 +382,22 @@ def _rows(
         elif table == "place_memories":
             rows = db.execute(
                 "SELECT place_memories.* FROM place_memories "
-                "WHERE place_memories.user_id=? AND EXISTS ("
+                "WHERE place_memories.user_id=? AND (place_memories.session_id IS NULL OR EXISTS ("
                 "SELECT 1 FROM spatial_sessions AS consent_session "
                 "WHERE consent_session.session_id=place_memories.session_id "
                 "AND consent_session.user_id=place_memories.user_id "
-                "AND consent_session.consented=1) "
+                "AND consent_session.consented=1)) "
                 f"ORDER BY {order_by} LIMIT ?",
                 (user_id, limit),
             ).fetchall()
         elif table == "place_memories":
             rows = db.execute(
                 "SELECT place_memories.* FROM place_memories "
-                "WHERE place_memories.user_id=? AND EXISTS ("
+                "WHERE place_memories.user_id=? AND (place_memories.session_id IS NULL OR EXISTS ("
                 "SELECT 1 FROM spatial_sessions AS consent_session "
                 "WHERE consent_session.session_id=place_memories.session_id "
                 "AND consent_session.user_id=place_memories.user_id "
-                "AND consent_session.consented=1) "
+                "AND consent_session.consented=1)) "
                 f"ORDER BY {order_by} LIMIT ?",
                 (user_id, limit),
             ).fetchall()

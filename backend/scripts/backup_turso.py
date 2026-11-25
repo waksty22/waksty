@@ -22,6 +22,23 @@ from storage.logical_backup import (  # noqa: E402
 )
 
 
+def _extract_expected_archive_members(
+    archive: zipfile.ZipFile,
+    destination: Path,
+    expected_names: set[str],
+) -> None:
+    """Reject duplicate/unexpected ZIP members and extract only fixed names."""
+    member_names = archive.namelist()
+    if len(member_names) != len(expected_names) or set(member_names) != expected_names:
+        raise ValueError("Backup archive contains missing, duplicate, or unexpected files.")
+    for name in sorted(expected_names):
+        # Callers supply fixed, application-owned member names; still refuse
+        # any path component so this helper cannot become a ZIP-slip primitive.
+        if Path(name).name != name or name in {"", ".", ".."}:
+            raise ValueError("Backup archive member name is not a safe file name.")
+        (destination / name).write_bytes(archive.read(name))
+
+
 def create_backup_archive(
     connection: Any,
     output_path: str | Path,
@@ -68,9 +85,9 @@ def create_backup_archive(
                     encrypted_path.name,
                     checksum_path.name,
                 }
-                if set(archive.namelist()) != expected:
-                    raise ValueError("Backup archive contains unexpected files.")
-                archive.extractall(verify_dir)
+                _extract_expected_archive_members(
+                    archive, verify_dir, expected
+                )
 
             packaged_backup = verify_dir / encrypted_path.name
             verification = verify_encrypted_logical_backup(

@@ -40,3 +40,29 @@ def test_archive_member_names_match_authenticated_api_contract(tmp_path):
             assert checksum_text.split()[-1] == expected_member
     finally:
         database.close()
+
+
+
+def test_archive_verification_rejects_duplicate_member_names(tmp_path):
+    from backup_turso import _extract_expected_archive_members
+
+    archive_path = tmp_path / "duplicate-members.zip"
+    destination = tmp_path / "verified"
+    destination.mkdir()
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("chappie-turso-backup.json.enc", b"first")
+        archive.writestr("chappie-turso-backup.json.enc", b"second")
+        archive.writestr("chappie-turso-backup.json.enc.sha256", b"checksum")
+
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        with pytest.raises(ValueError, match="duplicate"):
+            _extract_expected_archive_members(
+                archive,
+                destination,
+                {
+                    "chappie-turso-backup.json.enc",
+                    "chappie-turso-backup.json.enc.sha256",
+                },
+            )
+
+    assert list(destination.iterdir()) == []

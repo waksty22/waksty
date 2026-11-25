@@ -506,13 +506,14 @@ def search_episodic_memories(
     query = query.strip()[:MAX_SEARCH_LENGTH]
     limit = _normalize_limit(limit, 1, 30)
 
+    terms = _memory_search_terms(query) if query else []
     columns = """
         SELECT id, user_id, category, content, importance, source_type,
                confidence, tags, access_count, created_at, updated_at
         FROM memories_v19
         WHERE user_id = ?
     """
-    if not query:
+    if not terms:
         cursor = db.execute(
             columns + " ORDER BY importance DESC, access_count DESC, updated_at DESC LIMIT ?",
             (user_id, limit),
@@ -590,7 +591,6 @@ def search_episodic_memories(
 
     results: list[dict[str, Any]] = []
     normalized_query = query.casefold()
-    terms = _memory_search_terms(query) if query else []
     for row in rows:
         item = _row_to_dict(row, cursor)
         # Defensive read boundary: damaged rows must not crash ranking or

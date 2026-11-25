@@ -3252,7 +3252,7 @@ def build_world_model_context(
 def build_untrusted_identity_context_message(user_id: str, query: str = "") -> dict[str, Any]:
     """Build a bounded user-role context envelope, never a system instruction."""
     context = get_identity_context(user_id, query=query)
-    world_context = build_world_model_context(user_id)
+    world_context = build_world_model_context(user_id, query=query)
     max_chars = 24000
     if world_context:
         context = _truncate_context_at_section_boundary(context, max_chars - len(world_context) - 2)

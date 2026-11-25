@@ -199,6 +199,10 @@ def main() -> int:
                 expected_target_identity=EXPECTED_HOST,
                 production_identity=production,
             )
+            # Once restore starts, the target may contain partial fixture schema
+            # if a remote commit/rollback response is ambiguous. Always run the
+            # exact-name cleanup in the outer finally block after this point.
+            fixtures_created = True
             try:
                 restored = restore_encrypted_logical_backup(
                     HranaRestoreConnection(restore_tx),

@@ -142,6 +142,59 @@ def test_identity_context_includes_user_scoped_world_snapshot_for_chat_and_live(
     db.close()
 
 
+def test_explicit_semantic_promotion_is_distinguished_from_temporal_cooccurrence(monkeypatch):
+    db = _world_db()
+    row = db.execute(
+        "SELECT evidence_json FROM perception_fusion_candidates WHERE id=1"
+    ).fetchone()
+    evidence = json.loads(row["evidence_json"])
+    evidence["semantic_promotion"] = {
+        "object_label": "horloge",
+        "object_entity_id": "object:clock",
+        "evidence": "Le Créateur a explicitement confirmé le lien.",
+        "promoted": True,
+    }
+    db.execute(
+        "UPDATE perception_fusion_candidates SET evidence_json=? WHERE id=1",
+        (json.dumps(evidence, ensure_ascii=False),),
+    )
+    db.commit()
+
+    @contextmanager
+    def fake_db_connection():
+        yield db
+
+    monkeypatch.setattr(server, "db_connection", fake_db_connection)
+    context = server.build_world_model_context("creator")
+    header, encoded = context.split("\n", 1)
+    payload = json.loads(encoded)
+    promoted = next(item for item in payload["cross_modal_fusions"] if item["candidate_id"] == 1)
+
+    assert "seul un apprentissage explicitement promu" in header
+    assert promoted["semantic_identity_proven"] is True
+    assert promoted["world_knowledge_promoted"] is True
+    assert promoted["semantic_promotion"]["object_label"] == "horloge"
+
+    unpromoted_db = _world_db()
+
+    @contextmanager
+    def unpromoted_connection():
+        yield unpromoted_db
+
+    monkeypatch.setattr(server, "db_connection", unpromoted_connection)
+    unpromoted_context = server.build_world_model_context("creator")
+    _, unpromoted_encoded = unpromoted_context.split("\n", 1)
+    unpromoted_payload = json.loads(unpromoted_encoded)
+    unpromoted = next(
+        item for item in unpromoted_payload["cross_modal_fusions"]
+        if item["candidate_id"] == 1
+    )
+    assert unpromoted["semantic_identity_proven"] is False
+    assert unpromoted["world_knowledge_promoted"] is False
+    db.close()
+    unpromoted_db.close()
+
+
 def test_world_model_context_is_bounded_and_valid_json(monkeypatch):
     db = _world_db()
 

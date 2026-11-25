@@ -117,13 +117,14 @@ def test_world_model_context_is_bounded_and_valid_json(monkeypatch):
         yield db
 
     monkeypatch.setattr(server, "db_connection", fake_db_connection)
-    context = server.build_world_model_context("creator", max_chars=500)
+    context = server.build_world_model_context("creator", max_chars=700)
     header, encoded = context.split("\n", 1)
     payload = json.loads(encoded)
 
-    assert len(context) <= 500
+    assert len(context) <= 700
     assert "NON FIABLES" in header
-    assert payload["entities"][0]["id"] == "object:clock"
+    assert payload["partial"] is True
+    assert set(payload) >= {"entities", "relations", "object_properties", "object_experiences"}
     db.close()
 
 

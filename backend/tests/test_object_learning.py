@@ -8,6 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from learning.language import init_language_tables, record_heard_word, advance_word
+from memory.autobiographical import init_autobiographical_tables
 from learning.object_learning import (
     init_object_learning_tables,
     teach_object_property,
@@ -26,6 +27,13 @@ from world.world_model import init_world_tables, upsert_world_entity, add_world_
 def db():
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
+    connection.execute(
+        """CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY, user_id TEXT, role TEXT,
+            content TEXT, created_at TEXT
+        )"""
+    )
+    init_autobiographical_tables(connection)
     init_language_tables(connection)
     init_world_tables(connection)
     init_sensory_tables(connection)
@@ -412,3 +420,63 @@ def test_object_property_confirmation_endpoint_requires_authenticated_post():
         dependency.call is server.require_auth
         for dependency in route.dependant.dependencies
     )
+
+
+def test_object_experience_can_link_only_an_explicit_same_user_episode(db):
+    add_recognized_object(db, "balle")
+    db.execute(
+        """INSERT INTO conversations (id, user_id, role, content, created_at)
+           VALUES (1, 'creator', 'user', 'Julien montre une balle', '2026-11-25T10:00:00Z')"""
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events
+           (id, user_id, source_conversation_id, actor, event_type, content,
+            happened_at, importance, created_at)
+           VALUES (11, 'creator', 1, 'user', 'user_statement',
+                   'Julien montre une balle', '2026-11-25T10:00:00Z', 3,
+                   '2026-11-25T10:00:00Z')"""
+    )
+    experience = record_object_experience(
+        db, "creator", "balle", "pousser", "la balle roule",
+        autobiographical_event_id=11,
+    )
+    assert experience["autobiographical_event_id"] == 11
+    stored = db.execute(
+        "SELECT autobiographical_event_id FROM object_experiences WHERE id=?",
+        (experience["id"],),
+    ).fetchone()
+    assert stored["autobiographical_event_id"] == 11
+
+
+@pytest.mark.parametrize("invalid_id", [True, False, 0, -1, "11", 11.0, {}, []])
+def test_object_experience_rejects_invalid_episode_id_without_writing(db, invalid_id):
+    add_recognized_object(db, "balle")
+    with pytest.raises(ValueError, match="identifiant d'épisode"):
+        record_object_experience(
+            db, "creator", "balle", "pousser", "la balle roule",
+            autobiographical_event_id=invalid_id,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_experiences").fetchone()[0] == 0
+
+
+def test_object_experience_rejects_another_users_episode(db):
+    add_recognized_object(db, "balle")
+    db.execute(
+        """INSERT INTO conversations (id, user_id, role, content, created_at)
+           VALUES (2, 'other', 'user', 'Une autre balle', '2026-11-25T10:00:00Z')"""
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events
+           (id, user_id, source_conversation_id, actor, event_type, content,
+            happened_at, importance, created_at)
+           VALUES (12, 'other', 2, 'user', 'user_statement',
+                   'Une autre balle', '2026-11-25T10:00:00Z', 3,
+                   '2026-11-25T10:00:00Z')"""
+    )
+    with pytest.raises(ValueError, match="n'existe pas pour cet utilisateur"):
+        record_object_experience(
+            db, "creator", "balle", "pousser", "la balle roule",
+            autobiographical_event_id=12,
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_experiences").fetchone()[0] == 0
+

@@ -58,6 +58,17 @@ def init_object_learning_tables(db: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_object_experiences_user_object
         ON object_experiences(user_id, object_id, created_at DESC);
     """)
+    # Additive migration: existing experiences remain intact and unlinked.
+    columns = {
+        row["name"] for row in db.execute(
+            "PRAGMA table_info(object_experiences)"
+        ).fetchall()
+    }
+    if "autobiographical_event_id" not in columns:
+        db.execute(
+            "ALTER TABLE object_experiences "
+            "ADD COLUMN autobiographical_event_id INTEGER"
+        )
 
 
 def _clean(value: Any, label: str, maximum: int) -> str:
@@ -263,7 +274,8 @@ def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, A
             (user_id, entity["id"]),
         ).fetchall()
         experiences = db.execute(
-            """SELECT action, outcome, evidence, source_type, confidence, created_at
+            """SELECT action, outcome, evidence, source_type, confidence,
+                      autobiographical_event_id, created_at
                FROM object_experiences WHERE user_id=? AND object_id=?
                ORDER BY created_at DESC LIMIT 20""",
             (user_id, entity["id"]),
@@ -342,8 +354,28 @@ def record_object_experience(
     evidence: str = "",
     confidence: float = 0.6,
     source_type: str = "observed",
+    autobiographical_event_id: int | None = None,
 ) -> dict[str, Any]:
     word, object_id = _require_known_object(db, user_id, word)
+    if autobiographical_event_id is not None:
+        if (
+            isinstance(autobiographical_event_id, bool)
+            or not isinstance(autobiographical_event_id, int)
+            or autobiographical_event_id < 1
+        ):
+            raise ValueError("L'identifiant d'épisode doit être un entier positif.")
+        try:
+            episode = db.execute(
+                """SELECT 1 FROM autobiographical_events
+                   WHERE id=? AND user_id=?""",
+                (autobiographical_event_id, user_id),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).casefold():
+                raise ValueError("La mémoire autobiographique n'est pas initialisée.") from exc
+            raise
+        if episode is None:
+            raise ValueError("Cet épisode autobiographique n'existe pas pour cet utilisateur.")
     action = _clean(action, "Action", 300)
     outcome = _clean(outcome, "Résultat", 1000)
     evidence = _clean_optional_evidence(evidence)
@@ -354,14 +386,16 @@ def record_object_experience(
     cursor = db.execute(
         """INSERT INTO object_experiences
            (user_id, object_id, action, outcome, evidence, source_type,
-            confidence, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (user_id, object_id, action, outcome, evidence, source_type, confidence, now),
+            confidence, created_at, autobiographical_event_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, object_id, action, outcome, evidence, source_type, confidence,
+         now, autobiographical_event_id),
     )
     return {
         "id": cursor.lastrowid, "word": word, "action": action,
         "outcome": outcome, "evidence": evidence,
         "source_type": source_type, "confidence": confidence,
+        "autobiographical_event_id": autobiographical_event_id,
         "created_at": now,
         "promoted_to_property": False,
     }

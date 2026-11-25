@@ -555,3 +555,29 @@ def test_confirmed_live_turn_does_not_promote_ordinary_words(language_db):
     assert result["heard"]
     assert result["taught"] == []
     assert all(item["state"] == "heard" for item in result["heard"])
+
+
+def test_french_elisions_expose_the_root_word_without_learning_the_clitic(language_db):
+    from learning.language import record_heard_text, list_vocabulary
+
+    recorded = record_heard_text(
+        language_db, "creator",
+        "L'éléphant d'accord, j'aime qu'on regarde l’éléphant.",
+    )
+
+    words = [item["word"] for item in recorded]
+    assert words == ["éléphant", "accord", "aime", "on", "regarde"]
+    stored = {item["word"] for item in list_vocabulary(language_db, "creator")}
+    assert stored == set(words)
+    assert "l'éléphant" not in stored
+    assert "l'" not in stored
+
+
+def test_french_elisions_respect_newborn_known_word_gate():
+    from learning.language import text_uses_only_allowed_words, gate_spoken_text
+
+    known = {"éléphant", "regarde"}
+    assert text_uses_only_allowed_words("L'éléphant regarde.", known)
+    assert not text_uses_only_allowed_words("L'éléphant danse.", known)
+    assert gate_spoken_text("L'éléphant regarde.", known) == "L'éléphant regarde."
+    assert gate_spoken_text("L'éléphant danse.", known) == "L'éléphant."

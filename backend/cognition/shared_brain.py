@@ -123,6 +123,7 @@ def _rows(
             "sensory_observations", "perception_fusion_candidates",
             "world_entities", "world_relations", "spatial_sessions",
             "spatial_visits", "place_memories", "autobiographical_events",
+            "object_experiences",
         } else []
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
@@ -177,6 +178,54 @@ def _rows(
                     f"SELECT * FROM {table} WHERE user_id=? "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
+                    (user_id, *parameters, limit),
+                ).fetchall()
+            elif table == "object_experiences":
+                folded_action = _accent_folded_sql("experience.action")
+                folded_outcome = _accent_folded_sql("experience.outcome")
+                folded_evidence = _accent_folded_sql("experience.evidence")
+                has_autobiographical_events = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='autobiographical_events'"
+                ).fetchone() is not None
+                if has_autobiographical_events:
+                    folded_episode = _accent_folded_sql("episode.content")
+                    match = " OR ".join(
+                        "("
+                        f"INSTR({folded_action}, ?) > 0 OR "
+                        f"INSTR({folded_outcome}, ?) > 0 OR "
+                        f"INSTR({folded_evidence}, ?) > 0 OR "
+                        "EXISTS (SELECT 1 FROM autobiographical_events AS episode "
+                        "WHERE episode.id=experience.autobiographical_event_id "
+                        "AND episode.user_id=experience.user_id "
+                        f"AND INSTR({folded_episode}, ?) > 0)"
+                        ")"
+                        for _ in query_terms
+                    )
+                    parameters = tuple(
+                        value for term in query_terms
+                        for value in (term, term, term, term)
+                    )
+                else:
+                    # Older/test databases can have object experiences before
+                    # autobiographical episode indexing was introduced.
+                    match = " OR ".join(
+                        "("
+                        f"INSTR({folded_action}, ?) > 0 OR "
+                        f"INSTR({folded_outcome}, ?) > 0 OR "
+                        f"INSTR({folded_evidence}, ?) > 0"
+                        ")"
+                        for _ in query_terms
+                    )
+                    parameters = tuple(
+                        value for term in query_terms
+                        for value in (term, term, term)
+                    )
+                rows = db.execute(
+                    "SELECT experience.* FROM object_experiences AS experience "
+                    "WHERE experience.user_id=? "
+                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
+                    "experience.created_at DESC, experience.id DESC LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
             elif table == "autobiographical_events":
@@ -512,7 +561,7 @@ def get_shared_brain_snapshot(
                     "vocabulary", "word_visual_associations", "sensory_observations",
                     "perception_fusions", "world_entities", "world_relations",
                     "spatial_sessions", "spatial_visits", "place_memories",
-                    "autobiographical_events",
+                    "autobiographical_events", "object_experiences",
                 } else "",
             )
             totals[key] = _count(db, table, user_id)

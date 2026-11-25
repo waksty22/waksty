@@ -128,6 +128,10 @@ def _rows(
             placeholders = ",".join("?" for _ in query_terms)
             if table == "sensory_observations":
                 folded_word = _accent_folded_sql("association.word")
+                folded_content = _accent_folded_sql("observation.content")
+                content_match = " OR ".join(
+                    f"INSTR({folded_content}, ?) > 0" for _ in query_terms
+                )
                 rows = db.execute(
                     "SELECT observation.* FROM sensory_observations AS observation "
                     "WHERE observation.user_id=? ORDER BY CASE WHEN EXISTS ("
@@ -135,8 +139,9 @@ def _rows(
                     "WHERE association.user_id=observation.user_id "
                     "AND association.observation_id=observation.observation_id "
                     f"AND {folded_word} IN ({placeholders})"
-                    f") THEN 0 ELSE 1 END, {order_by} LIMIT ?",
-                    (user_id, *query_terms, limit),
+                    f") THEN 0 WHEN ({content_match}) THEN 1 ELSE 2 END, "
+                    f"{order_by} LIMIT ?",
+                    (user_id, *query_terms, *query_terms, limit),
                 ).fetchall()
             elif table in {"personal_vocabulary", "word_visual_associations"}:
                 folded_word = _accent_folded_sql("word")
@@ -348,11 +353,17 @@ def _rows(
         elif table == "sensory_observations" and _is_missing_table_error(
             exc, "word_visual_associations"
         ):
-            # Legacy databases may not have the optional association table yet.
-            # Preserve the previous recent-observation behavior in that case.
+            # Legacy databases may lack the optional association table. They
+            # can still retrieve historical observations by their own content.
+            folded_content = _accent_folded_sql("content")
+            content_match = " OR ".join(
+                f"INSTR({folded_content}, ?) > 0" for _ in query_terms
+            )
             rows = db.execute(
-                f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
-                (user_id, limit),
+                f"SELECT * FROM {table} WHERE user_id=? "
+                f"ORDER BY CASE WHEN ({content_match}) THEN 0 ELSE 1 END, "
+                f"{order_by} LIMIT ?",
+                (user_id, *query_terms, limit),
             ).fetchall()
         elif _is_missing_table_error(exc, table):
             return []

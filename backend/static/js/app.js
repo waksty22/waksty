@@ -302,6 +302,47 @@ document.addEventListener("DOMContentLoaded", () => {
                         card.appendChild(actions);
                     }
 
+                    if (item.status === "confirmed") {
+                        const promotion = evidence.semantic_promotion
+                            && typeof evidence.semantic_promotion === "object"
+                            ? evidence.semantic_promotion : null;
+                        if (promotion && promotion.promoted === true) {
+                            const learned = document.createElement("p");
+                            learned.className = "status";
+                            learned.textContent = "Apprentissage confirmé : " + String(promotion.object_label || "objet")
+                                + " est maintenant relié aux observations audio et visuelle.";
+                            card.appendChild(learned);
+                        } else {
+                            const label = document.createElement("label");
+                            label.textContent = "Nom de l'objet ou de l'élément identifié";
+                            card.appendChild(label);
+                            const objectName = document.createElement("input");
+                            objectName.type = "text";
+                            objectName.maxLength = 120;
+                            objectName.placeholder = "Ex. : tasse";
+                            card.appendChild(objectName);
+                            const proofLabel = document.createElement("label");
+                            proofLabel.textContent = "Preuve explicite de l'identité commune";
+                            card.appendChild(proofLabel);
+                            const proof = document.createElement("textarea");
+                            proof.rows = 2;
+                            proof.maxLength = 1000;
+                            proof.placeholder = "Explique pourquoi le son et l'image désignent bien cet élément.";
+                            card.appendChild(proof);
+                            const learn = document.createElement("button");
+                            learn.type = "button";
+                            learn.textContent = "Enregistrer cet apprentissage";
+                            learn.addEventListener("click", async () => {
+                                learn.disabled = true;
+                                const saved = await window.promotePerceptionFusion(
+                                    item.id, objectName.value, proof.value
+                                );
+                                if (!saved) learn.disabled = false;
+                            });
+                            card.appendChild(learn);
+                        }
+                    }
+
                     container.appendChild(card);
                 });
             }
@@ -343,6 +384,38 @@ document.addEventListener("DOMContentLoaded", () => {
                     + ". Aucun fait du monde n'a été créé automatiquement.";
             }
             await window.loadPerceptionFusions();
+            return true;
+        } catch (error) {
+            alert(error.message);
+            return false;
+        }
+    };
+
+    window.promotePerceptionFusion = async function(candidateId, objectLabel, evidence) {
+        const id = Number(candidateId);
+        const label = typeof objectLabel === "string" ? objectLabel.trim() : "";
+        const proof = typeof evidence === "string" ? evidence.trim() : "";
+        if (!Number.isSafeInteger(id) || id < 1 || !label || label.length > 120 || !proof || proof.length > 1000) {
+            alert("Renseigne un nom d'objet et une preuve explicite (1 à 1000 caractères).");
+            return false;
+        }
+        try {
+            const result = await apiCall(
+                "/api/perception/fusions/" + id + "/learn",
+                {
+                    method: "POST",
+                    headers: { "Authorization": "Bearer " + getToken() },
+                    body: { object_label: label, evidence: proof }
+                }
+            );
+            const promotion = result.promotion || {};
+            const status = document.getElementById("perceptionFusionStatus");
+            if (status) {
+                status.textContent = "Apprentissage enregistré : " + String(promotion.object_label || label)
+                    + " est relié aux observations audio et visuelle dans le modèle du monde.";
+            }
+            await window.loadPerceptionFusions();
+            if (window.loadKnownObjects) await window.loadKnownObjects();
             return true;
         } catch (error) {
             alert(error.message);

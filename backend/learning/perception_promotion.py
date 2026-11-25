@@ -8,7 +8,6 @@ from typing import Any
 
 from world.world_model import (
     add_world_relation,
-    init_world_tables,
     upsert_world_entity,
 )
 
@@ -74,7 +73,6 @@ def promote_confirmed_perception_fusion(
     if any(row["source"] == "live_camera_frame_received_by_server" for row in observations):
         raise ValueError("Une réception technique de caméra ne peut pas devenir un fait appris.")
 
-    init_world_tables(db)
     object_id = _stable_entity_id(user_id, "object", object_label.casefold())
     upsert_world_entity(
         db, user_id, object_id, "object",

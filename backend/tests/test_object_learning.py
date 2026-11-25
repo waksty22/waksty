@@ -396,3 +396,19 @@ def test_owner_cannot_confirm_missing_property_or_without_evidence(db):
         ("creator",),
     ).fetchone()
     assert stored["source_type"] == "taught"
+
+
+def test_object_property_confirmation_endpoint_requires_authenticated_post():
+    import server
+
+    matches = [
+        route for route in server.app.routes
+        if getattr(route, "path", None) == "/api/learning/object-property/confirm"
+    ]
+    assert len(matches) == 1
+    route = matches[0]
+    assert "POST" in route.methods
+    assert any(
+        dependency.call is server.require_auth
+        for dependency in route.dependant.dependencies
+    )

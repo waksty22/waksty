@@ -78,6 +78,7 @@ def test_get_emotions_supports_existing_skills_schema_without_xp(
     monkeypatch.setattr(server, "DB_PATH", database_path)
 
     emotions = server.get_emotions("creator")
+    server.ensure_user_state_initialized("creator")
 
     assert emotions["user_id"] == "creator"
     with sqlite3.connect(database_path) as connection:
@@ -100,6 +101,7 @@ def test_get_skills_summary_exposes_legacy_xp_as_zero_without_schema_change(
     monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
     monkeypatch.setattr(server, "DB_PATH", database_path)
 
+    server.ensure_user_state_initialized("creator")
     summary = server.get_skills_summary("creator")
 
     assert len(summary["skills"]) == 6
@@ -110,3 +112,66 @@ def test_get_skills_summary_exposes_legacy_xp_as_zero_without_schema_change(
             row[1] for row in connection.execute("PRAGMA table_info(skills)")
         }
     assert "xp" not in columns
+
+
+
+def test_cognitive_getters_do_not_initialize_or_write_state(monkeypatch, tmp_path):
+    database_path = tmp_path / "read-only-cognitive.sqlite3"
+    _prepare_legacy_skills_database(database_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    emotions = server.get_emotions("creator")
+    relationship = server.get_relationship("creator")
+    intention = server.get_user_intention("creator")
+    skills = server.get_skills_summary("creator")
+
+    assert emotions["energy"] == 100.0
+    assert relationship["trust"] == 50.0
+    assert intention["current_intent"] == "discussion libre"
+    assert skills["skills"] == []
+    with sqlite3.connect(database_path) as connection:
+        for table in (
+            "emotional_state", "relationships", "user_intentions",
+            "maintenance_state", "skills",
+        ):
+            count = connection.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE user_id=?",
+                ("creator",),
+            ).fetchone()[0]
+            assert count == 0, f"{table} was unexpectedly initialized by a getter"
+
+
+def test_explicit_state_initialization_is_idempotent_and_preserves_progress(
+    monkeypatch, tmp_path
+):
+    database_path = tmp_path / "explicit-init.sqlite3"
+    _prepare_legacy_skills_database(database_path)
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+
+    server.ensure_user_state_initialized("creator")
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE emotional_state SET joy=42 WHERE user_id='creator'"
+        )
+        connection.execute(
+            "UPDATE relationships SET trust=73 WHERE user_id='creator'"
+        )
+        connection.commit()
+
+    server.ensure_user_state_initialized("creator")
+    with sqlite3.connect(database_path) as connection:
+        joy = connection.execute(
+            "SELECT joy FROM emotional_state WHERE user_id='creator'"
+        ).fetchone()[0]
+        trust = connection.execute(
+            "SELECT trust FROM relationships WHERE user_id='creator'"
+        ).fetchone()[0]
+        skill_count = connection.execute(
+            "SELECT COUNT(*) FROM skills WHERE user_id='creator'"
+        ).fetchone()[0]
+
+    assert joy == 42
+    assert trust == 73
+    assert skill_count == 6

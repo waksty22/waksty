@@ -119,7 +119,7 @@ def test_search_finds_old_relevant_memory_beyond_candidate_window():
         init_memory_tables(db)
         save_episodic_memory(
             db, "owner", "Le café préféré du Créateur est torréfié léger",
-            importance=1, source_type="confirmed", confidence=0.95,
+            importance=1, source_type="taught", confidence=0.95,
         )
         db.execute(
             "UPDATE memories_v19 SET updated_at=?, created_at=? WHERE user_id=?",
@@ -149,7 +149,7 @@ def test_search_finds_old_relevant_memory_beyond_candidate_window():
             item for item in results
             if item["content"] == "Le café préféré du Créateur est torréfié léger"
         )
-        assert old_memory["source_type"] == "confirmed"
+        assert old_memory["source_type"] == "taught"
         assert old_memory["relevance_score"] > 0
         assert old_memory["access_count"] == 1
     finally:

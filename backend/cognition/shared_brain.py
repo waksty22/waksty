@@ -358,10 +358,12 @@ def _rows(
                 if _is_missing_table_error(legacy_exc, "memories"):
                     return []
                 raise
-        elif table in {"spatial_sessions", "spatial_visits"} and _is_missing_table_error(
-            exc, "place_memories"
+        elif table in {"spatial_sessions", "spatial_visits", "place_memories"} and (
+            _is_missing_table_error(exc, "place_memories")
+            or _is_missing_table_error(exc, "spatial_sessions")
         ):
-            # Without place evidence, do not expose GPS samples or infer locations.
+            # Without the consent ledger, or without linked place evidence for
+            # GPS ranking, fail closed rather than exposing spatial records.
             return []
         elif table == "sensory_observations" and _is_missing_table_error(
             exc, "word_visual_associations"
@@ -451,6 +453,11 @@ def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
                 if _is_missing_table_error(legacy_exc, "memories"):
                     return 0
                 raise
+        if table in {"spatial_sessions", "spatial_visits", "place_memories"} and (
+            _is_missing_table_error(exc, table)
+            or _is_missing_table_error(exc, "spatial_sessions")
+        ):
+            return 0
         if _is_missing_table_error(exc, table):
             return 0
         raise

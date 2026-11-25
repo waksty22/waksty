@@ -593,7 +593,7 @@ def search_episodic_memories(
                     matching_rows.append(item)
             # Keyset pagination avoids increasingly expensive OFFSET scans
             # and remains stable if newer memories are inserted mid-search.
-            last_seen_id = int(page[-1]["id"])
+            last_seen_id = int(_row_to_dict(page[-1], page_cursor)["id"])
 
         # Historical matches take priority, then recent memories are retained
         # as fallback. IDs ensure a record is never ranked twice.

@@ -131,6 +131,7 @@ from learning.perception_fusion import (
     list_perception_fusions,
     review_perception_fusion,
 )
+from learning.perception_promotion import promote_confirmed_perception_fusion
 from cognition.reasoning import (
     init_cognition_tables,
     log_cognitive_trace,
@@ -3148,6 +3149,20 @@ def build_world_model_context(
         human_review = evidence.get("human_review")
         if not isinstance(human_review, dict):
             human_review = None
+        semantic_promotion = evidence.get("semantic_promotion")
+        if not isinstance(semantic_promotion, dict):
+            semantic_promotion = None
+        promotion_valid = bool(
+            item.get("status") == "confirmed"
+            and human_review
+            and human_review.get("decision") == "confirm"
+            and semantic_promotion
+            and semantic_promotion.get("promoted") is True
+            and isinstance(semantic_promotion.get("object_label"), str)
+            and semantic_promotion.get("object_label").strip()
+            and isinstance(semantic_promotion.get("object_entity_id"), str)
+            and semantic_promotion.get("object_entity_id").strip()
+        )
         cross_modal_fusions.append({
             "candidate_id": item.get("id"),
             "status": item.get("status") if item.get("status") in {"candidate", "confirmed", "rejected"} else "unknown",
@@ -3163,9 +3178,14 @@ def build_world_model_context(
                 "evidence": str(human_review.get("evidence", ""))[:300],
                 "reviewed_at": str(human_review.get("reviewed_at", ""))[:80],
             } if human_review else None),
+            "semantic_promotion": ({
+                "object_label": semantic_promotion.get("object_label")[:120],
+                "object_entity_id": semantic_promotion.get("object_entity_id")[:200],
+                "evidence": str(semantic_promotion.get("evidence", ""))[:300],
+            } if promotion_valid else None),
             "created_at": str(item.get("created_at", ""))[:80],
-            "semantic_identity_proven": False,
-            "world_knowledge_promoted": False,
+            "semantic_identity_proven": promotion_valid,
+            "world_knowledge_promoted": promotion_valid,
         })
 
     if query_terms:
@@ -5637,6 +5657,33 @@ async def api_review_perception_fusion(
             )
             db.commit()
         return {"ok": True, "review": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/perception/fusions/{candidate_id}/learn")
+async def api_promote_confirmed_perception_fusion(
+    candidate_id: int,
+    request: Request,
+    auth=Depends(require_auth),
+):
+    """Promote a reviewed cross-modal match only after explicit object naming."""
+    user_id = _authenticated_user(auth)
+    try:
+        data = await _json_object(request)
+    except (ValueError, TypeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Corps JSON invalide.") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Le corps doit être un objet JSON.")
+    try:
+        with db_connection() as db:
+            result = promote_confirmed_perception_fusion(
+                db, user_id, candidate_id,
+                data.get("object_label", ""),
+                data.get("evidence", ""),
+            )
+            db.commit()
+        return {"ok": True, "promotion": result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

@@ -104,7 +104,7 @@ def test_query_prioritizes_older_relevant_vocabulary_over_recent_sample():
     assert all(row["word"] != "trésor" for row in recent_snapshot["vocabulary"])
 
     relevant_snapshot = get_shared_brain_snapshot(
-        db, "creator", limit=8, query="Parle-moi du trésor"
+        db, "creator", limit=8, query="Parle-moi du tresor"
     )
     assert relevant_snapshot["vocabulary"][0]["word"] == "trésor"
     assert relevant_snapshot["statistics"]["totals"]["vocabulary"] == 13

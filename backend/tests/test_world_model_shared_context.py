@@ -142,6 +142,29 @@ def test_identity_context_includes_user_scoped_world_snapshot_for_chat_and_live(
     db.close()
 
 
+def test_identity_context_forwards_current_query_to_world_model(monkeypatch):
+    received = {}
+
+    def fake_identity_context(user_id, query=""):
+        received["identity"] = (user_id, query)
+        return "IDENTITY"
+
+    def fake_world_context(user_id, query=""):
+        received["world"] = (user_id, query)
+        return ""
+
+    monkeypatch.setattr(server, "get_identity_context", fake_identity_context)
+    monkeypatch.setattr(server, "build_world_model_context", fake_world_context)
+
+    message = server.build_untrusted_identity_context_message(
+        "creator", query="où est mon horloge rouge"
+    )
+
+    assert received["identity"] == ("creator", "où est mon horloge rouge")
+    assert received["world"] == ("creator", "où est mon horloge rouge")
+    assert "IDENTITY" in message["parts"][0]["text"]
+
+
 def test_explicit_semantic_promotion_is_distinguished_from_temporal_cooccurrence(monkeypatch):
     db = _world_db()
     row = db.execute(

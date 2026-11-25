@@ -292,6 +292,15 @@ def _rows(
                 if _is_missing_table_error(legacy_exc, "memories"):
                     return []
                 raise
+        elif table in {"spatial_sessions", "spatial_visits"} and _is_missing_table_error(
+            exc, "place_memories"
+        ):
+            # A partially upgraded legacy database may have GPS samples but
+            # not yet have the place-observation table used for semantic ranking.
+            rows = db.execute(
+                f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
         elif table == "sensory_observations" and _is_missing_table_error(
             exc, "word_visual_associations"
         ):

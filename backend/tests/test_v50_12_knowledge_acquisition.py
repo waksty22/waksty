@@ -151,6 +151,7 @@ def test_formatted_context_is_bounded_and_keeps_uncertainty_rules():
     assert len(context) <= 2000
     assert "experience_only_not_proof_of_learning" in context
     assert "observed_not_understood" in context
+    assert "hypothesis_unverified = hypothèse non vérifiée" in context
     db.close()
 
 

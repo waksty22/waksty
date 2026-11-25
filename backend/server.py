@@ -2991,20 +2991,33 @@ def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
     entities: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []
     with db_connection() as db:
-        entity_rows = db.execute(
-            """SELECT id, entity_type, properties_json, source_type,
-                      confidence, last_observed_at
-               FROM world_entities WHERE user_id=?
-               ORDER BY last_observed_at DESC, id LIMIT 20""",
-            (user_id,),
-        ).fetchall()
-        relation_rows = db.execute(
-            """SELECT subject_id, predicate, object_id, source_type,
-                      confidence, updated_at
-               FROM world_relations WHERE user_id=?
-               ORDER BY updated_at DESC, id DESC LIMIT 30""",
-            (user_id,),
-        ).fetchall()
+        available_tables = {
+            row[0] for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('world_entities', 'world_relations')"
+            ).fetchall()
+        }
+        # Older test databases and pre-world-model installations may not
+        # contain these optional tables yet. An empty world snapshot is safer
+        # than breaking the whole conversation; missing columns still surface.
+        if not {"world_entities", "world_relations"}.issubset(available_tables):
+            entity_rows = []
+            relation_rows = []
+        else:
+            entity_rows = db.execute(
+                """SELECT id, entity_type, properties_json, source_type,
+                          confidence, last_observed_at
+                   FROM world_entities WHERE user_id=?
+                   ORDER BY last_observed_at DESC, id LIMIT 20""",
+                (user_id,),
+            ).fetchall()
+            relation_rows = db.execute(
+                """SELECT subject_id, predicate, object_id, source_type,
+                          confidence, updated_at
+                   FROM world_relations WHERE user_id=?
+                   ORDER BY updated_at DESC, id DESC LIMIT 30""",
+                (user_id,),
+            ).fetchall()
 
     for row in entity_rows:
         item = dict(row)

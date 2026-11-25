@@ -5486,7 +5486,7 @@ async def api_associate_visual_word(
             upsert_world_entity(
                 db, user_id, object_id, "object",
                 {"label": word, "learned_from_visual_observation": observation_id},
-                source_type="taught", confidence=0.65,
+                source_type="confirmed", confidence=0.65,
             )
             upsert_world_entity(
                 db, user_id, observation_entity_id, "visual_observation",
@@ -5496,7 +5496,7 @@ async def api_associate_visual_word(
             add_world_relation(
                 db, user_id, object_id, observation_entity_id,
                 relation_type="associated_with_visual_observation",
-                source_type="taught", confidence=0.65,
+                source_type="confirmed", confidence=0.65,
             )
             db.commit()
         return {"ok": True, "association": result}

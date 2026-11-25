@@ -133,3 +133,66 @@ def test_world_model_context_rejects_invalid_size():
         server.build_world_model_context("creator", max_chars=True)
     with pytest.raises(ValueError):
         server.build_world_model_context("creator", max_chars=100)
+
+
+def test_shared_world_model_tool_searches_relevant_records_for_both_channels(monkeypatch):
+    db = _world_db()
+    # Add newer unrelated records so the requested older object must be ranked,
+    # not merely returned because it happens to be the newest database row.
+    for index in range(30):
+        object_id = f"object:lamp{index}"
+        db.execute(
+            "INSERT INTO world_entities VALUES (?,?,?,?,?,?,?)",
+            (object_id, "creator", "object", "{}", "observed", 0.4,
+             f"2026-11-25T00:{index:02d}:00Z"),
+        )
+        db.execute(
+            "INSERT INTO object_properties VALUES (?,?,?,?,?,?,?,?,?)",
+            (10 + index, "creator", object_id, "matiere", "plastique",
+             "observed", 0.4, "Unrelated recent observation",
+             f"2026-11-25T00:{index:02d}:00Z"),
+        )
+    db.commit()
+
+    @contextmanager
+    def fake_db_connection():
+        yield db
+
+    monkeypatch.setattr(server, "db_connection", fake_db_connection)
+    result = server.execute_tool(
+        "search_world_model", {"query": "clock color"}, "creator"
+    )
+
+    assert result["found"] is True
+    assert result["read_only"] is True
+    assert result["user_scoped"] is True
+    assert result["matching_is_not_proof_of_understanding"] is True
+    header, encoded = result["world_model_context"].split("\n", 1)
+    payload = json.loads(encoded)
+    assert "NON FIABLES" in header
+    assert payload["object_properties"][0]["object"] == "object:clock"
+    assert payload["object_properties"][0]["value"] == "red"
+    assert payload["object_properties"][0]["provenance"] == "confirmed"
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "secret:other-user" not in serialized
+    assert "other user's data" not in serialized
+
+    declarations = [
+        declaration
+        for group in server.TOOLS
+        for declaration in group.get("functionDeclarations", [])
+    ]
+    assert any(item.get("name") == "search_world_model" for item in declarations)
+    db.close()
+
+
+def test_world_model_search_rejects_non_text_query_without_database_access(monkeypatch):
+    def unexpected_db_connection():
+        raise AssertionError("Une recherche invalide ne doit pas ouvrir la base.")
+
+    monkeypatch.setattr(server, "db_connection", unexpected_db_connection)
+    result = server.execute_tool(
+        "search_world_model", {"query": None}, "creator"
+    )
+    assert "error" in result
+    assert "texte" in result["error"]

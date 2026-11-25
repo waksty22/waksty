@@ -153,10 +153,6 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
-                    "AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
-                    "WHERE consent_session.session_id=place_memories.session_id "
-                    "AND consent_session.user_id=place_memories.user_id "
-                    "AND consent_session.consented=1) "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
                     (user_id, *query_terms, limit),
@@ -214,6 +210,10 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
+                    "AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
+                    "WHERE consent_session.session_id=place_memories.session_id "
+                    "AND consent_session.user_id=place_memories.user_id "
+                    "AND consent_session.consented=1) "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),
@@ -282,6 +282,34 @@ def _rows(
                     f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
+        elif table == "place_memories":
+            rows = db.execute(
+                "SELECT place_memories.* FROM place_memories "
+                "WHERE place_memories.user_id=? AND EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=place_memories.session_id "
+                "AND consent_session.user_id=place_memories.user_id "
+                "AND consent_session.consented=1) "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "spatial_sessions":
+            rows = db.execute(
+                "SELECT * FROM spatial_sessions WHERE user_id=? AND consented=1 "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "spatial_visits":
+            rows = db.execute(
+                "SELECT spatial_visits.* FROM spatial_visits "
+                "WHERE spatial_visits.user_id=? AND EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=spatial_visits.session_id "
+                "AND consent_session.user_id=spatial_visits.user_id "
+                "AND consent_session.consented=1) "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
         elif table == "place_memories":
             rows = db.execute(
                 "SELECT place_memories.* FROM place_memories "

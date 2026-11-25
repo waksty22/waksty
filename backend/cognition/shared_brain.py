@@ -123,7 +123,10 @@ def _rows(
             "sensory_observations", "perception_fusion_candidates",
             "world_entities", "world_relations", "spatial_sessions",
             "spatial_visits", "place_memories", "autobiographical_events",
-            "object_experiences",
+            "object_experiences", "memories_v19", "object_properties",
+            "causal_observations", "causal_hypotheses", "causal_experiments",
+            "imitation_examples", "imitation_attempts", "decision_journal",
+            "preference_evidence",
         } else []
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
@@ -310,6 +313,43 @@ def _rows(
                     "WHERE place.user_id=" + ("session.user_id " if table == "spatial_sessions" else "visit.user_id ") +
                     "AND place.session_id=" + session_column +
                     f" AND ({match})) THEN 0 ELSE 1 END, {timestamp} LIMIT ?",
+                    (user_id, *parameters, limit),
+                ).fetchall()
+            elif table in {
+                "memories_v19", "object_properties", "causal_observations",
+                "causal_hypotheses", "causal_experiments", "imitation_examples",
+                "imitation_attempts", "decision_journal", "preference_evidence",
+            }:
+                # Search only fixed, schema-verified text fields. This brings
+                # older episodic memories and supervised cognitive records into
+                # the same query-ranked snapshot without trusting user SQL.
+                searchable_columns = {
+                    "memories_v19": ("content", "category", "tags"),
+                    "object_properties": ("object_id", "property_key", "property_value", "evidence"),
+                    "causal_observations": ("event", "context", "outcome", "evidence"),
+                    "causal_hypotheses": ("statement", "predicted_effect", "status"),
+                    "causal_experiments": ("procedure", "prediction", "result", "evaluation", "status"),
+                    "imitation_examples": ("behavior", "context", "evidence", "status"),
+                    "imitation_attempts": ("result", "evidence"),
+                    "decision_journal": ("question", "chosen_option", "reasons", "outcome", "options_json", "evidence_json"),
+                    "preference_evidence": ("domain", "preference", "evidence", "basis"),
+                }[table]
+                folded_columns = [
+                    _accent_folded_sql(column) for column in searchable_columns
+                ]
+                match = " OR ".join(
+                    "(" + " OR ".join(
+                        f"INSTR({column}, ?) > 0" for column in folded_columns
+                    ) + ")"
+                    for _ in query_terms
+                )
+                parameters = tuple(
+                    term for term in query_terms for _column in folded_columns
+                )
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
+                    f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
             elif table == "world_relations":
@@ -562,6 +602,9 @@ def get_shared_brain_snapshot(
                     "perception_fusions", "world_entities", "world_relations",
                     "spatial_sessions", "spatial_visits", "place_memories",
                     "autobiographical_events", "object_experiences",
+                    "memories", "object_properties", "causal_observations",
+                    "causal_hypotheses", "causal_experiments", "imitation_examples",
+                    "imitation_attempts", "decision_journal", "preference_evidence",
                 } else "",
             )
             totals[key] = _count(db, table, user_id)

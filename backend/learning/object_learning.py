@@ -60,7 +60,7 @@ def init_object_learning_tables(db: sqlite3.Connection) -> None:
     """)
     # Additive migration: existing experiences remain intact and unlinked.
     columns = {
-        row["name"] for row in db.execute(
+        row[1] for row in db.execute(
             "PRAGMA table_info(object_experiences)"
         ).fetchall()
     }

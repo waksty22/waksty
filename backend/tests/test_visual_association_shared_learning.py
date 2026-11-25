@@ -112,7 +112,7 @@ def test_supervised_live_visual_association_enters_shared_brain_without_overlear
     )
     assert any(
         row["predicate"] == "associated_with_visual_observation"
-        and row["source_type"] == "taught"
+        and row["source_type"] == "confirmed"
         for row in snapshot["world_relations"]
     )
     assert not any(

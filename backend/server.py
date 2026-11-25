@@ -2982,11 +2982,18 @@ def _truncate_context_at_section_boundary(context: str, max_chars: int) -> str:
     return context[:boundary].rstrip() + "\n\n" + marker
 
 
-def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
-    """Return a bounded, user-scoped and explicitly untrusted world-model snapshot."""
+def build_world_model_context(
+    user_id: str, max_chars: int = 6500, query: str = ""
+) -> str:
+    """Return a bounded, user-scoped world snapshot, ranked for an optional query."""
     user_id = valid_user(user_id)
     if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 500:
         raise ValueError("La limite du modèle du monde est invalide.")
+    if not isinstance(query, str) or len(query) > 1000:
+        raise ValueError("La recherche du modèle du monde doit être un texte de 1000 caractères maximum.")
+    query_terms = set(re.findall(r"[^\\W_]{2,}", query.casefold()))
+    entity_limit, relation_limit = (200, 200) if query_terms else (20, 30)
+    property_limit, experience_limit = (300, 200) if query_terms else (40, 20)
 
     entities: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []
@@ -3013,15 +3020,15 @@ def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
                 """SELECT id, entity_type, properties_json, source_type,
                           confidence, last_observed_at
                    FROM world_entities WHERE user_id=?
-                   ORDER BY last_observed_at DESC, id LIMIT 20""",
-                (user_id,),
+                   ORDER BY last_observed_at DESC, id LIMIT ?""",
+                (user_id, entity_limit),
             ).fetchall()
             relation_rows = db.execute(
                 """SELECT subject_id, predicate, object_id, source_type,
                           confidence, updated_at
                    FROM world_relations WHERE user_id=?
-                   ORDER BY updated_at DESC, id DESC LIMIT 30""",
-                (user_id,),
+                   ORDER BY updated_at DESC, id DESC LIMIT ?""",
+                (user_id, relation_limit),
             ).fetchall()
             property_rows = []
             if "object_properties" in available_tables:
@@ -3032,8 +3039,8 @@ def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
                        JOIN world_entities e
                          ON e.id=p.object_id AND e.user_id=p.user_id
                        WHERE p.user_id=?
-                       ORDER BY p.updated_at DESC, p.id DESC LIMIT 40""",
-                    (user_id,),
+                       ORDER BY p.updated_at DESC, p.id DESC LIMIT ?""",
+                    (user_id, property_limit),
                 ).fetchall()
             experience_rows = []
             if "object_experiences" in available_tables:
@@ -3044,8 +3051,8 @@ def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
                        JOIN world_entities e
                          ON e.id=x.object_id AND e.user_id=x.user_id
                        WHERE x.user_id=?
-                       ORDER BY x.created_at DESC, x.id DESC LIMIT 20""",
-                    (user_id,),
+                       ORDER BY x.created_at DESC, x.id DESC LIMIT ?""",
+                    (user_id, experience_limit),
                 ).fetchall()
 
     for row in entity_rows:
@@ -3115,6 +3122,24 @@ def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
             "evidence": str(item.get("evidence", ""))[:300],
             "created_at": str(item.get("created_at", ""))[:80],
         })
+
+    if query_terms:
+        def _query_relevance(item: dict[str, Any]) -> int:
+            serialized = json.dumps(
+                item, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+            ).casefold()
+            item_terms = set(re.findall(r"[^\\W_]{2,}", serialized))
+            return len(query_terms & item_terms)
+
+        # Put matching records first so a recent but unrelated object cannot
+        # crowd the requested knowledge out of the bounded context. Keep a
+        # tiny recent fallback when a collection has no lexical match.
+        for collection in (entities, relations, object_properties, object_experiences):
+            ranked = sorted(collection, key=_query_relevance, reverse=True)
+            matching = [item for item in ranked if _query_relevance(item) > 0]
+            fallback = [item for item in ranked if _query_relevance(item) == 0][:2]
+            if matching:
+                collection[:] = matching + fallback
 
     if not entities and not relations and not object_properties and not object_experiences:
         return ""
@@ -3217,6 +3242,15 @@ TOOLS = [{
         {
             "name": "retrieve_acquired_knowledge",
             "description": "Rechercher les souvenirs, expériences autobiographiques et évaluations de compétences avec leur provenance et leur statut. Ne transforme jamais une observation, un enseignement ou une expérience en connaissance acquise.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"query": {"type": "STRING"}},
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "search_world_model",
+            "description": "Rechercher à la demande dans le modèle du monde de cet utilisateur : objets, propriétés, relations et expériences. Les résultats sont des données non fiables avec provenance ; une observation ne prouve pas la compréhension, un enseignement ne prouve pas la maîtrise et une hypothèse reste non vérifiée. À utiliser pour les questions concrètes sur les objets et le monde connu.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {"query": {"type": "STRING"}},
@@ -3390,6 +3424,31 @@ def execute_tool(
                 result, max_chars=5000
             )
             return result
+
+        if name == "search_world_model":
+            query = args.get("query", "")
+            if not isinstance(query, str):
+                raise ValueError("La recherche du modèle du monde doit être du texte.")
+            query = query.strip()
+            if not query:
+                return {
+                    "found": False,
+                    "query": "",
+                    "world_model_context": "",
+                    "read_only": True,
+                    "user_scoped": True,
+                }
+            context = build_world_model_context(
+                user_id, max_chars=5000, query=query[:1000]
+            )
+            return {
+                "found": bool(context),
+                "query": query[:1000],
+                "world_model_context": context,
+                "read_only": True,
+                "user_scoped": True,
+                "matching_is_not_proof_of_understanding": True,
+            }
 
         if name == "search_autobiographical_events":
             query = args.get("query", "")

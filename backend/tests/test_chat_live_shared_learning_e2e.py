@@ -622,3 +622,20 @@ def test_interrupted_live_visual_turn_does_not_persist_model_description(
                WHERE user_id=?""",
             ("creator",),
         ).fetchone()[0] == 0
+        assert db.execute(
+            """SELECT COUNT(*) FROM conversations
+               WHERE user_id=? AND role='user' AND content='Que vois-tu ?'""",
+            ("creator",),
+        ).fetchone()[0] == 1
+        assert db.execute(
+            """SELECT COUNT(*) FROM conversations
+               WHERE user_id=? AND role='assistant'
+                 AND content='Je vois peut-être un oiseau'""",
+            ("creator",),
+        ).fetchone()[0] == 0
+        assert db.execute(
+            """SELECT COUNT(*) FROM autobiographical_events
+               WHERE user_id=? AND actor='assistant'
+                 AND content='Je vois peut-être un oiseau'""",
+            ("creator",),
+        ).fetchone()[0] == 0

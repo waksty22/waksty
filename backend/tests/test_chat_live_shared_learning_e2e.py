@@ -11,6 +11,8 @@ import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import pytest
+
 class FakeClientWebSocket:
     def __init__(self, payloads):
         self.payloads = list(payloads)

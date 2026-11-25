@@ -163,6 +163,8 @@ def test_chat_and_live_share_persisted_learning_and_interrupted_turns_are_histor
     live_socket = FakeGeminiLiveSocket("velociraptor", "zorbital")
     live_messages, live_context = run_live_session("creator", live_socket)
     assert "zorbital" in live_context
+    assert "ESPACE COGNITIF COMMUN" in live_context
+    assert "STATISTIQUES DES DONNÉES PERSISTÉES" in live_context
     assert "velociraptor" not in live_context
     assert any(item.get("type") == "turn_complete" for item in live_messages)
     with server.db_connection() as trace_db:

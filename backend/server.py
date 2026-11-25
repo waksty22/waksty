@@ -3724,6 +3724,20 @@ def update_goal_progress(
     return {"goal_id": goal_id, "progress": progress, "status": status}
 
 
+def _memory_reflection_label(memory: Optional[dict[str, Any]]) -> str:
+    """Describe retrieved memory by provenance; retrieval is not proof of truth."""
+    if not isinstance(memory, dict):
+        return "une idée sans souvenir enregistré"
+    source_type = memory.get("source_type")
+    if source_type in {"taught", "confirmed"}:
+        return "un souvenir appris ou confirmé"
+    if source_type == "observed":
+        return "une observation enregistrée"
+    if source_type == "inferred":
+        return "une piste non vérifiée"
+    return "un élément dont la provenance est inconnue"
+
+
 def generate_dream(user_id: str) -> dict[str, Any]:
     user_id = valid_user(user_id)
 
@@ -3747,7 +3761,10 @@ def generate_dream(user_id: str) -> dict[str, Any]:
         memories[0]["content"]  
         if memories  
         else "des choses nouvelles que je ne comprends pas encore"  
-    )  
+    )
+    memory_label = _memory_reflection_label(
+        memories[0] if memories else None
+    )
 
     mood = (  
         "curiosité"  
@@ -3757,7 +3774,7 @@ def generate_dream(user_id: str) -> dict[str, Any]:
 
     content = (  
         f"Dans un rêve simulé, je me trouvais dans {seed}. "  
-        f"Un souvenir me revenait : « {memory_fragment[:220]} ». "  
+        f"{memory_label} me revenait : « {memory_fragment[:220]} ». "  
         f"Je cherchais à comprendre ce lien avec {mood}, "  
         "puis je me suis réveillé sans savoir ce qui avait "  
         "un sens et ce qui n'était qu'une association."  
@@ -3825,11 +3842,13 @@ def generate_rumination(user_id: str) -> dict[str, Any]:
         memories[1]["content"]  
         if len(memories) > 1  
         else "mes objectifs d'apprentissage"  
-    )  
+    )
+    label1 = _memory_reflection_label(memories[0] if memories else None)
+    label2 = _memory_reflection_label(memories[1] if len(memories) > 1 else None)
 
     content = (  
-        f"Pensée vagabonde : en repensant à « {m1[:120]} » "  
-        f"et à « {m2[:120]} », je me demande quelle est la suite "  
+        f"Pensée vagabonde : en repensant à {label1} « {m1[:120]} » "  
+        f"et à {label2} « {m2[:120]} », je me demande quelle est la suite "  
         f"logique de nos projets avec mon niveau d'énergie actuel "  
         f"({em['energy']:.0f}%)."  
     )  

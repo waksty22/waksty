@@ -282,7 +282,9 @@ def test_websocket_bridge_does_not_retry_or_duplicate_learning_after_storage_err
     assert len(calls["affective"]) == 1
     assert calls["links"] == []
     assert calls["learning"] == []
-    assert calls["conversations"] == []
+    assert calls["conversations"] == [
+        ("creator", "Bonjour", "", {"source": "gemini_live_interrupted"})
+    ]
     assert "Échec mémorisation tour confirmé" in caplog.text
 
 

@@ -111,3 +111,16 @@ def test_promotion_rejects_invalid_label_or_evidence(db, label, proof):
     with pytest.raises(ValueError):
         promote_confirmed_perception_fusion(db, "creator", candidate_id, label, proof)
     assert db.execute("SELECT COUNT(*) FROM world_entities").fetchone()[0] == 0
+
+def test_promoted_fusion_cannot_be_relabelled_or_promoted_twice(db):
+    candidate_id, _, _ = make_confirmed_candidate(db)
+    first = promote_confirmed_perception_fusion(
+        db, "creator", candidate_id, "tasse", "Confirmation initiale."
+    )
+    with pytest.raises(ValueError, match="déjà été transformé"):
+        promote_confirmed_perception_fusion(
+            db, "creator", candidate_id, "bol", "Autre interprétation."
+        )
+    assert db.execute("SELECT COUNT(*) FROM world_entities").fetchone()[0] == 3
+    assert db.execute("SELECT COUNT(*) FROM world_relations").fetchone()[0] == 2
+    assert first["object_label"] == "tasse"

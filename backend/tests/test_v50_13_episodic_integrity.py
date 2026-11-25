@@ -160,6 +160,30 @@ def test_search_finds_old_relevant_memory_beyond_candidate_window():
         db.close()
 
 
+def test_keyset_history_search_supports_tuple_rows_across_pages():
+    # Default sqlite connections return tuples, not sqlite3.Row objects.
+    db = sqlite3.connect(":memory:")
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(
+            db, "owner", "Objet rare : un cadran mécanique ancien",
+            importance=1, source_type="taught", confidence=0.9,
+        )
+        for index in range(505):
+            save_episodic_memory(
+                db, "owner", f"Note récente sans rapport {index}",
+                importance=5, source_type="observed", confidence=0.7,
+            )
+
+        results = search_episodic_memories(db, "owner", "cadran mécanique", limit=5)
+        assert any(
+            item["content"] == "Objet rare : un cadran mécanique ancien"
+            for item in results
+        )
+    finally:
+        db.close()
+
+
 def test_search_does_not_overflow_maximum_sqlite_access_counter():
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row

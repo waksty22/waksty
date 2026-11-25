@@ -534,13 +534,19 @@ def search_episodic_memories(
         ]
 
         matching_rows: list[dict[str, Any]] = []
-        offset = 0
+        last_seen_id: int | None = None
         page_size = 500
         while True:
-            page_cursor = db.execute(
-                columns + " ORDER BY id DESC LIMIT ? OFFSET ?",
-                (user_id, page_size, offset),
-            )
+            if last_seen_id is None:
+                page_cursor = db.execute(
+                    columns + " ORDER BY id DESC LIMIT ?",
+                    (user_id, page_size),
+                )
+            else:
+                page_cursor = db.execute(
+                    columns + " AND id < ? ORDER BY id DESC LIMIT ?",
+                    (user_id, last_seen_id, page_size),
+                )
             page = page_cursor.fetchall()
             if not page:
                 break
@@ -585,7 +591,9 @@ def search_episodic_memories(
                     for index in range(len(token_list) - len(phrase_tokens) + 1)
                 ):
                     matching_rows.append(item)
-            offset += len(page)
+            # Keyset pagination avoids increasingly expensive OFFSET scans
+            # and remains stable if newer memories are inserted mid-search.
+            last_seen_id = int(_row_to_dict(page[-1], page_cursor)["id"])
 
         # Historical matches take priority, then recent memories are retained
         # as fallback. IDs ensure a record is never ranked twice.

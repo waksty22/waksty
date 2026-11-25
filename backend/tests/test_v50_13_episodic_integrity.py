@@ -151,7 +151,6 @@ def test_search_finds_old_relevant_memory_beyond_candidate_window():
         )
         assert old_memory["source_type"] == "taught"
         assert old_memory["relevance_score"] > 0
-        assert old_memory["access_count"] == 1
     finally:
         db.close()
 

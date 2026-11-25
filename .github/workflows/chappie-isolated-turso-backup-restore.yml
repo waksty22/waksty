@@ -2,6 +2,13 @@ name: Chappie isolated Turso backup and restore E2E
 
 on:
   workflow_dispatch:
+  # Weekly isolated restore drill; never targets the production database.
+  schedule:
+    - cron: "23 4 * * 0"
+
+concurrency:
+  group: chappie-isolated-turso-backup-restore
+  cancel-in-progress: false
 
 permissions:
   contents: read

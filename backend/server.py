@@ -5978,6 +5978,7 @@ async def api_record_object_experience(
                 evidence=data.get("evidence", ""),
                 confidence=data.get("confidence", 0.6),
                 source_type="observed",
+                autobiographical_event_id=data.get("autobiographical_event_id"),
             )
             db.commit()
         return {"ok": True, "experience": result}

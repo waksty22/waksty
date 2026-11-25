@@ -2632,6 +2632,73 @@ def persist_interrupted_live_turn(user_id: str, turn_state: dict[str, Any]) -> b
     return True
 
 
+def build_autobiographical_context(
+    user_id: str,
+    query: str = "",
+    *,
+    recent_limit: int = 8,
+    relevant_limit: int = 5,
+) -> str:
+    """Combine recent episodes with query-relevant older episodes, preserving source links."""
+    user_id = valid_user(user_id)
+    if not isinstance(query, str) or len(query) > 1000:
+        raise ValueError("La recherche autobiographique doit être un texte de 1000 caractères maximum.")
+    if (
+        isinstance(recent_limit, bool) or not isinstance(recent_limit, int)
+        or not 1 <= recent_limit <= 20
+        or isinstance(relevant_limit, bool) or not isinstance(relevant_limit, int)
+        or not 0 <= relevant_limit <= 10
+    ):
+        raise ValueError("Les limites de rappel autobiographique sont invalides.")
+
+    with db_connection() as autobio_db:
+        sync_autobiographical_events(autobio_db, user_id)
+        recent = list_autobiographical_events(autobio_db, user_id, limit=recent_limit)
+        relevant = (
+            search_autobiographical_events(autobio_db, user_id, query, limit=relevant_limit)
+            if query.strip() and relevant_limit else []
+        )
+
+    selected: list[tuple[dict[str, Any], str]] = []
+    selected_ids: set[int] = set()
+    # Relevant older episodes take priority over unrelated recent dialogue.
+    # Paired assistant replies are included only through explicit same-turn links.
+    for episode in relevant:
+        episode_id = episode.get("id")
+        if isinstance(episode_id, int) and not isinstance(episode_id, bool):
+            selected_ids.add(episode_id)
+        selected.append((episode, "rappel pertinent"))
+    for episode in reversed(recent):
+        episode_id = episode.get("id")
+        if isinstance(episode_id, int) and episode_id in selected_ids:
+            continue
+        if isinstance(episode_id, int) and not isinstance(episode_id, bool):
+            selected_ids.add(episode_id)
+        selected.append((episode, "épisode récent"))
+        if len(selected) >= relevant_limit + recent_limit:
+            break
+
+    lines = []
+    for episode, label in selected:
+        score = episode.get("relevance_score")
+        matched = episode.get("matched_terms")
+        relevance = (
+            f" | pertinence={float(score):.2f} | termes={', '.join(matched[:8])}"
+            if label == "rappel pertinent"
+            and isinstance(score, (int, float)) and not isinstance(score, bool)
+            and isinstance(matched, list)
+            else ""
+        )
+        dialogue = " | réponse liée au même tour" if episode.get("dialogue_context") is True else ""
+        lines.append(
+            f"- [{label}{relevance}{dialogue}] [{episode.get('happened_at', '')}] "
+            f"{episode.get('actor', 'inconnu')} "
+            f"(source conversation #{episode.get('source_conversation_id', '?')}) : "
+            f"{str(episode.get('content', ''))[:350]}"
+        )
+    return "\n".join(lines) or "Aucun épisode autobiographique enregistré."
+
+
 def get_identity_context(user_id: str, query: str = "") -> str:
     em = get_emotions(user_id)
     rel = get_relationship(user_id)
@@ -2724,18 +2791,9 @@ def get_identity_context(user_id: str, query: str = "") -> str:
         or "Aucun résumé autobiographique consolidé."
     )
 
-    with db_connection() as autobio_db:
-        sync_autobiographical_events(autobio_db, user_id)
-        recent_episodes = list_autobiographical_events(
-            autobio_db, user_id, limit=8
-        )
-
-    autobiographical_context = "\n".join(
-        f"- [{episode['happened_at']}] {episode['actor']} "
-        f"(source conversation #{episode['source_conversation_id']}) : "
-        f"{episode['content'][:350]}"
-        for episode in reversed(recent_episodes)
-    ) or "Aucun épisode autobiographique enregistré."
+    autobiographical_context = build_autobiographical_context(
+        user_id, query=query, recent_limit=8, relevant_limit=5
+    )
 
     with db_connection() as development_db:
         recent_decisions = list_decisions(development_db, user_id, limit=5)

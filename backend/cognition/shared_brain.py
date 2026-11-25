@@ -522,9 +522,10 @@ def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
         elif table == "place_memories":
             query = (
                 "SELECT COUNT(*) FROM place_memories AS place WHERE place.user_id=? "
-                "AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
+                "AND (place.session_id IS NULL OR EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
                 "WHERE consent_session.session_id=place.session_id "
-                "AND consent_session.user_id=place.user_id AND consent_session.consented=1)"
+                "AND consent_session.user_id=place.user_id AND consent_session.consented=1))"
             )
         else:
             query = f"SELECT COUNT(*) FROM {table} WHERE user_id=?"

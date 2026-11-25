@@ -79,6 +79,9 @@ def test_shared_brain_never_exposes_spatial_records_from_nonconsented_sessions()
         "place-allowed", "place-visual"
     }
     assert all(row["user_id"] == "creator" for row in snapshot["place_memories"])
+    # Counts must match the returned consent-filtered records, including
+    # visual-only observations that do not have a GPS session.
+    assert snapshot["statistics"]["totals"]["place_memories"] == 2
     db.close()
 
 

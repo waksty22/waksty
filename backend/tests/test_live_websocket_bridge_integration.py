@@ -285,7 +285,7 @@ def test_websocket_bridge_does_not_retry_or_duplicate_learning_after_storage_err
     assert calls["conversations"] == [
         ("creator", "Bonjour", "", {"source": "gemini_live_interrupted"})
     ]
-    assert "Échec mémorisation tour confirmé" in caplog.text
+    assert "simulated sensory storage failure" in caplog.text
 
 
 

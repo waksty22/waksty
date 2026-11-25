@@ -29,6 +29,12 @@ def _world_db():
             action TEXT NOT NULL, outcome TEXT NOT NULL, evidence TEXT NOT NULL,
             source_type TEXT NOT NULL, confidence REAL NOT NULL, created_at TEXT NOT NULL
         );
+        CREATE TABLE perception_fusion_candidates (
+            id INTEGER PRIMARY KEY, user_id TEXT NOT NULL,
+            audio_observation_id TEXT NOT NULL, vision_observation_id TEXT NOT NULL,
+            time_delta_seconds REAL NOT NULL, status TEXT NOT NULL,
+            evidence_json TEXT NOT NULL, created_at TEXT NOT NULL
+        );
         CREATE TABLE world_relations (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, subject_id TEXT NOT NULL,
             predicate TEXT NOT NULL, object_id TEXT NOT NULL, source_type TEXT NOT NULL,
@@ -67,6 +73,26 @@ def _world_db():
          "other user's data", "2026-11-25T00:00:00Z"),
     )
     db.execute(
+        "INSERT INTO perception_fusion_candidates VALUES (?,?,?,?,?,?,?,?)",
+        (1, "creator", "audio:clock-tick", "vision:clock", 1.25, "confirmed",
+         json.dumps({
+             "rule": "temporal_cooccurrence_only",
+             "audio_excerpt": "tick tick",
+             "vision_excerpt": "A clock is visible",
+             "human_review": {
+                 "decision": "confirm",
+                 "evidence": "I verified the ticking clock in the frame",
+                 "reviewed_at": "2026-11-25T00:00:00Z",
+             },
+         }), "2026-11-25T00:00:00Z"),
+    )
+    db.execute(
+        "INSERT INTO perception_fusion_candidates VALUES (?,?,?,?,?,?,?,?)",
+        (2, "other", "audio:private", "vision:private", 0.2, "confirmed",
+         json.dumps({"audio_excerpt": "private audio", "vision_excerpt": "private image"}),
+         "2026-11-25T00:00:00Z"),
+    )
+    db.execute(
         "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?)",
         (1, "creator", "object:clock", "turn", "hands move", "observed movement",
          "observed", 0.7, "2026-11-25T00:00:00Z"),
@@ -102,6 +128,13 @@ def test_identity_context_includes_user_scoped_world_snapshot_for_chat_and_live(
     assert "Creator validated the color" in text
     assert "object_experiences" in text
     assert "hands move" in text
+    assert "cross_modal_fusions" in text
+    assert "audio:clock-tick" in text
+    assert "A clock is visible" in text
+    assert "I verified the ticking clock in the frame" in text
+    assert '"semantic_identity_proven":false' in text
+    assert '"world_knowledge_promoted":false' in text
+    assert "private audio" not in text
     assert "secret:other-user" not in text
     assert "other user's data" not in text
     assert "secret outcome" not in text
@@ -124,7 +157,7 @@ def test_world_model_context_is_bounded_and_valid_json(monkeypatch):
     assert len(context) <= 700
     assert "NON FIABLES" in header
     assert payload["partial"] is True
-    assert set(payload) >= {"entities", "relations", "object_properties", "object_experiences"}
+    assert set(payload) >= {"entities", "relations", "object_properties", "object_experiences", "cross_modal_fusions"}
     db.close()
 
 
@@ -173,6 +206,8 @@ def test_shared_world_model_tool_searches_relevant_records_for_both_channels(mon
     assert payload["object_properties"][0]["object"] == "object:clock"
     assert payload["object_properties"][0]["value"] == "red"
     assert payload["object_properties"][0]["provenance"] == "confirmed"
+    assert payload["cross_modal_fusions"][0]["candidate_id"] == 1
+    assert payload["cross_modal_fusions"][0]["status"] == "confirmed"
     serialized = json.dumps(payload, ensure_ascii=False)
     assert "secret:other-user" not in serialized
     assert "other user's data" not in serialized

@@ -57,12 +57,17 @@ class FakeGeminiWebSocket:
         self.client = client
         self.sent = []
         self._setup_read = False
+        self.refresh_count = 0
 
     async def send(self, payload):
         message = json.loads(payload)
+        is_refresh = message.get("clientContent", {}).get("turnComplete") is False
+        if is_refresh:
+            self.refresh_count += 1
         if (
             self.client.coordinate_refresh
-            and message.get("clientContent", {}).get("turnComplete") is False
+            and is_refresh
+            and self.refresh_count >= 2
         ):
             self.client.next_input_event.set()
             await self.client.second_input_received.wait()
@@ -642,7 +647,8 @@ def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(
 
     refresh_index = next(
         index for index, message in enumerate(provider.sent)
-        if message.get("clientContent", {}).get("turnComplete") is False
+        if index > tool_response_index
+        and message.get("clientContent", {}).get("turnComplete") is False
     )
     next_input_index = next(
         index for index, message in enumerate(provider.sent)
@@ -655,20 +661,14 @@ def test_live_tool_response_precedes_brain_refresh_and_next_user_input(
 ):
     run, _calls, client = live_bridge
     snapshots = [
-        {
-            "snapshot_version": "34.0",
-            "statistics": {"totals": {"memories": 1}},
-            "vocabulary": [],
-        },
-        {
-            "snapshot_version": "34.0",
-            "statistics": {"totals": {"memories": 2}},
-            "vocabulary": [],
-        },
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 0}}, "vocabulary": []},
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 1}}, "vocabulary": []},
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 2}}, "vocabulary": []},
+        {"snapshot_version": "34.0", "statistics": {"totals": {"memories": 2}}, "vocabulary": []},
     ]
     monkeypatch.setattr(
         server, "get_shared_brain_snapshot",
-        lambda _db, _user, limit=8: snapshots.pop(0),
+        lambda _db, _user, limit=8, query=None: snapshots.pop(0),
     )
     monkeypatch.setattr(server, "get_repeatable_words", lambda _db, _user: [])
     monkeypatch.setattr(

@@ -353,28 +353,103 @@ document.addEventListener("DOMContentLoaded", () => {
     window.loadKnownObjects = async function() {
         const token = getToken();
         const output = document.getElementById("knownObjectsOutput");
+        if (!output) return;
+        output.replaceChildren();
         try {
             const data = await apiCall("/api/learning/objects", {
                 headers: { "Authorization": "Bearer " + token }
             });
-            const objects = data.objects || [];
-            if (output) output.textContent = objects.length
-                ? objects.map(object => {
-                    const props = (object.properties || []).map(p =>
-                        "  • " + p.property_key + " : " + p.property_value
-                        + " [" + p.source_type + ", confiance "
-                        + Math.round(p.confidence * 100) + "%]"
-                    ).join("\\n");
-                    const experiences = (object.experiences || []).map(e =>
-                        "  ↳ " + e.action + " → " + e.outcome
-                    ).join("\\n");
-                    return object.word + " (" + object.vocabulary_state + ")\\n"
-                        + (props || "  Aucune propriété apprise.") + "\\n"
-                        + (experiences || "  Aucune expérience enregistrée.");
-                }).join("\\n\\n")
-                : "Aucun objet reconnu pour le moment.";
+            const objects = Array.isArray(data.objects) ? data.objects : [];
+            if (!objects.length) {
+                output.textContent = "Aucun objet reconnu pour le moment.";
+                return;
+            }
+
+            for (const object of objects) {
+                const card = document.createElement("section");
+                card.className = "info-card";
+                card.style.marginBottom = "10px";
+
+                const heading = document.createElement("h4");
+                heading.textContent = String(object.word || "Objet") + " (" + String(object.vocabulary_state || "état inconnu") + ")";
+                card.appendChild(heading);
+
+                const properties = Array.isArray(object.properties) ? object.properties : [];
+                if (!properties.length) {
+                    const empty = document.createElement("p");
+                    empty.className = "muted";
+                    empty.textContent = "Aucune propriété apprise.";
+                    card.appendChild(empty);
+                }
+
+                for (const property of properties) {
+                    const row = document.createElement("div");
+                    row.style.cssText = "padding:10px 0;border-top:1px solid #263449;display:grid;gap:7px";
+                    const description = document.createElement("p");
+                    description.textContent = property.property_key + " : " + property.property_value
+                        + " — " + property.source_type + ", confiance "
+                        + Math.round(Number(property.confidence || 0) * 100) + "%";
+                    row.appendChild(description);
+
+                    if (property.source_type === "confirmed") {
+                        const confirmed = document.createElement("span");
+                        confirmed.className = "badge";
+                        confirmed.textContent = "✓ Confirmé par le Créateur";
+                        row.appendChild(confirmed);
+                    } else {
+                        const proof = document.createElement("textarea");
+                        proof.maxLength = 1000;
+                        proof.rows = 2;
+                        proof.placeholder = "Preuve de confirmation (obligatoire)";
+                        proof.setAttribute("aria-label", "Preuve de confirmation pour " + property.property_key);
+                        const confirmButton = document.createElement("button");
+                        confirmButton.type = "button";
+                        confirmButton.textContent = "Confirmer cette propriété";
+                        confirmButton.addEventListener("click", () => {
+                            window.confirmObjectProperty(object.word, property.property_key, property.property_value, proof, confirmButton);
+                        });
+                        row.append(proof, confirmButton);
+                    }
+                    card.appendChild(row);
+                }
+
+                const experiences = Array.isArray(object.experiences) ? object.experiences : [];
+                if (experiences.length) {
+                    const experienceTitle = document.createElement("p");
+                    experienceTitle.className = "muted";
+                    experienceTitle.style.marginTop = "8px";
+                    experienceTitle.textContent = experiences.length + " expérience(s) enregistrée(s).";
+                    card.appendChild(experienceTitle);
+                }
+                output.appendChild(card);
+            }
         } catch (error) {
-            if (output) output.textContent = "Erreur : " + error.message;
+            output.textContent = "Erreur : " + error.message;
+        }
+    };
+
+    window.confirmObjectProperty = async function(word, property, value, proofInput, button) {
+        const evidence = proofInput?.value?.trim() || "";
+        const status = document.getElementById("objectLearningStatus");
+        if (!evidence) {
+            if (status) status.textContent = "Ajoute une preuve explicite avant de confirmer.";
+            proofInput?.focus();
+            return;
+        }
+        if (button) button.disabled = true;
+        try {
+            const result = await apiCall("/api/learning/object-property/confirm", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + getToken() },
+                body: { word, property, value, evidence }
+            });
+            if (status) status.textContent = result.confirmed_by_owner
+                ? "Confirmé par le Créateur : " + word + " — " + property + " : " + value
+                : "Confirmation enregistrée.";
+            await window.loadKnownObjects();
+        } catch (error) {
+            if (status) status.textContent = "Confirmation refusée : " + error.message;
+            if (button) button.disabled = false;
         }
     };
 

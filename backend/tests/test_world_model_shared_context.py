@@ -27,7 +27,8 @@ def _world_db():
         CREATE TABLE object_experiences (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, object_id TEXT NOT NULL,
             action TEXT NOT NULL, outcome TEXT NOT NULL, evidence TEXT NOT NULL,
-            source_type TEXT NOT NULL, confidence REAL NOT NULL, created_at TEXT NOT NULL
+            source_type TEXT NOT NULL, confidence REAL NOT NULL, created_at TEXT NOT NULL,
+            autobiographical_event_id INTEGER
         );
         CREATE TABLE perception_fusion_candidates (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL,
@@ -93,14 +94,14 @@ def _world_db():
          "2026-11-25T00:00:00Z"),
     )
     db.execute(
-        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?,?)",
         (1, "creator", "object:clock", "turn", "hands move", "observed movement",
-         "observed", 0.7, "2026-11-25T00:00:00Z"),
+         "observed", 0.7, "2026-11-25T00:00:00Z", 41),
     )
     db.execute(
-        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?,?)",
         (2, "other", "secret:other-user", "open", "secret outcome", "private",
-         "confirmed", 1.0, "2026-11-25T00:00:00Z"),
+         "confirmed", 1.0, "2026-11-25T00:00:00Z", 99),
     )
     db.commit()
     return db
@@ -128,6 +129,8 @@ def test_identity_context_includes_user_scoped_world_snapshot_for_chat_and_live(
     assert "Creator validated the color" in text
     assert "object_experiences" in text
     assert "hands move" in text
+    assert '"autobiographical_event_id":41' in text
+    assert '"autobiographical_event_id":99' not in text
     assert "cross_modal_fusions" in text
     assert "audio:clock-tick" in text
     assert "A clock is visible" in text

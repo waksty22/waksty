@@ -11,6 +11,7 @@ from learning.language import init_language_tables, record_heard_word, advance_w
 from learning.object_learning import (
     init_object_learning_tables,
     teach_object_property,
+    confirm_object_property,
     list_known_objects,
     compare_known_objects,
     record_object_experience,
@@ -351,3 +352,63 @@ def test_object_experience_rejects_coerced_confidence_without_writing(db, confid
             confidence=confidence,
         )
     assert db.execute("SELECT COUNT(*) FROM object_experiences").fetchone()[0] == 0
+
+
+def test_owner_can_confirm_only_an_existing_object_property(db):
+    add_recognized_object(db, "pomme")
+    taught = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Le Créateur enseigne que la pomme est rouge.",
+        confidence=0.75,
+    )
+    assert taught["source_type"] == "taught"
+
+    confirmed = confirm_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Vérification explicite du Créateur.",
+    )
+    assert confirmed["source_type"] == "confirmed"
+    assert confirmed["confidence"] == 1.0
+    assert confirmed["evidence"] == "Vérification explicite du Créateur."
+
+    later_teaching = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Répétition ultérieure.", confidence=1.0,
+    )
+    assert later_teaching["source_type"] == "confirmed"
+    assert later_teaching["evidence"] == "Vérification explicite du Créateur."
+
+
+def test_owner_cannot_confirm_missing_property_or_without_evidence(db):
+    add_recognized_object(db, "pomme")
+    with pytest.raises(ValueError, match="n'existe pas"):
+        confirm_object_property(
+            db, "creator", "pomme", "couleur", "rouge",
+            evidence="Je confirme.",
+        )
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    with pytest.raises(ValueError, match="preuve explicite"):
+        confirm_object_property(
+            db, "creator", "pomme", "couleur", "rouge", evidence="",
+        )
+    stored = db.execute(
+        "SELECT source_type FROM object_properties WHERE user_id=?",
+        ("creator",),
+    ).fetchone()
+    assert stored["source_type"] == "taught"
+
+
+def test_object_property_confirmation_endpoint_requires_authenticated_post():
+    import server
+
+    matches = [
+        route for route in server.app.routes
+        if getattr(route, "path", None) == "/api/learning/object-property/confirm"
+    ]
+    assert len(matches) == 1
+    route = matches[0]
+    assert "POST" in route.methods
+    assert any(
+        dependency.call is server.require_auth
+        for dependency in route.dependant.dependencies
+    )

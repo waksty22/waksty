@@ -103,7 +103,7 @@ from learning.live_visual_observation import (
     live_visual_observation_due,
 )
 from learning.object_learning import (
-    init_object_learning_tables, teach_object_property,
+    init_object_learning_tables, teach_object_property, confirm_object_property,
     list_known_objects, compare_known_objects, record_object_experience,
 )
 from learning.causal_learning import (
@@ -5673,6 +5673,29 @@ async def api_teach_object_property(
             )
             db.commit()
         return {"ok": True, "property": result}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/object-property/confirm")
+async def api_confirm_object_property(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    """Confirm an existing object property through an explicit owner action."""
+    user_id = _authenticated_user(auth)
+    data = await _json_object(request)
+    try:
+        with db_connection() as db:
+            result = confirm_object_property(
+                db, user_id,
+                data.get("word", ""),
+                data.get("property", ""),
+                data.get("value", ""),
+                evidence=data.get("evidence", ""),
+            )
+            db.commit()
+        return {"ok": True, "property": result, "confirmed_by_owner": True}
     except (ValueError, PermissionError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

@@ -639,3 +639,97 @@ def test_interrupted_live_visual_turn_does_not_persist_model_description(
                  AND content='Je vois peut-être un oiseau'""",
             ("creator",),
         ).fetchone()[0] == 0
+
+
+
+def test_interrupted_live_turn_persistence_is_idempotent_after_state_clear(
+    monkeypatch, tmp_path
+):
+    """A repeated cleanup call must not write the same buffered partial turn twice."""
+    import server
+
+    database_path = tmp_path / "interrupted-idempotency.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    server.init_db()
+
+    state = {
+        "user": "transcription partielle",
+        "assistant": "réponse inachevée",
+        "audio": [{"data": "ignored"}],
+        "audio_chars": 7,
+    }
+
+    assert server.persist_interrupted_live_turn("creator", state) is True
+    assert server.persist_interrupted_live_turn("creator", state) is False
+    assert state == {
+        "user": "",
+        "assistant": "",
+        "audio": [],
+        "audio_chars": 0,
+    }
+
+    with server.db_connection() as db:
+        rows = db.execute(
+            "SELECT role, content FROM conversations "
+            "WHERE user_id=? ORDER BY id",
+            ("creator",),
+        ).fetchall()
+        assert [(row["role"], row["content"]) for row in rows] == [
+            ("user", "transcription partielle")
+        ]
+        assert db.execute(
+            "SELECT COUNT(*) FROM journal "
+            "WHERE user_id=? AND kind='gemini_live_interrupted'",
+            ("creator",),
+        ).fetchone()[0] == 1
+
+
+def test_interrupted_live_turn_keeps_buffer_for_retry_when_storage_fails(
+    monkeypatch
+):
+    """A failed durable write must not erase the only in-memory transcript copy."""
+    import server
+
+    state = {
+        "user": "à conserver",
+        "assistant": "ne pas conserver",
+        "audio": [{"data": "buffer"}],
+        "audio_chars": 6,
+    }
+
+    def fail_save(*args, **kwargs):
+        raise RuntimeError("simulated storage failure")
+
+    monkeypatch.setattr(server, "save_conversation_turn", fail_save)
+    with pytest.raises(RuntimeError, match="simulated storage failure"):
+        server.persist_interrupted_live_turn("creator", state)
+
+    assert state == {
+        "user": "à conserver",
+        "assistant": "ne pas conserver",
+        "audio": [{"data": "buffer"}],
+        "audio_chars": 6,
+    }
+
+
+def test_empty_interrupted_live_turn_discards_assistant_and_audio_only():
+    """An assistant-only partial response is never promoted to conversation memory."""
+    import server
+
+    state = {
+        "user": "   ",
+        "assistant": "réponse tronquée",
+        "audio": [{"data": "buffer"}],
+        "audio_chars": 6,
+    }
+
+    assert server.persist_interrupted_live_turn("creator", state) is False
+    assert state == {
+        "user": "",
+        "assistant": "",
+        "audio": [],
+        "audio_chars": 0,
+    }

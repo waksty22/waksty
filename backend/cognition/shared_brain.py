@@ -608,6 +608,7 @@ def get_shared_brain_snapshot(
                     "memories", "object_properties", "causal_observations",
                     "causal_hypotheses", "causal_experiments", "imitation_examples",
                     "imitation_attempts", "decision_journal", "preference_evidence",
+                    "skills", "competency_tests",
                 } else "",
             )
             totals[key] = _count(db, table, user_id)

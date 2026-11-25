@@ -121,7 +121,8 @@ def _rows(
         query_terms = _query_terms(query) if table in {
             "personal_vocabulary", "word_visual_associations",
             "sensory_observations", "perception_fusion_candidates",
-            "world_entities", "world_relations",
+            "world_entities", "world_relations", "spatial_sessions",
+            "spatial_visits", "place_memories",
         } else []
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
@@ -171,6 +172,66 @@ def _rows(
                     f"SELECT * FROM {table} WHERE user_id=? "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
+                    (user_id, *parameters, limit),
+                ).fetchall()
+            elif table == "place_memories":
+                searchable = [
+                    _accent_folded_sql("label"),
+                    _accent_folded_sql("description"),
+                    _accent_folded_sql("visual_signature"),
+                    _accent_folded_sql("confirmation_evidence"),
+                ]
+                match = " OR ".join(
+                    " OR ".join(f"INSTR({column}, ?) > 0" for column in searchable)
+                    for _ in query_terms
+                )
+                parameters = tuple(
+                    term for _ in query_terms for term in query_terms[:0]
+                )
+                parameters = tuple(
+                    term for term in query_terms for _column in searchable
+                )
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
+                    f"{order_by} LIMIT ?",
+                    (user_id, *parameters, limit),
+                ).fetchall()
+            elif table in {"spatial_sessions", "spatial_visits"}:
+                # GPS samples have no semantic text of their own. Rank them
+                # through a matching place observation from the same session;
+                # never infer a place identity from coordinates alone.
+                if table == "spatial_sessions":
+                    session_column = "session.session_id"
+                    from_clause = "spatial_sessions AS session"
+                    selected = "session.*"
+                    timestamp = order_by.replace("started_at", "session.started_at")
+                else:
+                    session_column = "visit.session_id"
+                    from_clause = "spatial_visits AS visit"
+                    selected = "visit.*"
+                    timestamp = order_by.replace("recorded_at", "visit.recorded_at")
+                folded_fields = [
+                    _accent_folded_sql("place.label"),
+                    _accent_folded_sql("place.description"),
+                    _accent_folded_sql("place.visual_signature"),
+                    _accent_folded_sql("place.confirmation_evidence"),
+                ]
+                match = " OR ".join(
+                    " OR ".join(f"INSTR({column}, ?) > 0" for column in folded_fields)
+                    for _ in query_terms
+                )
+                parameters = tuple(
+                    term for _ in query_terms for _column in folded_fields
+                )
+                rows = db.execute(
+                    f"SELECT {selected} FROM {from_clause} "
+                    "WHERE " + ("session.user_id=?" if table == "spatial_sessions" else "visit.user_id=?") +
+                    " ORDER BY CASE WHEN EXISTS ("
+                    "SELECT 1 FROM place_memories AS place "
+                    "WHERE place.user_id=" + ("session.user_id " if table == "spatial_sessions" else "visit.user_id ") +
+                    "AND place.session_id=" + session_column +
+                    f" AND ({match})) THEN 0 ELSE 1 END, {timestamp} LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
             elif table == "world_relations":
@@ -345,7 +406,11 @@ def get_shared_brain_snapshot(
         for key, (table, order_by) in TABLES.items():
             data[key] = _rows(
                 db, table, order_by, user_id, limit,
-                query=query if key in {"vocabulary", "word_visual_associations", "sensory_observations", "perception_fusions", "world_entities", "world_relations"} else "",
+                query=query if key in {
+                    "vocabulary", "word_visual_associations", "sensory_observations",
+                    "perception_fusions", "world_entities", "world_relations",
+                    "spatial_sessions", "spatial_visits", "place_memories",
+                } else "",
             )
             totals[key] = _count(db, table, user_id)
 

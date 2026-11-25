@@ -163,7 +163,7 @@ def test_query_ranks_older_records_across_cognitive_domains():
     affective_context = format_shared_brain_context(affective_snapshot)
     assert "HISTORIQUE AFFECTIF" in affective_context
     assert "réaction à la panne du robot" in affective_context
-    assert '"curiosity": 85' in affective_context
+    assert '\\"curiosity\\":85' in affective_context
 
     skill_snapshot = get_shared_brain_snapshot(
         db, "creator", limit=2, query="navigation spatiale"

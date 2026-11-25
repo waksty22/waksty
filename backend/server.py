@@ -3142,7 +3142,7 @@ def build_world_model_context(
             property_rows = []
             if "object_properties" in available_tables:
                 property_rows = db.execute(
-                    """SELECT p.object_id, p.property_key, p.property_value,
+                    """SELECT p.id, p.object_id, p.property_key, p.property_value,
                               p.source_type, p.confidence, p.evidence, p.updated_at
                        FROM object_properties p
                        JOIN world_entities e
@@ -3154,7 +3154,7 @@ def build_world_model_context(
             experience_rows = []
             if "object_experiences" in available_tables:
                 experience_rows = db.execute(
-                    """SELECT x.object_id, x.action, x.outcome, x.evidence,
+                    """SELECT x.id, x.object_id, x.action, x.outcome, x.evidence,
                               x.source_type, x.confidence, x.created_at
                        FROM object_experiences x
                        JOIN world_entities e

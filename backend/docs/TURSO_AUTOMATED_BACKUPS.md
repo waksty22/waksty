@@ -120,3 +120,21 @@ Comparer les compteurs restaurés au résumé de l'archive. Contrôler les contr
 Aucun workflow automatisé de restauration distante de l'artefact quotidien n'est encore déclaré opérationnel. Avant d'en créer un, il faudra disposer de secrets dédiés à la base de récupération, d'un hostname attendu obligatoire, d'une confirmation explicite de l'opérateur, d'un précontrôle de base vide et d'une protection empêchant toute destination de production. Le workflow de test E2E existant ne remplace pas cet exercice réel.
 
 **Interdictions permanentes pour les exercices :** ne pas utiliser `chappie-db` comme cible ; ne pas lancer de reset ; ne pas restaurer dans la base de test partagée sans autorisation spécifique ; ne pas basculer l'application vers la base de récupération automatiquement.
+
+
+## Limite explicite du statut `verified`
+
+Une sauvegarde marquée **`verified`** signifie uniquement que l'export logique a été déchiffré et reconstruit avec succès dans une base SQLite temporaire isolée, et que son intégrité locale a été contrôlée. Cela **ne prouve pas** qu'une restauration distante vers Turso a été réalisée ni qu'elle fonctionnerait avec les contraintes propres à Turso.
+
+Le dépôt ne fournit pas encore d'importateur dédié capable de restaurer cet artefact chiffré dans une base Turso distante. Les outils de restauration SQLite locale et les outils de migration SQLite-vers-Turso ne sont pas des substituts à cet importateur.
+
+Avant de déclarer une restauration Turso validée, il faudra impérativement :
+1. utiliser une base Turso de test jetable, distincte de `chappie-db` et de toute base configurée pour Render ;
+2. vérifier l'identité de la destination à partir de son nom/hostname non secret et refuser toute cible de production ;
+3. vérifier l'archive, son checksum et son authentification, puis déchiffrer dans un espace temporaire privé ;
+4. importer avec un outil dédié qui respecte tables, index, vues, triggers, contraintes et limites de Turso ;
+5. comparer les schémas, objets SQL, nombres de lignes et contrôles d'intégrité ;
+6. relire les données par les chemins applicatifs, avec de nouvelles connexions ;
+7. conserver un rapport sans données personnelles.
+
+**État actuel :** cette procédure de restauration distante n'est pas automatisée ni validée de bout en bout. Ne jamais tester une restauration sur `chappie-db`, ne jamais lancer de reset et ne jamais basculer Render vers une base de récupération sur la seule base d'un export local vérifié.

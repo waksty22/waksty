@@ -3175,7 +3175,8 @@ def build_world_model_context(
             if "object_experiences" in available_tables:
                 experience_rows = db.execute(
                     """SELECT x.id, x.object_id, x.action, x.outcome, x.evidence,
-                              x.source_type, x.confidence, x.created_at
+                              x.source_type, x.confidence, x.created_at,
+                               x.autobiographical_event_id
                        FROM object_experiences x
                        JOIN world_entities e
                          ON e.id=x.object_id AND e.user_id=x.user_id
@@ -3220,7 +3221,7 @@ def build_world_model_context(
             if "object_experiences" in available_tables:
                 experience_matches = _query_matches(
                     db, "object_experiences",
-                    "id, object_id, action, outcome, evidence, source_type, confidence, created_at",
+                    "id, object_id, action, outcome, evidence, source_type, confidence, created_at, autobiographical_event_id",
                     ("object_id", "action", "outcome", "evidence"),
                     "created_at", 500,
                 )
@@ -3302,6 +3303,7 @@ def build_world_model_context(
             "confidence": confidence,
             "evidence": str(item.get("evidence", ""))[:300],
             "created_at": str(item.get("created_at", ""))[:80],
+            "autobiographical_event_id": item.get("autobiographical_event_id"),
         })
 
     for row in fusion_rows:

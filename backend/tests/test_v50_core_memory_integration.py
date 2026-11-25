@@ -188,6 +188,7 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
     chat_source = inspect.getsource(server.call_gemini)
     live_source = inspect.getsource(server.websocket_endpoint)
     identity_source = inspect.getsource(server.get_identity_context)
+    autobiographical_source = inspect.getsource(server.build_autobiographical_context)
 
     assert "get_identity_prompt(user_id, query=query)" in chat_source
     assert "get_identity_prompt(user_id)" in live_source
@@ -198,8 +199,10 @@ def test_written_chat_and_gemini_live_use_the_same_persisted_identity_context():
     assert '"clientContent"' in live_source
 
     # Durable context is assembled once and reused by both modalities.
-    assert "sync_autobiographical_events" in identity_source
-    assert "list_autobiographical_events" in identity_source
+    assert "build_autobiographical_context" in identity_source
+    assert "sync_autobiographical_events" in autobiographical_source
+    assert "list_autobiographical_events" in autobiographical_source
+    assert "search_autobiographical_events" in autobiographical_source
     assert "get_shared_brain_snapshot" in identity_source
     assert "format_shared_brain_context" in identity_source
     assert "retrieve_acquired_knowledge" in identity_source

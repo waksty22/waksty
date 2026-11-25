@@ -34,3 +34,39 @@ def test_live_brain_refresh_message_enforces_total_payload_limit(monkeypatch):
     monkeypatch.setattr(server, "_truncate_context_at_section_boundary", lambda value, limit: value)
     with pytest.raises(ValueError):
         server.build_live_brain_refresh_message({}, [], [], 1)
+
+def test_live_query_refresh_uses_current_user_text_before_provider_input(monkeypatch):
+    calls = []
+
+    def snapshot(db, user_id, limit, query):
+        calls.append((db, user_id, limit, query))
+        return {"world_entities": [{"properties": {"label": "Éléphant"}}]}
+
+    monkeypatch.setattr(server, "get_shared_brain_snapshot", snapshot)
+    monkeypatch.setattr(
+        server, "build_live_brain_refresh_message",
+        lambda value, added, removed, version: {
+            "snapshot": value, "added": added, "removed": removed,
+            "version": version,
+        },
+    )
+
+    result = server.build_live_query_brain_refresh_message(
+        "temporary-db", "creator", "Parle-moi de l'éléphant", 3
+    )
+
+    assert calls == [(
+        "temporary-db", "creator", 8, "Parle-moi de l'éléphant"
+    )]
+    assert result["snapshot"]["world_entities"][0]["properties"]["label"] == "Éléphant"
+    assert result["version"] == 3
+
+
+def test_live_query_refresh_skips_empty_query_without_reading_database(monkeypatch):
+    monkeypatch.setattr(
+        server, "get_shared_brain_snapshot",
+        lambda *args, **kwargs: pytest.fail("empty queries must not read the brain"),
+    )
+    assert server.build_live_query_brain_refresh_message(
+        "temporary-db", "creator", "   ", 1
+    ) is None

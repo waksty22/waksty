@@ -122,7 +122,7 @@ def _rows(
             "personal_vocabulary", "word_visual_associations",
             "sensory_observations", "perception_fusion_candidates",
             "world_entities", "world_relations", "spatial_sessions",
-            "spatial_visits", "place_memories",
+            "spatial_visits", "place_memories", "autobiographical_events",
         } else []
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
@@ -172,6 +172,23 @@ def _rows(
                     f"SELECT * FROM {table} WHERE user_id=? "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
+                    (user_id, *parameters, limit),
+                ).fetchall()
+            elif table == "autobiographical_events":
+                folded_content = _accent_folded_sql("content")
+                folded_type = _accent_folded_sql("event_type")
+                match = " OR ".join(
+                    f"INSTR({folded_content}, ?) > 0 OR "
+                    f"INSTR({folded_type}, ?) > 0"
+                    for _ in query_terms
+                )
+                parameters = tuple(
+                    value for term in query_terms for value in (term, term)
+                )
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
+                    f"importance DESC, happened_at DESC, id DESC LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
             elif table == "place_memories":
@@ -410,6 +427,7 @@ def get_shared_brain_snapshot(
                     "vocabulary", "word_visual_associations", "sensory_observations",
                     "perception_fusions", "world_entities", "world_relations",
                     "spatial_sessions", "spatial_visits", "place_memories",
+                    "autobiographical_events",
                 } else "",
             )
             totals[key] = _count(db, table, user_id)

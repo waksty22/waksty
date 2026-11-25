@@ -40,6 +40,7 @@ TABLES = {
     "decision_journal": ("decision_journal", "id DESC"),
     "preference_evidence": ("preference_evidence", "id DESC"),
     "emotional_state": ("emotional_state", "updated_at DESC"),
+    "affective_history": ("affective_history", "id DESC"),
     "competency_tests": ("competency_tests", "tested_at DESC"),
     "spatial_sessions": ("spatial_sessions", "started_at DESC"),
     "spatial_visits": ("spatial_visits", "recorded_at DESC"),
@@ -126,7 +127,7 @@ def _rows(
             "object_experiences", "memories_v19", "object_properties",
             "causal_observations", "causal_hypotheses", "causal_experiments",
             "imitation_examples", "imitation_attempts", "decision_journal",
-            "preference_evidence", "skills", "competency_tests",
+            "preference_evidence", "skills", "competency_tests", "affective_history",
         } else []
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
@@ -319,7 +320,7 @@ def _rows(
                 "memories_v19", "object_properties", "causal_observations",
                 "causal_hypotheses", "causal_experiments", "imitation_examples",
                 "imitation_attempts", "decision_journal", "preference_evidence",
-                "skills", "competency_tests",
+                "skills", "competency_tests", "affective_history",
             }:
                 # Search only fixed, schema-verified text fields. This brings
                 # older episodic memories and supervised cognitive records into
@@ -336,6 +337,7 @@ def _rows(
                     "preference_evidence": ("domain", "preference", "evidence", "basis"),
                     "skills": ("skill_name", "evidence"),
                     "competency_tests": ("test_name", "details"),
+                    "affective_history": ("source", "event_label", "state_json"),
                 }[table]
                 folded_columns = [
                     _accent_folded_sql(column) for column in searchable_columns
@@ -608,7 +610,7 @@ def get_shared_brain_snapshot(
                     "memories", "object_properties", "causal_observations",
                     "causal_hypotheses", "causal_experiments", "imitation_examples",
                     "imitation_attempts", "decision_journal", "preference_evidence",
-                    "skills", "competency_tests",
+                    "skills", "competency_tests", "affective_history",
                 } else "",
             )
             totals[key] = _count(db, table, user_id)

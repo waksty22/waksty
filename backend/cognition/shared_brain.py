@@ -239,7 +239,7 @@ def _rows(
                     for _ in query_terms
                 )
                 parameters = tuple(
-                    term for _ in query_terms for _column in folded_fields
+                    term for term in query_terms for _column in folded_fields
                 )
                 rows = db.execute(
                     f"SELECT {selected} FROM {from_clause} "

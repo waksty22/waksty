@@ -94,12 +94,12 @@ def _world_db():
          "2026-11-25T00:00:00Z"),
     )
     db.execute(
-        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?,?)",
         (1, "creator", "object:clock", "turn", "hands move", "observed movement",
          "observed", 0.7, "2026-11-25T00:00:00Z", 41),
     )
     db.execute(
-        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?,?)",
         (2, "other", "secret:other-user", "open", "secret outcome", "private",
          "confirmed", 1.0, "2026-11-25T00:00:00Z", 99),
     )

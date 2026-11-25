@@ -3136,7 +3136,7 @@ def build_world_model_context(user_id: str, max_chars: int = 6500) -> str:
         return context
 
     # Trim whole records, preserving valid JSON and a clear partial marker.
-    while len(context) > max_chars and (entities or relations):
+    while len(context) > max_chars and any((entities, relations, object_properties, object_experiences)):
         collections = (relations, entities, object_properties, object_experiences)
         largest = max(collections, key=len)
         if largest:

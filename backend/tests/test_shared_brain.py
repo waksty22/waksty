@@ -114,6 +114,54 @@ def test_query_prioritizes_older_relevant_vocabulary_over_recent_sample():
     db.close()
 
 
+def test_query_prioritizes_historical_sensory_content_over_recent_observations():
+    db = make_db()
+    db.execute("""
+        CREATE TABLE word_visual_associations (
+            id INTEGER PRIMARY KEY, user_id TEXT, word TEXT,
+            observation_id TEXT, evidence TEXT, created_at TEXT
+        )
+    """)
+    db.execute(
+        "INSERT INTO sensory_observations VALUES "
+        "('old-vision','creator','vision','Une tasse rouge avec une anse','camera',0.0,'{}','2000-01-01')"
+    )
+    for index in range(12):
+        db.execute(
+            "INSERT INTO sensory_observations VALUES (?,?,?,?,?,?,?,?)",
+            (f"recent-{index}", "creator", "vision", f"Observation récente numéro {index}",
+             "camera", 0.0, "{}", f"2026-11-{index + 1:02d}"),
+        )
+
+    recent = get_shared_brain_snapshot(db, "creator", limit=5)
+    assert all(row["observation_id"] != "old-vision" for row in recent["sensory_observations"])
+
+    recalled = get_shared_brain_snapshot(
+        db, "creator", limit=5, query="Que sais-tu de la tasse rouge ?"
+    )
+    assert recalled["sensory_observations"][0]["observation_id"] == "old-vision"
+    db.close()
+
+
+def test_query_retrieves_sensory_content_without_legacy_association_table():
+    db = make_db()
+    db.execute(
+        "INSERT INTO sensory_observations VALUES "
+        "('old-vision','creator','vision','Un vélo bleu posé contre le mur','camera',0.0,'{}','2000-01-01')"
+    )
+    for index in range(8):
+        db.execute(
+            "INSERT INTO sensory_observations VALUES (?,?,?,?,?,?,?,?)",
+            (f"recent-{index}", "creator", "vision", f"Observation récente {index}",
+             "camera", 0.0, "{}", f"2026-11-{index + 1:02d}"),
+        )
+    recalled = get_shared_brain_snapshot(
+        db, "creator", limit=5, query="Rappelle le vélo bleu"
+    )
+    assert recalled["sensory_observations"][0]["observation_id"] == "old-vision"
+    db.close()
+
+
 def test_snapshot_unifies_persisted_modules_without_promoting_observations():
     db = make_db()
     db.execute(

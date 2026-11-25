@@ -10,6 +10,7 @@ import json
 import math
 import re
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -84,17 +85,32 @@ def _rows(
                 "que", "qui", "sur", "une", "vous", "the", "and", "for",
                 "from", "that", "this", "what", "when", "where",
             }
+            raw_terms = re.findall(
+                r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+            )
             query_terms = list(dict.fromkeys(
-                token for token in re.findall(
-                    r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+                "".join(
+                    char for char in unicodedata.normalize("NFKD", token)
+                    if not unicodedata.combining(char)
                 )
+                for token in raw_terms
                 if len(token) >= 3 and token not in stop_words
             ))[:12]
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
+            folded_word = "LOWER(word)"
+            for accented, plain in (
+                ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"),
+                ("ç", "c"), ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+                ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
+                ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"),
+                ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
+                ("ÿ", "y"),
+            ):
+                folded_word = f"REPLACE({folded_word}, '{accented}', '{plain}')"
             rows = db.execute(
                 f"SELECT * FROM {table} WHERE user_id=? "
-                f"ORDER BY CASE WHEN LOWER(word) IN ({placeholders}) "
+                f"ORDER BY CASE WHEN {folded_word} IN ({placeholders}) "
                 f"THEN 0 ELSE 1 END, {order_by} LIMIT ?",
                 (user_id, *query_terms, limit),
             ).fetchall()

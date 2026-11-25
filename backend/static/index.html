@@ -1763,6 +1763,11 @@ En attente de synchronisation du cerveau...
           <input id="experienceAction" maxlength="300" placeholder="Ex. pousser doucement">
           <label for="experienceOutcome">Résultat observé</label>
           <textarea id="experienceOutcome" rows="2" maxlength="1000" placeholder="Ex. la balle a roulé sur le sol"></textarea>
+          <label for="experienceEpisode">Épisode autobiographique associé (facultatif)</label>
+          <select id="experienceEpisode">
+            <option value="">Aucun épisode lié</option>
+          </select>
+          <p id="experienceEpisodeStatus" class="muted">Choisis un épisode uniquement si cette expérience en provient explicitement.</p>
           <button type="button" onclick="recordObjectExperience()">Enregistrer l'expérience</button>
           <div id="objectExperienceStatus" class="status">Aucune expérience enregistrée.</div>
         </div>

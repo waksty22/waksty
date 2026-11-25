@@ -192,6 +192,51 @@ def teach_object_property(
     return {"word": word, **dict(row)}
 
 
+def confirm_object_property(
+    db: sqlite3.Connection,
+    user_id: str,
+    word: str,
+    property_key: str,
+    property_value: str,
+    evidence: str,
+) -> dict[str, Any]:
+    """Mark an existing object property as explicitly confirmed by its owner."""
+    word, object_id = _require_known_object(db, user_id, word)
+    key = _clean(property_key, "Propriété", 40).casefold()
+    if key not in ALLOWED_PROPERTY_KEYS:
+        raise ValueError("Type de propriété non autorisé.")
+    value = _clean(property_value, "Valeur", MAX_VALUE_LENGTH)
+    evidence = _clean_optional_evidence(evidence)
+    if not evidence:
+        raise ValueError("Une preuve explicite est obligatoire pour confirmer cette propriété.")
+
+    existing = db.execute(
+        """SELECT 1 FROM object_properties
+           WHERE user_id=? AND object_id=? AND property_key=? AND property_value=?""",
+        (user_id, object_id, key, value),
+    ).fetchone()
+    if existing is None:
+        raise ValueError("Cette propriété n'existe pas encore ; elle ne peut pas être confirmée.")
+
+    now = utc_now()
+    db.execute(
+        """UPDATE object_properties
+           SET source_type='confirmed', confidence=1.0, evidence=?, updated_at=?
+           WHERE user_id=? AND object_id=? AND property_key=? AND property_value=?""",
+        (evidence, now, user_id, object_id, key, value),
+    )
+    row = db.execute(
+        """SELECT property_key, property_value, source_type, confidence,
+                  evidence, created_at, updated_at
+           FROM object_properties
+           WHERE user_id=? AND object_id=? AND property_key=? AND property_value=?""",
+        (user_id, object_id, key, value),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("La confirmation de la propriété n'a pas pu être vérifiée.")
+    return {"word": word, **dict(row)}
+
+
 def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("Identifiant utilisateur invalide.")

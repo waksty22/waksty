@@ -157,6 +157,15 @@ def _rows(
                 if _is_missing_table_error(legacy_exc, "memories"):
                     return []
                 raise
+        elif table == "sensory_observations" and _is_missing_table_error(
+            exc, "word_visual_associations"
+        ):
+            # Legacy databases may not have the optional association table yet.
+            # Preserve the previous recent-observation behavior in that case.
+            rows = db.execute(
+                f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
         elif _is_missing_table_error(exc, table):
             return []
         else:

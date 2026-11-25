@@ -645,11 +645,11 @@ def test_websocket_bridge_holds_next_user_input_until_refresh_is_sent(
         {"serverContent": {"turnComplete": True}},
     ])
 
-    refresh_index = next(
+    refresh_indexes = [
         index for index, message in enumerate(provider.sent)
-        if index > tool_response_index
-        and message.get("clientContent", {}).get("turnComplete") is False
-    )
+        if message.get("clientContent", {}).get("turnComplete") is False
+    ]
+    refresh_index = refresh_indexes[1]
     next_input_index = next(
         index for index, message in enumerate(provider.sent)
         if message.get("realtimeInput", {}).get("text") == "suivant"
@@ -703,7 +703,8 @@ def test_live_tool_response_precedes_brain_refresh_and_next_user_input(
     )
     refresh_index = next(
         index for index, message in enumerate(provider.sent)
-        if message.get("clientContent", {}).get("turnComplete") is False
+        if index > tool_response_index
+        and message.get("clientContent", {}).get("turnComplete") is False
     )
     next_input_index = next(
         index for index, message in enumerate(provider.sent)

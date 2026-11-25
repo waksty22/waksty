@@ -60,6 +60,9 @@ def promote_confirmed_perception_fusion(
     review = stored_evidence.get("human_review")
     if not isinstance(review, dict) or review.get("decision") != "confirm":
         raise ValueError("La confirmation humaine est absente ou invalide.")
+    existing_promotion = stored_evidence.get("semantic_promotion")
+    if isinstance(existing_promotion, dict) and existing_promotion.get("promoted") is True:
+        raise ValueError("Ce rapprochement a déjà été transformé en apprentissage.")
 
     observations = db.execute(
         """SELECT observation_id, modality, content, source

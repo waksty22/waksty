@@ -37,7 +37,7 @@ def test_query_ranks_older_records_across_cognitive_domains():
             """INSERT INTO memories_v19
                (user_id,category,content,importance,source_type,confidence,tags,
                 access_count,created_at,updated_at)
-               VALUES ('creator','general',?,?,5,'taught',0.8,'[]',0,?,?)""",
+               VALUES ('creator','general',?,5,'taught',0.8,'[]',0,?,?)""",
             (f"souvenir récent {index}", f"2026-01-0{index+1}", f"2026-01-0{index+1}"),
         )
 

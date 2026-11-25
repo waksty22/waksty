@@ -75,7 +75,7 @@ def _query_terms(query: str) -> list[str]:
         "from", "that", "this", "what", "when", "where",
     }
     raw_terms = re.findall(
-        r"[\\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+        r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
     )
     return list(dict.fromkeys(
         "".join(
@@ -279,7 +279,7 @@ def get_shared_brain_snapshot(
         for key, (table, order_by) in TABLES.items():
             data[key] = _rows(
                 db, table, order_by, user_id, limit,
-                query=query if key == "vocabulary" else "",
+                query=query if key in {"vocabulary", "word_visual_associations", "sensory_observations"} else "",
             )
             totals[key] = _count(db, table, user_id)
 

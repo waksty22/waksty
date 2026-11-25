@@ -152,12 +152,7 @@ def _rows(
                     f"INSTR({folded_evidence}, ?) > 0" for _ in query_terms
                 )
                 rows = db.execute(
-                    f"SELECT * FROM {table} AS place WHERE place.user_id=? "
-                    "AND (place.session_id IS NULL OR EXISTS ("
-                    "SELECT 1 FROM spatial_sessions AS consent_session "
-                    "WHERE consent_session.session_id=place.session_id "
-                    "AND consent_session.user_id=place.user_id "
-                    "AND consent_session.consented=1)) "
+                    f"SELECT * FROM {table} WHERE user_id=? "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
                     (user_id, *query_terms, limit),
@@ -214,7 +209,12 @@ def _rows(
                     term for term in query_terms for _column in searchable
                 )
                 rows = db.execute(
-                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"SELECT * FROM {table} AS place WHERE place.user_id=? "
+                    "AND (place.session_id IS NULL OR EXISTS ("
+                    "SELECT 1 FROM spatial_sessions AS consent_session "
+                    "WHERE consent_session.session_id=place.session_id "
+                    "AND consent_session.user_id=place.user_id "
+                    "AND consent_session.consented=1)) "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),

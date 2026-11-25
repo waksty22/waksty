@@ -75,7 +75,7 @@ def _query_terms(query: str) -> list[str]:
         "from", "that", "this", "what", "when", "where",
     }
     raw_terms = re.findall(
-        r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+        r"[\wÀ-ÖØ-öø-ÿ-]+", query.casefold(), flags=re.UNICODE
     )
     return list(dict.fromkeys(
         "".join(

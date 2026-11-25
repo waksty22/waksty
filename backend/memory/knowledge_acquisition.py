@@ -46,6 +46,76 @@ def _safe_rows(
         raise
 
 
+def _folded_sql(column: str) -> str:
+    """SQLite expression matching the accent-insensitive Python tokenizer."""
+    expression = f"LOWER(COALESCE({column}, ''))"
+    for source, target in (
+        ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"), ("ã", "a"),
+        ("ç", "c"),
+        ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+        ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
+        ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"), ("õ", "o"),
+        ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
+        ("ý", "y"), ("ÿ", "y"), ("œ", "oe"), ("æ", "ae"),
+    ):
+        expression = f"REPLACE({expression}, '{source}', '{target}')"
+    return expression
+
+
+def _query_rows(
+    db: sqlite3.Connection,
+    table: str,
+    selected_columns: str,
+    searchable_columns: tuple[str, ...],
+    timestamp_column: str,
+    user_id: str,
+    query_terms: set[str],
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """Find matching older records without scanning them into Python first."""
+    if not query_terms:
+        return []
+    term_clauses: list[str] = []
+    where_parameters: list[str] = []
+    score_terms: list[str] = []
+    score_parameters: list[str] = []
+    folded_columns = [_folded_sql(column) for column in searchable_columns]
+    for term in sorted(query_terms):
+        expression = "(" + " OR ".join(
+            f"{column} LIKE ?" for column in folded_columns
+        ) + ")"
+        patterns = [f"%{term}%" for _ in folded_columns]
+        term_clauses.append(expression)
+        where_parameters.extend(patterns)
+        score_terms.append(f"CASE WHEN {expression} THEN 1 ELSE 0 END")
+        score_parameters.extend(patterns)
+    sql = (
+        f"SELECT {selected_columns} FROM {table} "
+        f"WHERE user_id=? AND ({' OR '.join(term_clauses)}) "
+        f"ORDER BY ({' + '.join(score_terms)}) DESC, "
+        f"{timestamp_column} DESC, id DESC LIMIT ?"
+    )
+    return _safe_rows(
+        db, sql, (user_id, *where_parameters, *score_parameters, limit)
+    )
+
+
+def _merge_query_rows(
+    recent_rows: list[dict[str, Any]], matching_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Put historical matches first and keep recent rows as a bounded fallback."""
+    merged: dict[int, dict[str, Any]] = {}
+    for row in matching_rows:
+        row_id = row.get("id")
+        if isinstance(row_id, int) and not isinstance(row_id, bool):
+            merged[row_id] = row
+    for row in recent_rows:
+        row_id = row.get("id")
+        if isinstance(row_id, int) and not isinstance(row_id, bool):
+            merged.setdefault(row_id, row)
+    return list(merged.values())
+
+
 def _validated_assessment(details: Any, passed: Any, score: Any) -> bool:
     """Only explicit, well-typed passing flags and supervisor provenance validate a skill."""
     if not isinstance(details, dict):
@@ -133,6 +203,33 @@ def retrieve_acquired_knowledge(
            ORDER BY tested_at DESC, id DESC LIMIT 200""",
         (user_id,),
     )
+
+    if query_terms:
+        memories = _merge_query_rows(
+            memories,
+            _query_rows(
+                db, "memories_v19",
+                "id, category, content, source_type, confidence, importance, created_at, updated_at",
+                ("category", "content"), "updated_at", user_id, query_terms,
+            ),
+        )
+        experiences = _merge_query_rows(
+            experiences,
+            _query_rows(
+                db, "autobiographical_events",
+                "id, actor, event_type, content, happened_at, source_conversation_id",
+                ("actor", "event_type", "content"), "happened_at",
+                user_id, query_terms,
+            ),
+        )
+        assessments = _merge_query_rows(
+            assessments,
+            _query_rows(
+                db, "competency_tests",
+                "id, test_name, passed, score, details, tested_at",
+                ("test_name", "details"), "tested_at", user_id, query_terms,
+            ),
+        )
 
     candidates: list[dict[str, Any]] = []
 

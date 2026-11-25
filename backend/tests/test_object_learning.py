@@ -21,6 +21,7 @@ from learning.sensory import (
     init_sensory_tables, record_observation, associate_word_with_observation,
 )
 from world.world_model import init_world_tables, upsert_world_entity, add_world_relation
+from cognition.shared_brain import get_shared_brain_snapshot
 
 
 @pytest.fixture
@@ -480,3 +481,43 @@ def test_object_experience_rejects_another_users_episode(db):
         )
     assert db.execute("SELECT COUNT(*) FROM object_experiences").fetchone()[0] == 0
 
+
+
+def test_shared_brain_prioritizes_old_object_experience_linked_to_matching_episode(db):
+    add_recognized_object(db, "balle")
+    db.execute(
+        """INSERT INTO conversations(id, user_id, role, content, created_at)
+           VALUES (1, 'creator', 'user',
+                   'La balle a roulé sous le meuble du salon.',
+                   '2026-11-01T10:00:00+00:00')"""
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events
+           (id, user_id, source_conversation_id, actor, event_type,
+            content, happened_at, importance, created_at)
+           VALUES (1, 'creator', 1, 'user', 'user_statement',
+                   'La balle a roulé sous le meuble du salon.',
+                   '2026-11-01T10:00:00+00:00', 3,
+                   '2026-11-01T10:00:00+00:00')"""
+    )
+    historical = record_object_experience(
+        db, "creator", "balle", "pousser", "se déplace",
+        evidence="Expérience observée",
+        autobiographical_event_id=1,
+    )
+    for index in range(5):
+        record_object_experience(
+            db, "creator", "balle", f"action récente {index}",
+            f"résultat récent {index}",
+            evidence="aucun lien avec le meuble",
+        )
+    db.commit()
+
+    snapshot = get_shared_brain_snapshot(
+        db, "creator", limit=2, query="meuble salon"
+    )
+
+    experiences = snapshot["object_experiences"]
+    assert experiences[0]["id"] == historical["id"]
+    assert experiences[0]["autobiographical_event_id"] == 1
+    assert len(experiences) == 2

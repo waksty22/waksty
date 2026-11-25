@@ -151,6 +151,11 @@ def test_search_finds_old_relevant_memory_beyond_candidate_window():
         )
         assert old_memory["source_type"] == "taught"
         assert old_memory["relevance_score"] > 0
+        stored_access_count = db.execute(
+            "SELECT access_count FROM memories_v19 WHERE user_id=? AND id=?",
+            ("owner", old_memory["id"]),
+        ).fetchone()[0]
+        assert stored_access_count == 1
     finally:
         db.close()
 

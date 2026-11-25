@@ -151,6 +151,8 @@ def test_production_routes_wire_validation_world_model_and_recall():
     assert "Association validée par le créateur" not in associate_route
     assert "upsert_world_entity(" in associate_route
     assert "add_world_relation(" in associate_route
+    assert 'source_type="confirmed"' in associate_route
+    assert 'source_type="taught"' not in associate_route
     assert "db.commit()" in associate_route
 
     recall_start = server_source.index("@app.get(\"/api/learning/objects\")")

@@ -564,3 +564,99 @@ def test_query_prioritizes_older_autobiographical_experiences_for_live_shared_co
     assert all(row["user_id"] == "creator" for row in relevant["autobiographical_events"])
     assert relevant["statistics"]["totals"]["autobiographical_events"] == 13
     db.close()
+
+
+
+def test_shared_brain_excludes_spatial_records_without_explicit_consent():
+    db = make_db()
+    db.executescript("""
+        CREATE TABLE spatial_sessions (
+            session_id TEXT PRIMARY KEY, user_id TEXT, device_label TEXT,
+            consented INTEGER, started_at TEXT, ended_at TEXT, created_at TEXT
+        );
+        CREATE TABLE spatial_visits (
+            id INTEGER PRIMARY KEY, user_id TEXT, session_id TEXT,
+            latitude REAL, longitude REAL, accuracy_m REAL, altitude_m REAL,
+            heading_deg REAL, speed_mps REAL, recorded_at TEXT, source TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE place_memories (
+            place_id TEXT PRIMARY KEY, user_id TEXT, label TEXT, description TEXT,
+            visual_signature TEXT, session_id TEXT, latitude REAL, longitude REAL,
+            confidence REAL, identity_status TEXT, candidate_place_id TEXT,
+            similarity_score REAL, confirmation_evidence TEXT, confirmed_at TEXT,
+            first_seen_at TEXT, last_seen_at TEXT, observations_count INTEGER,
+            created_at TEXT, updated_at TEXT
+        );
+    """)
+    db.executemany(
+        "INSERT INTO spatial_sessions VALUES (?,?,?,?,?,?,?)",
+        [
+            ("allowed", "creator", "phone", 1, "2026-01-01", None, "2026-01-01"),
+            ("denied", "creator", "phone", 0, "2026-01-02", None, "2026-01-02"),
+            ("other-user", "alice", "phone", 1, "2026-01-03", None, "2026-01-03"),
+        ],
+    )
+    db.executemany(
+        "INSERT INTO place_memories VALUES (?,?,?,?,?,?,NULL,NULL,0.5,'unconfirmed',NULL,0.0,'',NULL,?,?,1,?,?)",
+        [
+            ("place-allowed", "creator", "Mairie", "Lieu autorisé", "mairie", "allowed",
+             "2026-01-01", "2026-01-01", "2026-01-01", "2026-01-01"),
+            ("place-denied", "creator", "Maison privée", "Lieu sans consentement", "maison", "denied",
+             "2026-01-02", "2026-01-02", "2026-01-02", "2026-01-02"),
+            ("place-other-user", "alice", "Mairie", "Autre utilisateur", "mairie", "other-user",
+             "2026-01-03", "2026-01-03", "2026-01-03", "2026-01-03"),
+        ],
+    )
+    db.executemany(
+        "INSERT INTO spatial_visits VALUES (?,?,?,?,?,10,NULL,NULL,NULL,?,?,?)",
+        [
+            (1, "creator", "allowed", 48.1, -2.8, "2026-01-01", "browser_geolocation", "2026-01-01"),
+            (2, "creator", "denied", 48.2, -2.9, "2026-01-02", "browser_geolocation", "2026-01-02"),
+        ],
+    )
+
+    snapshot = get_shared_brain_snapshot(db, "creator", limit=20, query="mairie maison privée")
+    assert [row["session_id"] for row in snapshot["spatial_sessions"]] == ["allowed"]
+    assert [row["id"] for row in snapshot["spatial_visits"]] == [1]
+    assert [row["place_id"] for row in snapshot["place_memories"]] == ["place-allowed"]
+    assert snapshot["statistics"]["totals"]["spatial_sessions"] == 1
+    assert snapshot["statistics"]["totals"]["spatial_visits"] == 1
+    assert snapshot["statistics"]["totals"]["place_memories"] == 1
+    db.close()
+
+
+def test_shared_brain_fails_closed_when_spatial_consent_ledger_is_missing():
+    db = make_db()
+    db.executescript("""
+        CREATE TABLE spatial_visits (
+            id INTEGER PRIMARY KEY, user_id TEXT, session_id TEXT,
+            latitude REAL, longitude REAL, accuracy_m REAL, altitude_m REAL,
+            heading_deg REAL, speed_mps REAL, recorded_at TEXT, source TEXT,
+            created_at TEXT
+        );
+        CREATE TABLE place_memories (
+            place_id TEXT PRIMARY KEY, user_id TEXT, label TEXT, description TEXT,
+            visual_signature TEXT, session_id TEXT, latitude REAL, longitude REAL,
+            confidence REAL, identity_status TEXT, candidate_place_id TEXT,
+            similarity_score REAL, confirmation_evidence TEXT, confirmed_at TEXT,
+            first_seen_at TEXT, last_seen_at TEXT, observations_count INTEGER,
+            created_at TEXT, updated_at TEXT
+        );
+        INSERT INTO spatial_visits VALUES
+            (1, 'creator', 'unknown-consent', 48.1, -2.8, 10, NULL, NULL, NULL,
+             '2026-01-01', 'browser_geolocation', '2026-01-01');
+        INSERT INTO place_memories VALUES
+            ('place-unknown-consent', 'creator', 'Lieu', 'Sans registre de consentement',
+             'lieu', 'unknown-consent', NULL, NULL, 0.5, 'unconfirmed', NULL, 0.0,
+             '', NULL, '2026-01-01', '2026-01-01', 1, '2026-01-01', '2026-01-01');
+    """)
+
+    snapshot = get_shared_brain_snapshot(db, "creator", limit=20, query="lieu")
+    assert snapshot["spatial_sessions"] == []
+    assert snapshot["spatial_visits"] == []
+    assert snapshot["place_memories"] == []
+    assert snapshot["statistics"]["totals"]["spatial_sessions"] == 0
+    assert snapshot["statistics"]["totals"]["spatial_visits"] == 0
+    assert snapshot["statistics"]["totals"]["place_memories"] == 0
+    db.close()

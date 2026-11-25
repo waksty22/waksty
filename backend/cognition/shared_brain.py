@@ -210,6 +210,10 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
+                    "AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
+                    "WHERE consent_session.session_id=place_memories.session_id "
+                    "AND consent_session.user_id=place_memories.user_id "
+                    "AND consent_session.consented=1) "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
                     f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),
@@ -243,7 +247,13 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT {selected} FROM {from_clause} "
-                    "WHERE " + ("session.user_id=?" if table == "spatial_sessions" else "visit.user_id=?") +
+                    "WHERE " + (
+                        "session.user_id=? AND session.consented=1"
+                        if table == "spatial_sessions"
+                        else "visit.user_id=? AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
+                        "WHERE consent_session.session_id=visit.session_id "
+                        "AND consent_session.user_id=visit.user_id AND consent_session.consented=1)"
+                    ) +
                     " ORDER BY CASE WHEN EXISTS ("
                     "SELECT 1 FROM place_memories AS place "
                     "WHERE place.user_id=" + ("session.user_id " if table == "spatial_sessions" else "visit.user_id ") +
@@ -272,6 +282,62 @@ def _rows(
                     f"{order_by} LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
+        elif table == "place_memories":
+            rows = db.execute(
+                "SELECT place_memories.* FROM place_memories "
+                "WHERE place_memories.user_id=? AND EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=place_memories.session_id "
+                "AND consent_session.user_id=place_memories.user_id "
+                "AND consent_session.consented=1) "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "spatial_sessions":
+            rows = db.execute(
+                "SELECT * FROM spatial_sessions WHERE user_id=? AND consented=1 "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "spatial_visits":
+            rows = db.execute(
+                "SELECT spatial_visits.* FROM spatial_visits "
+                "WHERE spatial_visits.user_id=? AND EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=spatial_visits.session_id "
+                "AND consent_session.user_id=spatial_visits.user_id "
+                "AND consent_session.consented=1) "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "place_memories":
+            rows = db.execute(
+                "SELECT place_memories.* FROM place_memories "
+                "WHERE place_memories.user_id=? AND EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=place_memories.session_id "
+                "AND consent_session.user_id=place_memories.user_id "
+                "AND consent_session.consented=1) "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "spatial_sessions":
+            rows = db.execute(
+                "SELECT * FROM spatial_sessions WHERE user_id=? AND consented=1 "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "spatial_visits":
+            rows = db.execute(
+                "SELECT spatial_visits.* FROM spatial_visits "
+                "WHERE spatial_visits.user_id=? AND EXISTS ("
+                "SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=spatial_visits.session_id "
+                "AND consent_session.user_id=spatial_visits.user_id "
+                "AND consent_session.consented=1) "
+                f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
         else:
             rows = db.execute(
                 f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
@@ -292,15 +358,13 @@ def _rows(
                 if _is_missing_table_error(legacy_exc, "memories"):
                     return []
                 raise
-        elif table in {"spatial_sessions", "spatial_visits"} and _is_missing_table_error(
-            exc, "place_memories"
+        elif table in {"spatial_sessions", "spatial_visits", "place_memories"} and (
+            _is_missing_table_error(exc, "place_memories")
+            or _is_missing_table_error(exc, "spatial_sessions")
         ):
-            # A partially upgraded legacy database may have GPS samples but
-            # not yet have the place-observation table used for semantic ranking.
-            rows = db.execute(
-                f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",
-                (user_id, limit),
-            ).fetchall()
+            # Without the consent ledger, or without linked place evidence for
+            # GPS ranking, fail closed rather than exposing spatial records.
+            return []
         elif table == "sensory_observations" and _is_missing_table_error(
             exc, "word_visual_associations"
         ):
@@ -360,9 +424,25 @@ def _rows(
 
 def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
     try:
-        return int(db.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE user_id=?", (user_id,)
-        ).fetchone()[0])
+        if table == "spatial_sessions":
+            query = "SELECT COUNT(*) FROM spatial_sessions WHERE user_id=? AND consented=1"
+        elif table == "spatial_visits":
+            query = (
+                "SELECT COUNT(*) FROM spatial_visits AS visit WHERE visit.user_id=? "
+                "AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=visit.session_id "
+                "AND consent_session.user_id=visit.user_id AND consent_session.consented=1)"
+            )
+        elif table == "place_memories":
+            query = (
+                "SELECT COUNT(*) FROM place_memories AS place WHERE place.user_id=? "
+                "AND EXISTS (SELECT 1 FROM spatial_sessions AS consent_session "
+                "WHERE consent_session.session_id=place.session_id "
+                "AND consent_session.user_id=place.user_id AND consent_session.consented=1)"
+            )
+        else:
+            query = f"SELECT COUNT(*) FROM {table} WHERE user_id=?"
+        return int(db.execute(query, (user_id,)).fetchone()[0])
     except sqlite3.OperationalError as exc:
         if table == "memories_v19" and _is_missing_table_error(exc, table):
             try:
@@ -373,6 +453,11 @@ def _count(db: sqlite3.Connection, table: str, user_id: str) -> int:
                 if _is_missing_table_error(legacy_exc, "memories"):
                     return 0
                 raise
+        if table in {"spatial_sessions", "spatial_visits", "place_memories"} and (
+            _is_missing_table_error(exc, table)
+            or _is_missing_table_error(exc, "spatial_sessions")
+        ):
+            return 0
         if _is_missing_table_error(exc, table):
             return 0
         raise

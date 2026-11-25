@@ -66,6 +66,41 @@ def _is_missing_table_error(error: sqlite3.OperationalError, table: str) -> bool
     return "no such table" in message and table.casefold() in message
 
 
+def _query_terms(query: str) -> list[str]:
+    if not isinstance(query, str) or not query.strip():
+        return []
+    stop_words = {
+        "avec", "dans", "des", "est", "les", "mais", "mon", "pour",
+        "que", "qui", "sur", "une", "vous", "the", "and", "for",
+        "from", "that", "this", "what", "when", "where",
+    }
+    raw_terms = re.findall(
+        r"[\\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
+    )
+    return list(dict.fromkeys(
+        "".join(
+            char for char in unicodedata.normalize("NFKD", token)
+            if not unicodedata.combining(char)
+        )
+        for token in raw_terms
+        if len(token) >= 3 and token not in stop_words
+    ))[:12]
+
+
+def _accent_folded_sql(column: str) -> str:
+    expression = f"LOWER({column})"
+    for accented, plain in (
+        ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"),
+        ("ç", "c"), ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+        ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
+        ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"),
+        ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
+        ("ÿ", "y"),
+    ):
+        expression = f"REPLACE({expression}, '{accented}', '{plain}')"
+    return expression
+
+
 def _rows(
     db: sqlite3.Connection,
     table: str,
@@ -75,45 +110,33 @@ def _rows(
     query: str = "",
 ) -> list[dict[str, Any]]:
     try:
-        # Chat can ask about vocabulary learned long ago. Keep the shared
-        # snapshot bounded, but rank exact query-token matches ahead of the
-        # usual recent sample so older words remain visible to the model.
-        query_terms: list[str] = []
-        if table == "personal_vocabulary" and isinstance(query, str):
-            stop_words = {
-                "avec", "dans", "des", "est", "les", "mais", "mon", "pour",
-                "que", "qui", "sur", "une", "vous", "the", "and", "for",
-                "from", "that", "this", "what", "when", "where",
-            }
-            raw_terms = re.findall(
-                r"[\wÀ-ÖØ-öø-ÿ'-]+", query.casefold(), flags=re.UNICODE
-            )
-            query_terms = list(dict.fromkeys(
-                "".join(
-                    char for char in unicodedata.normalize("NFKD", token)
-                    if not unicodedata.combining(char)
-                )
-                for token in raw_terms
-                if len(token) >= 3 and token not in stop_words
-            ))[:12]
+        # Query-aware retrieval keeps old words AND their linked visual
+        # evidence in the same bounded snapshot consumed by Chat and Live.
+        query_terms = _query_terms(query) if table in {
+            "personal_vocabulary", "word_visual_associations", "sensory_observations"
+        } else []
         if query_terms:
             placeholders = ",".join("?" for _ in query_terms)
-            folded_word = "LOWER(word)"
-            for accented, plain in (
-                ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"),
-                ("ç", "c"), ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
-                ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
-                ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"),
-                ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
-                ("ÿ", "y"),
-            ):
-                folded_word = f"REPLACE({folded_word}, '{accented}', '{plain}')"
-            rows = db.execute(
-                f"SELECT * FROM {table} WHERE user_id=? "
-                f"ORDER BY CASE WHEN {folded_word} IN ({placeholders}) "
-                f"THEN 0 ELSE 1 END, {order_by} LIMIT ?",
-                (user_id, *query_terms, limit),
-            ).fetchall()
+            if table == "sensory_observations":
+                folded_word = _accent_folded_sql("association.word")
+                rows = db.execute(
+                    "SELECT observation.* FROM sensory_observations AS observation "
+                    "WHERE observation.user_id=? ORDER BY CASE WHEN EXISTS ("
+                    "SELECT 1 FROM word_visual_associations AS association "
+                    "WHERE association.user_id=observation.user_id "
+                    "AND association.observation_id=observation.observation_id "
+                    f"AND {folded_word} IN ({placeholders})"
+                    f") THEN 0 ELSE 1 END, {order_by} LIMIT ?",
+                    (user_id, *query_terms, limit),
+                ).fetchall()
+            else:
+                folded_word = _accent_folded_sql("word")
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE user_id=? "
+                    f"ORDER BY CASE WHEN {folded_word} IN ({placeholders}) "
+                    f"THEN 0 ELSE 1 END, {order_by} LIMIT ?",
+                    (user_id, *query_terms, limit),
+                ).fetchall()
         else:
             rows = db.execute(
                 f"SELECT * FROM {table} WHERE user_id=? ORDER BY {order_by} LIMIT ?",

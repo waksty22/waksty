@@ -444,3 +444,10 @@ def test_query_retrieves_old_world_model_and_fusion_evidence_with_accent_folding
     assert len(snapshot["world_relations"]) <= 8
     assert len(snapshot["perception_fusions"]) <= 8
     db.close()
+
+def test_query_terms_split_french_elisions_and_normalize_accents():
+    from cognition.shared_brain import _query_terms
+
+    terms = _query_terms("Parle-moi de l'Éléphant")
+    assert "elephant" in terms
+    assert "l'elephant" not in terms

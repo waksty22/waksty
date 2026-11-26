@@ -318,3 +318,37 @@ def test_autobiographical_links_still_reject_same_user_intervening_message():
 
     assert linked_sources == [(22, 23)]
     db.close()
+
+
+def test_autobiographical_list_orders_mixed_timezone_events_by_instant():
+    db = make_db()
+    add_event(db, 1, "creator", "user", "Épisode récent")
+    add_event(db, 2, "creator", "user", "Épisode ancien")
+    db.execute(
+        "UPDATE autobiographical_events SET happened_at=? WHERE id=1",
+        ("2026-11-26T10:01:00+00:00",),
+    )
+    db.execute(
+        "UPDATE autobiographical_events SET happened_at=? WHERE id=2",
+        ("2026-11-26T12:00:00+02:00",),
+    )
+    results = list_autobiographical_events(db, "creator")
+    assert [item["id"] for item in results] == [1, 2]
+    db.close()
+
+
+def test_autobiographical_search_uses_absolute_time_for_equal_relevance():
+    db = make_db()
+    add_event(db, 1, "creator", "user", "Mon vélo rouge")
+    add_event(db, 2, "creator", "user", "Mon vélo rouge")
+    db.execute(
+        "UPDATE autobiographical_events SET happened_at=? WHERE id=1",
+        ("2026-11-26T10:01:00+00:00",),
+    )
+    db.execute(
+        "UPDATE autobiographical_events SET happened_at=? WHERE id=2",
+        ("2026-11-26T12:00:00+02:00",),
+    )
+    results = search_autobiographical_events(db, "creator", "vélo rouge")
+    assert [item["id"] for item in results] == [1, 2]
+    db.close()

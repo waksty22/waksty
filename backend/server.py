@@ -3515,12 +3515,21 @@ TOOLS = [{
         },
         {
             "name": "search_memories",
-            "description": "Rechercher des souvenirs pertinents pour répondre.",
+            "description": "Rechercher des souvenirs épisodiques de cet utilisateur. OBLIGATOIRE avant de répondre à une question vocale ou écrite sur une conversation passée, un fait personnel ou un événement qui n'est pas clairement présent dans le contexte courant. Les résultats sont des souvenirs sourcés, pas une preuve indépendante.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
                     "query": {"type": "STRING"},
                 },
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "search_sensory_observations",
+            "description": "Rechercher dans les observations audio et visuelles persistées de cet utilisateur, y compris les observations plus anciennes qui ne figurent pas dans le contexte récent. À utiliser avant de répondre à une question vocale ou écrite portant sur ce qui a été entendu ou vu. Lecture seule : retourne la modalité, la source, la date, la confiance et les métadonnées. Une observation sensorielle ou une description générée par le modèle n'est jamais automatiquement un fait appris ou une compréhension confirmée.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"query": {"type": "STRING"}},
                 "required": ["query"],
             },
         },
@@ -3696,6 +3705,27 @@ def execute_tool(
             if not isinstance(query, str):
                 raise ValueError("La recherche doit être du texte.")
             return {"memories": retrieve_memories(user_id, query, 10)}
+
+        if name == "search_sensory_observations":
+            query = args.get("query", "")
+            if not isinstance(query, str):
+                raise ValueError("La recherche sensorielle doit être du texte.")
+            query = query.strip()
+            if not query or len(query) > 1000:
+                raise ValueError("La recherche sensorielle doit contenir entre 1 et 1000 caractères.")
+            with db_connection() as sensory_db:
+                snapshot = get_shared_brain_snapshot(
+                    sensory_db, user_id, limit=30, query=query
+                )
+            observations = snapshot.get("sensory_observations", [])
+            return {
+                "query": query,
+                "observations": observations,
+                "read_only": True,
+                "user_scoped": True,
+                "observations_are_not_confirmed_facts": True,
+                "model_generated_descriptions_require_review": True,
+            }
 
         if name == "retrieve_acquired_knowledge":
             query = args.get("query", "")
@@ -6791,7 +6821,6 @@ async def websocket_endpoint(
         "repeatable_words": set(),
         "brain_snapshot_fingerprint": "",
         "brain_refresh_version": 0,
-        "audio_query_context_sent": False,
     }
 
     try:
@@ -7056,10 +7085,6 @@ async def websocket_endpoint(
                             if query_refresh is not None:
                                 await send_to_gemini(query_refresh)
                                 live_turn_state["brain_refresh_version"] += 1
-                            # Text input already received query-aware context before
-                            # it was forwarded. Do not send the same refresh again
-                            # when the provider echoes its input transcription.
-                            live_turn_state["audio_query_context_sent"] = True
                         except Exception:
                             log.exception(
                                 "[GEMINI LIVE] Échec du rappel contextuel avant le message utilisateur"
@@ -7157,35 +7182,6 @@ async def websocket_endpoint(
                             )
                             live_turn_state["user"] = merged_user_text
                             if new_heard_text:
-                                # Audio has no client-side transcript to prefetch
-                                # against. Once Gemini supplies its transcription,
-                                # retrieve query-relevant memories and inject them
-                                # into the same Live session before turn completion.
-                                # One refresh per audio turn bounds extra context
-                                # traffic when a provider emits incremental updates.
-                                if not live_turn_state["audio_query_context_sent"]:
-                                    brain_context_ready.clear()
-                                    try:
-                                        with db_connection() as query_brain_db:
-                                            query_refresh = build_live_query_brain_refresh_message(
-                                                query_brain_db,
-                                                user_id,
-                                                merged_user_text,
-                                                live_turn_state["brain_refresh_version"] + 1,
-                                            )
-                                        if query_refresh is not None:
-                                            await send_to_gemini(
-                                                query_refresh, wait_for_brain=False
-                                            )
-                                            live_turn_state["brain_refresh_version"] += 1
-                                        live_turn_state["audio_query_context_sent"] = True
-                                    except Exception:
-                                        log.exception(
-                                            "[GEMINI LIVE] Échec du rappel mémoire depuis la transcription audio"
-                                        )
-                                        raise
-                                    finally:
-                                        brain_context_ready.set()
                                 # Stream the transcript to the UI immediately, but
                                 # keep all durable sensory/emotional writes buffered
                                 # until Gemini confirms the complete turn below.
@@ -7423,7 +7419,6 @@ async def websocket_endpoint(
                         live_turn_state["assistant"] = ""
                         live_turn_state["audio"] = []
                         live_turn_state["audio_chars"] = 0
-                        live_turn_state["audio_query_context_sent"] = False
 
                         refresh_succeeded = False
                         try:

@@ -101,7 +101,7 @@ def build_gemini_visual_observation(
         "image/jpeg", "image/png", "image/webp"
     }:
         return None
-    if not isinstance(question, str) or len(question) > 1000:
+    if not isinstance(question, str) or not question.strip() or len(question) > 1000:
         return None
 
     return {
@@ -113,7 +113,7 @@ def build_gemini_visual_observation(
         "metadata": {
             "model": model.strip(),
             "mime_type": mime_type,
-            "question": question,
+            "question": question.strip(),
             "model_generated": True,
             "semantic_analysis_performed": True,
             "semantic_understanding_confirmed": False,

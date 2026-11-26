@@ -3515,12 +3515,21 @@ TOOLS = [{
         },
         {
             "name": "search_memories",
-            "description": "Rechercher des souvenirs pertinents pour répondre.",
+            "description": "Rechercher des souvenirs épisodiques de cet utilisateur. OBLIGATOIRE avant de répondre à une question vocale ou écrite sur une conversation passée, un fait personnel ou un événement qui n'est pas clairement présent dans le contexte courant. Les résultats sont des souvenirs sourcés, pas une preuve indépendante.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
                     "query": {"type": "STRING"},
                 },
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "search_sensory_observations",
+            "description": "Rechercher dans les observations audio et visuelles persistées de cet utilisateur, y compris les observations plus anciennes qui ne figurent pas dans le contexte récent. À utiliser avant de répondre à une question vocale ou écrite portant sur ce qui a été entendu ou vu. Lecture seule : retourne la modalité, la source, la date, la confiance et les métadonnées. Une observation sensorielle ou une description générée par le modèle n'est jamais automatiquement un fait appris ou une compréhension confirmée.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"query": {"type": "STRING"}},
                 "required": ["query"],
             },
         },
@@ -3696,6 +3705,27 @@ def execute_tool(
             if not isinstance(query, str):
                 raise ValueError("La recherche doit être du texte.")
             return {"memories": retrieve_memories(user_id, query, 10)}
+
+        if name == "search_sensory_observations":
+            query = args.get("query", "")
+            if not isinstance(query, str):
+                raise ValueError("La recherche sensorielle doit être du texte.")
+            query = query.strip()
+            if not query or len(query) > 1000:
+                raise ValueError("La recherche sensorielle doit contenir entre 1 et 1000 caractères.")
+            with db_connection() as sensory_db:
+                snapshot = get_shared_brain_snapshot(
+                    sensory_db, user_id, limit=30, query=query
+                )
+            observations = snapshot.get("sensory_observations", [])
+            return {
+                "query": query,
+                "observations": observations,
+                "read_only": True,
+                "user_scoped": True,
+                "observations_are_not_confirmed_facts": True,
+                "model_generated_descriptions_require_review": True,
+            }
 
         if name == "retrieve_acquired_knowledge":
             query = args.get("query", "")

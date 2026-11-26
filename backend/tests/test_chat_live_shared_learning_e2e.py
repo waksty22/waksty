@@ -735,3 +735,130 @@ def test_empty_interrupted_live_turn_discards_assistant_and_audio_only():
         "audio": [],
         "audio_chars": 0,
     }
+
+
+class SensoryMemoryToolFakeGeminiSocket:
+    """Fake Live provider that asks the server to retrieve an old visual observation."""
+    def __init__(self, query: str):
+        self.query = query
+        self.sent: list[dict] = []
+        self._audio_ready = asyncio.Event()
+        self._tool_response_ready = asyncio.Event()
+        self._step = 0
+
+    async def send(self, raw: str) -> None:
+        payload = json.loads(raw)
+        self.sent.append(payload)
+        if isinstance(payload.get("realtimeInput"), dict):
+            self._audio_ready.set()
+        if isinstance(payload.get("toolResponse"), dict):
+            self._tool_response_ready.set()
+
+    async def recv(self) -> str:
+        return json.dumps({"setupComplete": {}})
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        if self._step == 0:
+            await asyncio.wait_for(self._audio_ready.wait(), timeout=5)
+            self._step = 1
+            return json.dumps({
+                "toolCall": {
+                    "functionCalls": [{
+                        "id": "sensory-search-1",
+                        "name": "search_sensory_observations",
+                        "args": {"query": self.query},
+                    }]
+                }
+            })
+        if self._step == 1:
+            await asyncio.wait_for(self._tool_response_ready.wait(), timeout=5)
+            self._step = 2
+            return json.dumps({
+                "serverContent": {
+                    "inputTranscription": {"text": "Te souviens-tu de ce que tu as vu ?"},
+                    "outputTranscription": {"text": "bonjour"},
+                    "modelTurn": {"parts": [{"text": "bonjour"}]},
+                    "turnComplete": True,
+                }
+            })
+        raise StopAsyncIteration
+
+
+def test_live_audio_can_search_older_shared_sensory_observations_via_read_only_tool(
+    monkeypatch, tmp_path
+):
+    """Live tool calls retrieve old visual observations without interrupting model output."""
+    import server
+
+    database_path = tmp_path / "live-sensory-tool.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.setattr(server, "GEMINI_API_KEY", "test-only-provider-key")
+    server.init_db()
+
+    query = "cristal nebulaire"
+    unique_memory = "souvenir du cristal nebulaire bleu"
+    with server.db_connection() as db:
+        for index in range(12):
+            observation = server.record_observation(
+                db, "creator", "vision",
+                unique_memory if index == 0 else f"observation visuelle ordinaire numero {index}",
+                "test_visual_memory", confidence=0.7,
+                metadata={"test_fixture": True},
+            )
+            db.execute(
+                "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+                (f"2025-01-{index + 1:02d}T00:00:00+00:00", observation["observation_id"]),
+            )
+        server.record_observation(
+            db, "another-user", "vision",
+            "souvenir du cristal nebulaire secret autre utilisateur",
+            "test_visual_memory", confidence=0.9,
+        )
+        db.commit()
+        initial = server.get_shared_brain_snapshot(db, "creator", limit=8)
+        assert unique_memory not in json.dumps(initial, ensure_ascii=False)
+
+    provider = SensoryMemoryToolFakeGeminiSocket(query)
+
+    @asynccontextmanager
+    async def fake_connection(websocket):
+        yield provider
+
+    monkeypatch.setattr(server, "supervised_gemini_connection", fake_connection)
+    fake_client = FakeClientWebSocket([
+        {"action": "audio_chunk", "pcm_data": "AQID"},
+    ])
+    ticket = server.live_ws_tickets.issue("creator")
+    asyncio.run(server.websocket_endpoint(fake_client, ticket=ticket))
+
+    setup = next(payload["setup"] for payload in provider.sent if "setup" in payload)
+    declared_tools = setup.get("tools", [])
+    declarations = [
+        declaration
+        for group in declared_tools
+        for declaration in group.get("functionDeclarations", [])
+    ]
+    assert any(item.get("name") == "search_sensory_observations" for item in declarations)
+
+    tool_responses = [
+        payload["toolResponse"]["functionResponses"][0]["response"]
+        for payload in provider.sent
+        if isinstance(payload.get("toolResponse"), dict)
+    ]
+    assert len(tool_responses) == 1
+    result = tool_responses[0]
+    assert result["read_only"] is True
+    assert result["user_scoped"] is True
+    assert result["observations_are_not_confirmed_facts"] is True
+    encoded = json.dumps(result, ensure_ascii=False)
+    assert unique_memory in encoded
+    assert "secret autre utilisateur" not in encoded
+    assert any(item.get("type") == "turn_complete" for item in fake_client.sent)

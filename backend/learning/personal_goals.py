@@ -208,7 +208,7 @@ def list_goal_skill_assessments(
         return []
     rows = db.execute(
         """SELECT test_name, passed, score, tested_at, details
-           FROM competency_tests WHERE user_id=? ORDER BY tested_at DESC, id DESC LIMIT 100""",
+           FROM competency_tests WHERE user_id=? ORDER BY COALESCE(julianday(tested_at), -1.0) DESC, id DESC LIMIT 100""",
         (user_id,),
     ).fetchall()
     linked: list[dict[str, Any]] = []

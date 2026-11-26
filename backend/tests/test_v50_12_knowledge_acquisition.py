@@ -405,12 +405,12 @@ def test_context_rejects_non_integer_character_limits(invalid_limit):
 def test_knowledge_retrieval_orders_mixed_offsets_by_absolute_time():
     db = make_db()
     db.execute(
-        "INSERT INTO memories_v19 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO memories_v19 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (5, "creator", "objets", "Une montre a un cadran clair",
          "taught", 0.8, 3, "2026-11-26", "2026-11-26T09:00:00+02:00"),
     )
     db.execute(
-        "INSERT INTO memories_v19 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO memories_v19 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (6, "creator", "objets", "Une montre a un cadran sombre",
          "taught", 0.8, 3, "2026-11-26", "2026-11-26T08:30:00Z"),
     )

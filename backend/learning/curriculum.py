@@ -616,7 +616,7 @@ def get_competency_test_history(
             tested_at
         FROM competency_tests
         WHERE user_id = ?
-        ORDER BY tested_at DESC, id DESC
+        ORDER BY COALESCE(julianday(tested_at), -1.0) DESC, id DESC
         LIMIT ?
         """,
         (user_id, limit)

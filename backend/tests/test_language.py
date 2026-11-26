@@ -12,6 +12,7 @@ from learning.language import (
     get_repeatable_words,
     get_usable_words,
     init_language_tables,
+    list_vocabulary,
     record_heard_word,
     record_heard_text,
     text_uses_only_allowed_words,
@@ -581,3 +582,14 @@ def test_french_elisions_respect_newborn_known_word_gate():
     assert not text_uses_only_allowed_words("L'éléphant danse.", known)
     assert gate_spoken_text("L'éléphant regarde.", known) == "L'éléphant regarde."
     assert gate_spoken_text("L'éléphant danse.", known) == "L'éléphant."
+
+
+def test_vocabulary_is_ordered_by_absolute_update_time(language_db):
+    record_heard_word(language_db, "creator", "pomme")
+    record_heard_word(language_db, "creator", "banane")
+    language_db.execute("UPDATE personal_vocabulary SET updated_at=? WHERE word=?",
+                        ("2026-11-26T09:00:00+02:00", "pomme"))
+    language_db.execute("UPDATE personal_vocabulary SET updated_at=? WHERE word=?",
+                        ("2026-11-26T08:30:00Z", "banane"))
+    assert [item["word"] for item in list_vocabulary(language_db, "creator")] == [
+        "banane", "pomme"]

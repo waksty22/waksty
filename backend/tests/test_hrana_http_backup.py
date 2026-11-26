@@ -444,3 +444,34 @@ def test_http_closes_stream_when_begin_sql_fails_after_baton_allocation():
         assert baton is None
     finally:
         client.close()
+
+
+def test_default_hrana_client_uses_bounded_connection_retries(monkeypatch):
+    import storage.hrana_http as hrana_module
+
+    captured = {}
+
+    class RecordingTransport:
+        def __init__(self, *, retries):
+            captured["retries"] = retries
+
+    class RecordingClient:
+        def __init__(self, *, transport, timeout):
+            captured["transport"] = transport
+            captured["timeout"] = timeout
+
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(hrana_module.httpx, "HTTPTransport", RecordingTransport)
+    monkeypatch.setattr(hrana_module.httpx, "Client", RecordingClient)
+    client = HranaHttpClient(
+        "libsql://example-org.turso.io", "test-token", timeout=12.5
+    )
+    try:
+        assert captured["retries"] == 2
+        assert isinstance(captured["transport"], RecordingTransport)
+        assert captured["timeout"] == 12.5
+    finally:
+        client.close()
+    assert captured["closed"] is True

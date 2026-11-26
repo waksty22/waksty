@@ -74,7 +74,8 @@ def test_failed_consolidation_survives_connection_reopen_and_is_recovered(
             ("creator",),
         ).fetchone()
         completed = db.execute(
-            "SELECT status, attempts, completed_at FROM conversation_finalization_outbox"
+            "SELECT status, attempts, completed_at FROM conversation_finalization_outbox "
+            "ORDER BY id DESC LIMIT 1"
         ).fetchone()
     assert summary["through_conversation_id"] == 10
     assert completed["status"] == "completed"

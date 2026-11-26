@@ -207,8 +207,25 @@ def list_autobiographical_events(
     where = "user_id=?"
     if before_id is not None:
         before_id = _validated_integer(before_id, "Identifiant de pagination")
-        where += " AND id < ?"
-        params.append(before_id)
+        cursor = db.execute(
+            """
+            SELECT julianday(happened_at) AS sort_time
+            FROM autobiographical_events
+            WHERE user_id=? AND id=?
+            """,
+            (user_id, before_id),
+        ).fetchone()
+        # A cursor must belong to this user. Unknown/foreign cursors return
+        # no rows rather than silently restarting at the first page.
+        if cursor is None:
+            return []
+        cursor_time = cursor["sort_time"]
+        cursor_time = float(cursor_time) if cursor_time is not None else -1.0
+        where += (
+            " AND (COALESCE(julianday(happened_at), -1.0) < ?"
+            " OR (COALESCE(julianday(happened_at), -1.0) = ? AND id < ?))"
+        )
+        params.extend([cursor_time, cursor_time, before_id])
     params.append(limit)
     rows = db.execute(
         f"""
@@ -216,7 +233,7 @@ def list_autobiographical_events(
                happened_at, importance
         FROM autobiographical_events
         WHERE {where}
-        ORDER BY datetime(happened_at) DESC, id DESC
+        ORDER BY COALESCE(julianday(happened_at), -1.0) DESC, id DESC
         LIMIT ?
         """,
         params,

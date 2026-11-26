@@ -352,3 +352,43 @@ def test_autobiographical_search_uses_absolute_time_for_equal_relevance():
     results = search_autobiographical_events(db, "creator", "vélo rouge")
     assert [item["id"] for item in results] == [1, 2]
     db.close()
+
+
+def test_autobiographical_timeline_pagination_follows_chronological_cursor():
+    db = make_db()
+    add_event(db, 1, "creator", "user", "Le plus récent")
+    add_event(db, 2, "creator", "user", "Le plus ancien")
+    add_event(db, 3, "creator", "user", "Au milieu")
+    db.execute(
+        "UPDATE autobiographical_events SET happened_at=? WHERE id=1",
+        ("2026-11-26T12:00:00+02:00",),
+    )
+    db.execute(
+        "UPDATE autobiographical_events SET happened_at=? WHERE id=2",
+        ("2026-11-26T09:00:00+00:00",),
+    )
+    db.execute(
+        "UPDATE autobiographical_events SET happened_at=? WHERE id=3",
+        ("2026-11-26T10:00:00+00:00",),
+    )
+
+    first_page = list_autobiographical_events(db, "creator", limit=2)
+    second_page = list_autobiographical_events(
+        db, "creator", limit=2, before_id=first_page[-1]["id"]
+    )
+
+    assert [item["id"] for item in first_page] == [3, 1]
+    assert [item["id"] for item in second_page] == [2]
+    assert not ({item["id"] for item in first_page} & {
+        item["id"] for item in second_page
+    })
+    db.close()
+
+
+def test_autobiographical_timeline_rejects_foreign_pagination_cursor():
+    db = make_db()
+    add_event(db, 1, "alice", "user", "Souvenir Alice")
+    add_event(db, 2, "bob", "user", "Souvenir Bob")
+
+    assert list_autobiographical_events(db, "alice", before_id=2) == []
+    db.close()

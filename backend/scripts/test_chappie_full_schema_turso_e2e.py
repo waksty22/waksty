@@ -260,6 +260,15 @@ def main():
                         actual=sorted((tuple(r) for r in check.execute(f"SELECT {','.join(q(c) for c in cols[t])} FROM {q(t)}").fetchall()),key=repr)
                         expected=sorted(rows[t],key=repr)
                         need(actual==expected,f"Restored rows differ in {t}.")
+                    sequence_before_probe = check.execute(
+                        "SELECT seq FROM sqlite_sequence WHERE name=?",
+                        ("memories_v19",),
+                    ).fetchall()
+                    need(
+                        sequence_before_probe
+                        and int(sequence_before_probe[0][0]) == 9000,
+                        "Restored Turso AUTOINCREMENT sequence was not 9000 before the probe.",
+                    )
                     # Verify that restoring the encrypted backup preserved
                     # the remote AUTOINCREMENT high-water mark, even though the
                     # largest currently stored row ID is much smaller.

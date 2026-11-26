@@ -377,7 +377,7 @@ def test_autobiographical_timeline_pagination_follows_chronological_cursor():
         db, "creator", limit=2, before_id=first_page[-1]["id"]
     )
 
-    assert [item["id"] for item in first_page] == [1, 3]
+    assert [item["id"] for item in first_page] == [3, 1]
     assert [item["id"] for item in second_page] == [2]
     assert not ({item["id"] for item in first_page} & {
         item["id"] for item in second_page

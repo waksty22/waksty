@@ -102,17 +102,21 @@ def test_entity_relations_order_by_absolute_timestamp():
     from world.world_model import get_entity_relations
 
     db = make_db()
-    for entity_id in ("person:creator", "place:home", "place:work"):
+    for entity_id, entity_type in (
+        ("person:creator", "person"),
+        ("place:home", "place"),
+        ("place:work", "place"),
+    ):
         upsert_world_entity(
-            db, "creator", entity_id, "place", {"label": entity_id},
+            db, "creator", entity_id, entity_type, {"label": entity_id},
             source_type="taught", confidence=0.8,
         )
     add_world_relation(
-        db, "creator", "person:creator", "lives_at", "place:home",
+        db, "creator", "person:creator", "place:home",
         relation_type="lives_at", source_type="observed", confidence=0.7,
     )
     add_world_relation(
-        db, "creator", "person:creator", "works_at", "place:work",
+        db, "creator", "person:creator", "place:work",
         relation_type="works_at", source_type="observed", confidence=0.7,
     )
     db.execute(

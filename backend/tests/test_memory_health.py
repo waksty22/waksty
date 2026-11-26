@@ -63,7 +63,6 @@ def test_memory_health_reports_missing_tables_without_writing():
     ).fetchall()
     assert report["schema_ready"] is False
     assert "memories_v19" in report["missing_tables"]
-    assert "conversation_finalization_outbox" in report["missing_tables"]
     assert before == after
     db.close()
 

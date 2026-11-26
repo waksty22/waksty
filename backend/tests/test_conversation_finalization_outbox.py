@@ -160,3 +160,38 @@ def test_outbox_works_with_real_local_libsql_adapter():
         db.commit()
     finally:
         db.close()
+
+
+def test_recovery_drains_more_than_one_consolidation_page(tmp_path, monkeypatch):
+    database = tmp_path / "outbox-multipage.sqlite3"
+    _isolate_database(monkeypatch, database)
+    real_consolidate = server.consolidate_conversation
+
+    def fail_consolidation(_user_id: str):
+        raise RuntimeError("temporary offline consolidation")
+
+    monkeypatch.setattr(server, "consolidate_conversation", fail_consolidation)
+    for index in range(45):
+        server.save_conversation_turn(
+            "creator", f"Message long backlog {index}.",
+            f"Réponse long backlog {index}.",
+        )
+
+    with server.db_connection() as db:
+        pending_before = list_pending_conversation_finalizations(db)
+    assert pending_before
+
+    monkeypatch.setattr(server, "consolidate_conversation", real_consolidate)
+    report = server.recover_pending_conversation_finalizations()
+    assert report["users_checked"] == 1
+    assert report["jobs_completed"] == len(pending_before)
+    assert report["jobs_still_pending"] == 0
+
+    with server.db_connection() as db:
+        summary = db.execute(
+            "SELECT through_conversation_id FROM conversation_summaries "
+            "WHERE user_id=? ORDER BY id DESC LIMIT 1", ("creator",)
+        ).fetchone()
+        pending_after = list_pending_conversation_finalizations(db)
+    assert summary["through_conversation_id"] == 90
+    assert pending_after == []

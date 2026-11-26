@@ -140,3 +140,23 @@ def test_outbox_enqueue_is_idempotent_for_user_and_cursor(tmp_path):
         ]
     finally:
         db.close()
+
+
+def test_outbox_works_with_real_local_libsql_adapter():
+    libsql = pytest.importorskip("libsql")
+    from storage.libsql_adapter import adapt_libsql_connection
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        init_conversation_finalization_outbox(db)
+        assert enqueue_conversation_finalization(db, "creator", 17) is True
+        pending = list_pending_conversation_finalizations(db)
+        assert pending == [{
+            "id": 1,
+            "user_id": "creator",
+            "through_conversation_id": 17,
+            "attempts": 0,
+        }]
+        db.commit()
+    finally:
+        db.close()

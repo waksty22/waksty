@@ -330,7 +330,7 @@ def list_vocabulary(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]
     rows = db.execute(
         """SELECT word, meaning, state, exposure_count, evidence, created_at, updated_at
            FROM personal_vocabulary WHERE user_id=?
-           ORDER BY updated_at DESC, word ASC""",
+           ORDER BY COALESCE(julianday(updated_at), -1.0) DESC, word ASC""",
         (user_id,),
     ).fetchall()
     return [dict(row) for row in rows]

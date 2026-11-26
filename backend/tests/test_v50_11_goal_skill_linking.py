@@ -247,3 +247,27 @@ def test_goal_skill_listing_ignores_failed_corrupt_and_unlinked_assessments():
     db.commit()
     assert list_goal_skill_assessments(db, "creator", goal_id) == []
     db.close()
+
+
+def test_goal_assessments_order_mixed_offsets_by_absolute_time():
+    db = make_db()
+    goal_id, step_id = seed_goal(db)
+    base = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "Résultat validé sur plusieurs essais.",
+        "goal_id": goal_id,
+        "goal_step_id": step_id,
+    }
+    db.execute(
+        "INSERT INTO competency_tests(user_id,test_name,passed,score,details,tested_at) VALUES(?,?,?,?,?,?)",
+        ("creator", "tete:ancien", 1, 80, json.dumps(base), "2026-11-26T09:00:00+02:00"),
+    )
+    db.execute(
+        "INSERT INTO competency_tests(user_id,test_name,passed,score,details,tested_at) VALUES(?,?,?,?,?,?)",
+        ("creator", "tete:recent", 1, 90, json.dumps(base), "2026-11-26T08:30:00Z"),
+    )
+    db.commit()
+    linked = list_goal_skill_assessments(db, "creator", goal_id)
+    assert [item["test_name"] for item in linked] == ["tete:recent", "tete:ancien"]
+    db.close()

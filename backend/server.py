@@ -2444,8 +2444,8 @@ def save_conversation_turn(
 ) -> None:
     """Commit source messages and a durable finalization job atomically."""
     user_id = valid_user(user_id)
-    user_text = re.sub(r"\\s+", " ", str(user_text)).strip()[:MAX_MESSAGE_CHARS]
-    assistant_text = re.sub(r"\\s+", " ", str(assistant_text)).strip()[:MAX_MESSAGE_CHARS]
+    user_text = re.sub(r"\s+", " ", str(user_text)).strip()[:MAX_MESSAGE_CHARS]
+    assistant_text = re.sub(r"\s+", " ", str(assistant_text)).strip()[:MAX_MESSAGE_CHARS]
     if not user_text and not assistant_text:
         return
 

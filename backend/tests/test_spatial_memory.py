@@ -202,3 +202,42 @@ def test_geolocated_observation_does_not_merge_into_locationless_place(db):
     assert len(places) == 2
     original = next(place for place in places if place["place_id"] == first["place_id"])
     assert original["observations_count"] == 1
+
+
+def test_map_visits_are_ordered_by_absolute_time_across_offsets(db):
+    session = start_location_session(db, "creator", True)
+    sid = session["session_id"]
+    record_location(
+        db, "creator", sid, 48.1000, -2.8000,
+        recorded_at="2026-11-26T11:00:00+02:00",
+    )
+    record_location(
+        db, "creator", sid, 48.1001, -2.8001,
+        recorded_at="2026-11-26T10:00:00+00:00",
+    )
+
+    visits = get_map_state(db, "creator")["visits"]
+
+    assert [item["recorded_at"] for item in visits] == [
+        "2026-11-26T11:00:00+02:00",
+        "2026-11-26T10:00:00+00:00",
+    ]
+
+
+def test_map_places_are_ordered_by_absolute_last_seen_time(db):
+    first = record_place_observation(db, "creator", "Un pont en pierre.")
+    second = record_place_observation(db, "creator", "Une tour en bois.")
+    db.execute(
+        "UPDATE place_memories SET last_seen_at=? WHERE place_id=?",
+        ("2026-11-26T12:00:00+02:00", first["place_id"]),
+    )
+    db.execute(
+        "UPDATE place_memories SET last_seen_at=? WHERE place_id=?",
+        ("2026-11-26T09:30:00+00:00", second["place_id"]),
+    )
+
+    places = get_map_state(db, "creator")["places"]
+
+    assert [item["place_id"] for item in places] == [
+        first["place_id"], second["place_id"]
+    ]

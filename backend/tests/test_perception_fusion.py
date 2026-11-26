@@ -173,3 +173,25 @@ def test_technical_camera_receipt_never_creates_a_semantic_fusion_candidate(db):
         db, "creator", receipt["observation_id"]
     ) == []
     assert list_perception_fusions(db, "creator") == []
+
+
+def test_temporal_fusion_preserves_subsecond_window_and_timezone_order(db):
+    audio, vision = make_audio_and_vision(db)
+    # The observations are 0.8 seconds apart, but their textual offsets differ.
+    db.execute(
+        "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+        ("2026-11-26T09:00:00.100+02:00", audio["observation_id"]),
+    )
+    db.execute(
+        "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+        ("2026-11-26T07:00:00.900Z", vision["observation_id"]),
+    )
+
+    result = link_temporally_cooccurring_observation(
+        db, "creator", vision["observation_id"], window_seconds=1
+    )
+
+    assert len(result) == 1
+    assert result[0]["audio_observation_id"] == audio["observation_id"]
+    assert result[0]["vision_observation_id"] == vision["observation_id"]
+    assert result[0]["time_delta_seconds"] == pytest.approx(0.8)

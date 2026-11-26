@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 import unicodedata
+from datetime import datetime, timezone
 from typing import Any
 
 MAX_QUERY_CHARS = 200
@@ -19,6 +20,18 @@ MAX_ITEMS = 12
 MAX_CONTEXT_CHARS = 5000
 VALID_MEMORY_STATES = {"observed", "taught", "inferred", "confirmed"}
 
+
+def _timestamp_sort_key(value: Any) -> float:
+    """Return an absolute UTC timestamp; malformed values sort last."""
+    if not isinstance(value, str) or not value.strip():
+        return float("-inf")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except (OverflowError, OSError, TypeError, ValueError):
+        return float("-inf")
 
 def _terms(value: str) -> list[str]:
     normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
@@ -93,7 +106,7 @@ def _query_rows(
         f"SELECT {selected_columns} FROM {table} "
         f"WHERE user_id=? AND ({' OR '.join(term_clauses)}) "
         f"ORDER BY ({' + '.join(score_terms)}) DESC, "
-        f"{timestamp_column} DESC, id DESC LIMIT ?"
+        f"COALESCE(julianday({timestamp_column}), -1.0) DESC, id DESC LIMIT ?"
     )
     return _safe_rows(
         db, sql, (user_id, *where_parameters, *score_parameters, limit)
@@ -185,7 +198,7 @@ def retrieve_acquired_knowledge(
         """SELECT id, category, content, source_type, confidence, importance,
                   created_at, updated_at
            FROM memories_v19 WHERE user_id=?
-           ORDER BY importance DESC, updated_at DESC, id DESC LIMIT 300""",
+           ORDER BY importance DESC, COALESCE(julianday(updated_at), -1.0) DESC, id DESC LIMIT 300""",
         (user_id,),
     )
     experiences = _safe_rows(
@@ -193,14 +206,14 @@ def retrieve_acquired_knowledge(
         """SELECT id, actor, event_type, content, happened_at,
                   source_conversation_id
            FROM autobiographical_events WHERE user_id=?
-           ORDER BY id DESC LIMIT 300""",
+           ORDER BY COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT 300""",
         (user_id,),
     )
     assessments = _safe_rows(
         db,
         """SELECT id, test_name, passed, score, details, tested_at
            FROM competency_tests WHERE user_id=?
-           ORDER BY tested_at DESC, id DESC LIMIT 200""",
+           ORDER BY COALESCE(julianday(tested_at), -1.0) DESC, id DESC LIMIT 200""",
         (user_id,),
     )
 
@@ -376,7 +389,7 @@ def retrieve_acquired_knowledge(
         key=lambda item: (
             item["relevance"] if query_terms else 0,
             status_rank.get(item["status"], 0),
-            item["timestamp"],
+            _timestamp_sort_key(item["timestamp"]),
             item["source_id"],
         ),
         reverse=True,

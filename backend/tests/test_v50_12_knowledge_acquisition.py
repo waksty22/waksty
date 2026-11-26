@@ -401,3 +401,21 @@ def test_context_never_cuts_a_json_record_at_the_character_limit():
 def test_context_rejects_non_integer_character_limits(invalid_limit):
     with pytest.raises(ValueError, match="entier"):
         format_acquired_knowledge_context({"items": []}, max_chars=invalid_limit)
+
+def test_knowledge_retrieval_orders_mixed_offsets_by_absolute_time():
+    db = make_db()
+    db.execute(
+        "INSERT INTO memories_v19 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (5, "creator", "objets", "Une montre a un cadran clair",
+         "taught", 0.8, 3, "2026-11-26", "2026-11-26T09:00:00+02:00"),
+    )
+    db.execute(
+        "INSERT INTO memories_v19 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (6, "creator", "objets", "Une montre a un cadran sombre",
+         "taught", 0.8, 3, "2026-11-26", "2026-11-26T08:30:00Z"),
+    )
+    db.commit()
+    result = retrieve_acquired_knowledge(db, "creator", "montre", limit=10)
+    memories = [item for item in result["items"] if item["kind"] == "memory"]
+    assert [item["source_id"] for item in memories[:2]] == [6, 5]
+    db.close()

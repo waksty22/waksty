@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -43,10 +44,12 @@ def _schema_inventory(connection: sqlite3.Connection) -> tuple[list[dict], str]:
         """
     ).fetchall()
     objects = [
-        {"type": str(row[0]), "name": str(row[1]),
-         "table": str(row[2]), "sql_sha256": hashlib.sha256(
-             str(row[3]).encode("utf-8")
-         ).hexdigest()}
+        {
+            "type": str(row[0]),
+            "name": str(row[1]),
+            "table": str(row[2]),
+            "sql_sha256": hashlib.sha256(str(row[3]).encode("utf-8")).hexdigest(),
+        }
         for row in rows
     ]
     canonical = json.dumps(objects, sort_keys=True, separators=(",", ":"))
@@ -126,6 +129,39 @@ def inspect_sqlite_database(database_path: str | Path) -> dict[str, Any]:
             connection.close()
 
 
+def render_report(report: dict[str, Any]) -> str:
+    """Render valid JSON terminated by exactly one platform-independent LF."""
+    return json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+
+
+def write_report_no_clobber(
+    output_path: str | Path,
+    database_path: str | Path,
+    rendered: str,
+) -> None:
+    """Write a new report without ever replacing an existing path or the DB."""
+    database = Path(database_path).expanduser().resolve(strict=True)
+    output = Path(output_path).expanduser()
+    resolved_output = output.resolve(strict=False)
+
+    if resolved_output == database:
+        raise ValueError("Report output must not resolve to the SQLite database")
+    if output.exists():
+        try:
+            same_file = os.path.samefile(output, database)
+        except OSError:
+            same_file = False
+        if same_file:
+            raise ValueError("Report output refers to the SQLite database")
+        raise FileExistsError("Refusing to overwrite an existing report path")
+
+    resolved_output.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    descriptor = os.open(resolved_output, flags, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+        stream.write(rendered)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -134,14 +170,14 @@ def main() -> int:
     )
     parser.add_argument(
         "--output", type=Path,
-        help="Optional JSON report path; never write it inside the database file."
+        help="Optional new JSON report path; existing files are never overwritten."
     )
     args = parser.parse_args()
-    report = inspect_sqlite_database(args.database)
-    rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\\n"
+    database = args.database.expanduser().resolve(strict=True)
+    report = inspect_sqlite_database(database)
+    rendered = render_report(report)
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(rendered, encoding="utf-8")
+        write_report_no_clobber(args.output, database, rendered)
     else:
         print(rendered, end="")
     return 0 if report["integrity_check"]["ok"] else 2

@@ -521,3 +521,14 @@ def test_shared_brain_prioritizes_old_object_experience_linked_to_matching_episo
     assert experiences[0]["id"] == historical["id"]
     assert experiences[0]["autobiographical_event_id"] == 1
     assert len(experiences) == 2
+
+
+def test_known_objects_are_ordered_by_absolute_observation_time(db):
+    add_recognized_object(db, "pomme")
+    add_recognized_object(db, "banane")
+    db.execute("UPDATE world_entities SET last_observed_at=? WHERE id=?",
+               ("2026-11-26T09:00:00+02:00", "object:pomme"))
+    db.execute("UPDATE world_entities SET last_observed_at=? WHERE id=?",
+               ("2026-11-26T08:30:00Z", "object:banane"))
+    assert [item["word"] for item in list_known_objects(db, "creator")] == [
+        "banane", "pomme"]

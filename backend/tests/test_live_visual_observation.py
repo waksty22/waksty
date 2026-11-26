@@ -118,6 +118,7 @@ class LiveVisualObservationTests(unittest.TestCase):
             ("description", "", "image/jpeg", "question"),
             ("description", "gemini-3.6-flash", "image/gif", "question"),
             ("description", "gemini-3.6-flash", "image/jpeg", "q" * 1001),
+            ("description", "gemini-3.6-flash", "image/jpeg", "   "),
             ("x" * 12001, "gemini-3.6-flash", "image/jpeg", "question"),
         )
         for args in invalid_cases:

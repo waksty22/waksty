@@ -98,3 +98,13 @@ def test_active_memory_count_rejects_empty_user_id():
     else:
         raise AssertionError("empty user id must be rejected")
     db.close()
+
+
+def test_core_memory_readiness_does_not_depend_on_optional_outbox_table():
+    db = make_db()
+    db.execute("DROP TABLE conversation_finalization_outbox")
+    report = inspect_memory_persistence(db, "creator", "sqlite")
+    assert report["schema_ready"] is True
+    assert report["pending_finalization_jobs"] is None
+    assert report["failed_finalization_jobs"] is None
+    db.close()

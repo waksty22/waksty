@@ -155,8 +155,22 @@ def main():
                     for row in rows[t]: tx.execute_write(sql,row)
                 for r in objs:
                     if r["type"]!="table" and r["sql"]: tx.execute_write(r["sql"])
+                # Force a sequence value well above the largest seeded row.
+                # The encrypted export must preserve sqlite_sequence, not just
+                # the current records, or the next Chappie memory ID can collide.
+                tx.execute_write(
+                    "UPDATE sqlite_sequence SET seq=? WHERE name=?",
+                    (9000, "memories_v19"),
+                )
+                sequence_rows = tx.execute(
+                    "SELECT seq FROM sqlite_sequence WHERE name='memories_v19'"
+                ).rows
+                need(
+                    sequence_rows and int(sequence_rows[0][0]) == 9000,
+                    "Could not establish the remote AUTOINCREMENT fixture.",
+                )
                 tx.commit()
-                print("E2E_STAGE turso_seed_commit_ok", flush=True)
+                print("E2E_STAGE turso_seed_commit_ok sequence=9000", flush=True)
             except Exception:
                 tx.rollback(); raise
 
@@ -172,9 +186,9 @@ def main():
                 need(report["encrypted"] and report["verified_after_packaging"],"Encrypted archive verification failed.")
                 need(report["table_count"]==len(tables) and report["total_rows"]==total,"Backup counts mismatch.")
                 with zipfile.ZipFile(archive) as z:
-                    need(set(z.namelist())=={"chappie-turso.json.enc","chappie-turso.json.enc.sha256"},"Unexpected archive members.")
+                    need(set(z.namelist())=={"chappie-turso-backup.json.enc","chappie-turso-backup.json.enc.sha256"},"Unexpected archive members.")
                     z.extractall(root/"unpacked")
-                enc=root/"unpacked"/"chappie-turso.json.enc"
+                enc=root/"unpacked"/"chappie-turso-backup.json.enc"
                 need(verify_encrypted_logical_backup(enc,key).get("valid") is True,"Independent archive verification failed.")
 
                 # A valid restore must refuse a populated database without
@@ -246,6 +260,39 @@ def main():
                         actual=sorted((tuple(r) for r in check.execute(f"SELECT {','.join(q(c) for c in cols[t])} FROM {q(t)}").fetchall()),key=repr)
                         expected=sorted(rows[t],key=repr)
                         need(actual==expected,f"Restored rows differ in {t}.")
+                    sequence_before_probe = check.execute(
+                        "SELECT seq FROM sqlite_sequence WHERE name=?",
+                        ("memories_v19",),
+                    ).fetchall()
+                    need(
+                        sequence_before_probe
+                        and int(sequence_before_probe[0][0]) == 9000,
+                        "Restored Turso AUTOINCREMENT sequence was not 9000 before the probe.",
+                    )
+                    # Verify that restoring the encrypted backup preserved
+                    # the remote AUTOINCREMENT high-water mark, even though the
+                    # largest currently stored row ID is much smaller.
+                    check.execute(
+                        """INSERT INTO memories_v19
+                           (user_id,category,content,importance,source_type,
+                            confidence,tags,access_count,created_at,updated_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                        ("creator", "e2e", "remote-sequence-probe", 1, "taught",
+                         0.8, "[]", 0, "2026-11-20T00:00:00Z",
+                         "2026-11-20T00:00:00Z"),
+                    )
+                    sequence_probe = check.execute(
+                        "SELECT id FROM memories_v19 WHERE user_id=? AND content=?",
+                        ("creator", "remote-sequence-probe"),
+                    ).fetchall()
+                    need(
+                        sequence_probe and int(sequence_probe[0][0]) == 9001,
+                        "Restored Turso AUTOINCREMENT sequence was not preserved.",
+                    )
+                    check.execute(
+                        "DELETE FROM memories_v19 WHERE user_id=? AND content=?",
+                        ("creator", "remote-sequence-probe"),
+                    )
                     need(not check.execute("PRAGMA foreign_key_check").fetchall(),"Foreign-key check failed.")
                     rtx.commit(); created=True
                 except Exception:
@@ -269,13 +316,21 @@ def main():
                             actual_rows == sorted(rows[t], key=repr),
                             f"Data not durable after remote reconnect in {t}.",
                         )
+                    sequence_after_reconnect = reconnect_check.execute(
+                        "SELECT seq FROM sqlite_sequence WHERE name='memories_v19'"
+                    ).fetchall()
+                    need(
+                        sequence_after_reconnect
+                        and int(sequence_after_reconnect[0][0]) == 9001,
+                        "AUTOINCREMENT sequence was not durable after remote reconnect.",
+                    )
                     need(
                         not reconnect_check.execute("PRAGMA foreign_key_check").fetchall(),
                         "Foreign-key check failed after remote reconnect.",
                     )
                     reconnect_tx.commit()
                     print(
-                        f"E2E_STAGE remote_reconnect_verified tables={len(tables)} rows={total}",
+                        f"E2E_STAGE remote_reconnect_verified tables={len(tables)} rows={total} autoincrement=9001",
                         flush=True,
                     )
                 except Exception:

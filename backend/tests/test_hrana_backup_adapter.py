@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage.hrana_backup import HranaTransactionConnection, describe_hrana_error
+from storage.hrana_backup import HranaRestoreCursor, HranaTransactionConnection, describe_hrana_error
 
 
 class _Result:
@@ -130,3 +130,14 @@ def test_hrana_error_summary_exposes_status_without_request_credentials():
     }
     assert "secret" not in repr(details)
     assert "private" not in repr(details)
+
+
+
+def test_hrana_restore_cursor_supports_dbapi_iteration():
+    cursor = HranaRestoreCursor(
+        _Result(("name", "seq"), [("memories_v19", 9001)])
+    )
+
+    assert list(cursor) == [("memories_v19", 9001)]
+    assert cursor.fetchall() == [("memories_v19", 9001)]
+    assert cursor.fetchone() == ("memories_v19", 9001)

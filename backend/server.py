@@ -2536,7 +2536,27 @@ def finalize_conversation_turn(user_id: str) -> dict[str, int]:
             through = int(summary_row["through_conversation_id"]) if summary_row else 0
 
         if latest - through >= 10:
-            consolidate_conversation(user_id)
+            # Consolidation reads at most 80 source messages per page. Drain
+            # every page before completing the durable outbox markers; otherwise
+            # a long offline backlog could be marked complete after only page 1.
+            while through < latest:
+                result = consolidate_conversation(user_id)
+                next_through = result.get("through_id", through)
+                if (
+                    not result.get("created")
+                    or isinstance(next_through, bool)
+                    or not isinstance(next_through, int)
+                    or next_through <= through
+                ):
+                    raise RuntimeError(
+                        "La consolidation mémoire n'a pas avancé le curseur."
+                    )
+                through = next_through
+                with db_connection() as db:
+                    latest = int(db.execute(
+                        "SELECT COALESCE(MAX(id), 0) FROM conversations WHERE user_id=?",
+                        (user_id,),
+                    ).fetchone()[0])
 
         with db_connection() as db:
             for job in pending:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from datetime import datetime, timezone
 import unicodedata
 from typing import Any
 
@@ -29,6 +30,18 @@ def _validated_integer(value: Any, field: str, minimum: int = 1) -> int:
 
 def _bounded_limit(value: Any, maximum: int, field: str = "Limite") -> int:
     return min(_validated_integer(value, field), maximum)
+
+def _timestamp_sort_key(value: Any) -> float:
+    """Convertit un horodatage ISO en instant comparable, quel que soit son offset."""
+    if not isinstance(value, str) or not value.strip():
+        return float("-inf")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except (ValueError, OverflowError, OSError):
+        return float("-inf")
 
 
 def init_autobiographical_tables(db: sqlite3.Connection) -> None:
@@ -203,7 +216,7 @@ def list_autobiographical_events(
                happened_at, importance
         FROM autobiographical_events
         WHERE {where}
-        ORDER BY id DESC
+        ORDER BY datetime(happened_at) DESC, id DESC
         LIMIT ?
         """,
         params,
@@ -301,7 +314,7 @@ def search_autobiographical_events(
         key=lambda pair: (
             pair[0],
             int(pair[1].get("importance") or 1),
-            str(pair[1].get("happened_at") or ""),
+            _timestamp_sort_key(pair[1].get("happened_at")),
             int(pair[1].get("id") or 0),
         ),
         reverse=True,
@@ -413,7 +426,7 @@ def find_related_autobiographical_events(
     candidates.sort(
         key=lambda item: (
             item["lexical_similarity"],
-            str(item.get("happened_at") or ""),
+            _timestamp_sort_key(item.get("happened_at")),
             int(item.get("id") or 0),
         ),
         reverse=True,

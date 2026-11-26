@@ -21,30 +21,30 @@ MAX_CONTEXT_CHARS = 18000
 
 # Table and ordering names are fixed constants, never user supplied.
 TABLES = {
-    "vocabulary": ("personal_vocabulary", "updated_at DESC, word ASC"),
-    "sensory_observations": ("sensory_observations", "created_at DESC"),
-    "word_visual_associations": ("word_visual_associations", "created_at DESC"),
-    "perception_fusions": ("perception_fusion_candidates", "created_at DESC"),
-    "world_entities": ("world_entities", "last_observed_at DESC"),
-    "world_relations": ("world_relations", "updated_at DESC"),
-    "object_properties": ("object_properties", "updated_at DESC"),
-    "object_experiences": ("object_experiences", "created_at DESC"),
+    "vocabulary": ("personal_vocabulary", "COALESCE(julianday(updated_at), -1.0) DESC, word ASC"),
+    "sensory_observations": ("sensory_observations", "COALESCE(julianday(created_at), -1.0) DESC"),
+    "word_visual_associations": ("word_visual_associations", "COALESCE(julianday(created_at), -1.0) DESC"),
+    "perception_fusions": ("perception_fusion_candidates", "COALESCE(julianday(created_at), -1.0) DESC"),
+    "world_entities": ("world_entities", "COALESCE(julianday(last_observed_at), -1.0) DESC"),
+    "world_relations": ("world_relations", "COALESCE(julianday(updated_at), -1.0) DESC"),
+    "object_properties": ("object_properties", "COALESCE(julianday(updated_at), -1.0) DESC"),
+    "object_experiences": ("object_experiences", "COALESCE(julianday(created_at), -1.0) DESC"),
     "causal_observations": ("causal_observations", "id DESC"),
     "causal_hypotheses": ("causal_hypotheses", "id DESC"),
     "causal_experiments": ("causal_experiments", "id DESC"),
     "imitation_examples": ("imitation_examples", "id DESC"),
     "imitation_attempts": ("imitation_attempts", "id DESC"),
     "autobiographical_events": ("autobiographical_events", "id DESC"),
-    "memories": ("memories_v19", "importance DESC, updated_at DESC, id DESC"),
-    "skills": ("skills", "updated_at DESC"),
+    "memories": ("memories_v19", "importance DESC, COALESCE(julianday(updated_at), -1.0) DESC, id DESC"),
+    "skills": ("skills", "COALESCE(julianday(updated_at), -1.0) DESC"),
     "decision_journal": ("decision_journal", "id DESC"),
     "preference_evidence": ("preference_evidence", "id DESC"),
-    "emotional_state": ("emotional_state", "updated_at DESC"),
+    "emotional_state": ("emotional_state", "COALESCE(julianday(updated_at), -1.0) DESC"),
     "affective_history": ("affective_history", "id DESC"),
-    "competency_tests": ("competency_tests", "tested_at DESC"),
-    "spatial_sessions": ("spatial_sessions", "started_at DESC"),
-    "spatial_visits": ("spatial_visits", "recorded_at DESC"),
-    "place_memories": ("place_memories", "last_seen_at DESC"),
+    "competency_tests": ("competency_tests", "COALESCE(julianday(tested_at), -1.0) DESC"),
+    "spatial_sessions": ("spatial_sessions", "COALESCE(julianday(started_at), -1.0) DESC"),
+    "spatial_visits": ("spatial_visits", "COALESCE(julianday(recorded_at), -1.0) DESC"),
+    "place_memories": ("place_memories", "COALESCE(julianday(last_seen_at), -1.0) DESC"),
 }
 
 
@@ -229,7 +229,7 @@ def _rows(
                     "SELECT experience.* FROM object_experiences AS experience "
                     "WHERE experience.user_id=? "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
-                    "experience.created_at DESC, experience.id DESC LIMIT ?",
+                    "COALESCE(julianday(experience.created_at), -1.0) DESC, experience.id DESC LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
             elif table == "autobiographical_events":
@@ -246,7 +246,7 @@ def _rows(
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
                     f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
-                    f"importance DESC, happened_at DESC, id DESC LIMIT ?",
+                    f"importance DESC, COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
             elif table == "place_memories":
@@ -431,7 +431,7 @@ def _rows(
             try:
                 rows = db.execute(
                     "SELECT * FROM memories WHERE user_id=? "
-                    "ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ?",
+                    "ORDER BY importance DESC, COALESCE(julianday(updated_at), -1.0) DESC, id DESC LIMIT ?",
                     (user_id, limit),
                 ).fetchall()
             except sqlite3.OperationalError as legacy_exc:

@@ -811,3 +811,19 @@ def test_live_system_policy_requires_refresh_before_relying_on_session_snapshot(
         if tool.get("name") == "get_shared_brain_state"
     )
     assert "OBLIGATOIRE avant toute réponse" in refresh_tool["description"]
+
+
+def test_snapshot_orders_timezone_aware_sensory_observations_by_instant():
+    db = make_db()
+    db.executemany(
+        "INSERT INTO sensory_observations VALUES (?,?,?,?,?,?,?,?)",
+        [
+            ("earlier", "creator", "vision", "Observation plus ancienne", "camera", 0.9, "{}", "2026-11-26T09:00:00.100+02:00"),
+            ("later", "creator", "vision", "Observation plus récente", "camera", 0.9, "{}", "2026-11-26T07:00:00.900Z"),
+        ],
+    )
+
+    snapshot = get_shared_brain_snapshot(db, "creator")
+
+    assert [row["observation_id"] for row in snapshot["sensory_observations"]] == ["later", "earlier"]
+    db.close()

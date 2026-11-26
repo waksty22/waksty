@@ -162,3 +162,43 @@ def test_spatial_numeric_fields_reject_numeric_strings(db):
 def test_missing_place_confidence_defaults_to_unrated_zero(db):
     place = record_place_observation(db, "creator", "Description sans score")
     assert place["confidence"] == 0.0
+
+
+def test_locationless_observation_does_not_merge_into_geolocated_place(db):
+    session = start_location_session(db, "creator", True)
+    first = record_place_observation(
+        db, "creator", "Une façade en pierre avec trois fenêtres et un clocher.",
+        48.1, -2.8, session_id=session["session_id"],
+    )
+
+    second = record_place_observation(
+        db, "creator", "Une façade en pierre avec trois fenêtres et un clocher.",
+    )
+
+    assert second["place_id"] != first["place_id"]
+    assert second["identity_status"] == "candidate"
+    assert second["candidate_place_id"] == first["place_id"]
+    places = get_map_state(db, "creator")["places"]
+    assert len(places) == 2
+    original = next(place for place in places if place["place_id"] == first["place_id"])
+    assert original["observations_count"] == 1
+
+
+def test_geolocated_observation_does_not_merge_into_locationless_place(db):
+    first = record_place_observation(
+        db, "creator", "Un pont en pierre au-dessus d'une rivière.",
+    )
+    session = start_location_session(db, "creator", True)
+
+    second = record_place_observation(
+        db, "creator", "Un pont en pierre au-dessus d'une rivière.",
+        48.1, -2.8, session_id=session["session_id"],
+    )
+
+    assert second["place_id"] != first["place_id"]
+    assert second["identity_status"] == "candidate"
+    assert second["candidate_place_id"] == first["place_id"]
+    places = get_map_state(db, "creator")["places"]
+    assert len(places) == 2
+    original = next(place for place in places if place["place_id"] == first["place_id"])
+    assert original["observations_count"] == 1

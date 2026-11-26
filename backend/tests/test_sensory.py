@@ -229,3 +229,22 @@ def test_list_observations_orders_mixed_timezone_timestamps_by_instant(db):
         audio["observation_id"],
         vision["observation_id"],
     ]
+
+
+def test_observation_history_orders_subsecond_instants_before_id_tiebreak(db):
+    db.executemany(
+        """INSERT INTO sensory_observations
+           (observation_id, user_id, modality, content, source,
+            confidence, metadata_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            ("z-older", "creator", "vision", "older", "test", 0.5, "{}",
+             "2026-11-26T08:00:00.100Z"),
+            ("a-newer", "creator", "vision", "newer", "test", 0.5, "{}",
+             "2026-11-26T08:00:00.900Z"),
+        ],
+    )
+    observations = list_observations(db, "creator")
+    assert [item["observation_id"] for item in observations] == [
+        "a-newer", "z-older"
+    ]

@@ -87,9 +87,10 @@ def link_temporally_cooccurring_observation(
         """SELECT observation_id, modality, content, source, created_at
            FROM sensory_observations
            WHERE user_id=? AND modality=?
-             AND datetime(created_at) BETWEEN datetime(?) AND datetime(?)
+             AND julianday(created_at) BETWEEN julianday(?) - (1.0 / 86400.0)
+                                           AND julianday(?) + (1.0 / 86400.0)
              AND observation_id<>?
-           ORDER BY datetime(created_at) DESC LIMIT 20""",
+           ORDER BY julianday(created_at) DESC LIMIT 20""",
         (user_id, other_modality, lower, upper, observation_id),
     ).fetchall()
 

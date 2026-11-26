@@ -64,6 +64,11 @@ class HranaRestoreCursor:
         )
         self._rows = [tuple(row) for row in result.rows]
 
+    def __iter__(self):
+        # sqlite3 cursors are iterable; restore logic relies on the DB-API
+        # cursor contract when reading sqlite_sequence.
+        return iter(self._rows)
+
     def fetchall(self) -> list[tuple[Any, ...]]:
         return list(self._rows)
 

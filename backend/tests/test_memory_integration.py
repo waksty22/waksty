@@ -502,3 +502,36 @@ def test_legacy_retrieval_fallback_never_promotes_unverified_rows_to_taught(monk
     assert results[0]["confidence"] == 0.5
     assert "legacy_source_unverified" in results[0]["tags"]
     db.close()
+
+
+def test_conflicting_memory_statements_remain_separate_and_retrievable():
+    """Contradictory statements are preserved as evidence, never silently overwritten."""
+    from memory.episodic_memory import (
+        init_memory_tables, save_episodic_memory, search_episodic_memories,
+    )
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    init_memory_tables(db)
+
+    save_episodic_memory(
+        db, "creator", "La porte du garage est ouverte.",
+        category="observation", source_type="observed", confidence=0.6,
+    )
+    save_episodic_memory(
+        db, "creator", "La porte du garage est fermée.",
+        category="observation", source_type="observed", confidence=0.6,
+    )
+    db.commit()
+
+    results = search_episodic_memories(db, "creator", "porte garage", limit=10)
+    contents = {item["content"] for item in results}
+    assert contents == {
+        "La porte du garage est ouverte.",
+        "La porte du garage est fermée.",
+    }
+    assert all(item["source_type"] == "observed" for item in results)
+    assert db.execute(
+        "SELECT COUNT(*) FROM memories_v19 WHERE user_id='creator'"
+    ).fetchone()[0] == 2
+    db.close()

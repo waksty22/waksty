@@ -791,7 +791,7 @@ def get_entity_relations(
                   OR object_id = ?
               )
 
-            ORDER BY updated_at DESC, id DESC
+            ORDER BY COALESCE(julianday(updated_at), -1.0) DESC, id DESC
             """,
             (
                 user_id,
@@ -900,7 +900,7 @@ def search_world_entities(
         ])
 
     sql += """
-        ORDER BY last_observed_at DESC
+        ORDER BY COALESCE(julianday(last_observed_at), -1.0) DESC, id DESC
         LIMIT ?
     """
 

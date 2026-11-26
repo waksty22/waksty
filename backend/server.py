@@ -67,6 +67,12 @@ from memory.autobiographical import (
     find_related_autobiographical_events,
     autobiographical_statistics,
 )
+from memory.conversation_outbox import (
+    init_conversation_finalization_outbox,
+    enqueue_conversation_finalization,
+    list_pending_conversation_finalizations,
+    mark_conversation_finalization,
+)
 from world.spatial_memory import (
     init_spatial_tables, start_location_session, stop_location_session,
     record_location, record_place_observation, confirm_place_identity, get_map_state,
@@ -1177,6 +1183,8 @@ async def lifespan(app: FastAPI):
         collect_runtime_snapshot(),
     )
     init_db()
+    recovery_report = recover_pending_conversation_finalizations()
+    log.info("[MEMORY OUTBOX] Reprise au démarrage : %s", recovery_report)
     log.info(
         "%s runtime phase=after_init_db elapsed_seconds=%.2f %s",
         CHAPPIE_VERSION,
@@ -2434,23 +2442,12 @@ def save_conversation_turn(
     assistant_text: str,
     source: str = "conversation",
 ) -> None:
-
-    user_id = valid_user(user_id)  
-
-    user_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(user_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    assistant_text = re.sub(  
-        r"\s+",  
-        " ",  
-        str(assistant_text),  
-    ).strip()[:MAX_MESSAGE_CHARS]  
-
-    if not user_text and not assistant_text:  
-        return  
+    """Commit source messages and a durable finalization job atomically."""
+    user_id = valid_user(user_id)
+    user_text = re.sub(r"\s+", " ", str(user_text)).strip()[:MAX_MESSAGE_CHARS]
+    assistant_text = re.sub(r"\s+", " ", str(assistant_text)).strip()[:MAX_MESSAGE_CHARS]
+    if not user_text and not assistant_text:
+        return
 
     now = utc_now()
     diagnostic_source = (
@@ -2468,7 +2465,6 @@ def save_conversation_turn(
                     """,
                     (user_id, "user", user_text, now),
                 )
-
             if assistant_text:
                 db.execute(
                     """
@@ -2477,7 +2473,6 @@ def save_conversation_turn(
                     """,
                     (user_id, "assistant", assistant_text, now),
                 )
-
             db.execute(
                 """
                 INSERT INTO journal(user_id, entry, kind, created_at)
@@ -2490,9 +2485,14 @@ def save_conversation_turn(
                     now,
                 ),
             )
-            # Index the newly inserted source messages in the same transaction.
-            # If indexing fails, the conversation and journal entries roll back too.
+            # Keep source indexing and the retry marker in the same transaction.
             sync_autobiographical_events(db, user_id, commit=False)
+            through_id = int(db.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM conversations WHERE user_id=?",
+                (user_id,),
+            ).fetchone()[0])
+            if through_id:
+                enqueue_conversation_finalization(db, user_id, through_id)
             db.commit()
     except Exception:
         record_persistence_event("save_failed", diagnostic_source)
@@ -2501,49 +2501,87 @@ def save_conversation_turn(
             diagnostic_source,
         )
         raise
+
     record_persistence_event("save_committed", diagnostic_source)
     log.info(
         "[MEMORY WRITE] Commit confirmé source=%s user_scope=authenticated_user "
         "user_chars=%s assistant_chars=%s",
         diagnostic_source, len(user_text), len(assistant_text),
     )
+    finalize_conversation_turn(user_id)
+
+
+def finalize_conversation_turn(user_id: str) -> dict[str, int]:
+    """Retry post-commit consolidation while leaving failures durably pending."""
+    user_id = valid_user(user_id)
+    with db_connection() as db:
+        pending = [
+            job for job in list_pending_conversation_finalizations(db, limit=500)
+            if job["user_id"] == user_id
+        ]
+    if not pending:
+        return {"pending": 0, "completed": 0}
 
     try:
         with db_connection() as db:
-            latest = int(
-                db.execute(  
-                    """  
-                    SELECT COALESCE(MAX(id),0)  
-                    FROM conversations  
-                    WHERE user_id=?  
-                    """,  
-                    (user_id,),  
-                ).fetchone()[0]  
-            )  
+            latest = int(db.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM conversations WHERE user_id=?",
+                (user_id,),
+            ).fetchone()[0])
+            summary_row = db.execute(
+                """SELECT through_conversation_id FROM conversation_summaries
+                   WHERE user_id=? ORDER BY id DESC LIMIT 1""",
+                (user_id,),
+            ).fetchone()
+            through = int(summary_row["through_conversation_id"]) if summary_row else 0
 
-            summary_row = db.execute(  
-                """  
-                SELECT through_conversation_id  
-                FROM conversation_summaries  
-                WHERE user_id=?  
-                ORDER BY id DESC  
-                LIMIT 1  
-                """,  
-                (user_id,),  
-            ).fetchone()  
+        if latest - through >= 10:
+            consolidate_conversation(user_id)
 
-            through = (  
-                int(summary_row["through_conversation_id"])  
-                if summary_row else 0  
-            )  
+        with db_connection() as db:
+            for job in pending:
+                mark_conversation_finalization(db, job["id"])
+            db.commit()
+        return {"pending": 0, "completed": len(pending)}
+    except Exception as exc:
+        log.exception("[MEMORY OUTBOX] Finalisation interrompue ; reprise conservée")
+        try:
+            with db_connection() as db:
+                for job in pending:
+                    mark_conversation_finalization(db, job["id"], error=str(exc))
+                db.commit()
+        except Exception:
+            log.exception("[MEMORY OUTBOX] Impossible de mettre à jour les tentatives")
+        return {"pending": len(pending), "completed": 0}
 
-        if latest - through >= 10:  
-            consolidate_conversation(user_id)  
 
-    except Exception:  
-        log.exception(  
-            "Échec de consolidation après enregistrement d'un tour"  
-        )
+def recover_pending_conversation_finalizations() -> dict[str, int]:
+    """Recover pending finalization jobs on process startup."""
+    with db_connection() as db:
+        jobs = list_pending_conversation_finalizations(db, limit=500)
+    users = sorted({str(job["user_id"]) for job in jobs})
+    completed = 0
+    pending = 0
+    for user_id in users:
+        try:
+            valid_user(user_id)
+        except HTTPException:
+            skipped = sum(1 for job in jobs if job["user_id"] == user_id)
+            pending += skipped
+            log.warning(
+                "[MEMORY OUTBOX] Reprise ignorée pour un utilisateur non autorisé ; "
+                "les travaux restent en attente."
+            )
+            continue
+        report = finalize_conversation_turn(user_id)
+        completed += report["completed"]
+        pending += report["pending"]
+    return {
+        "users_checked": len(users),
+        "jobs_completed": completed,
+        "jobs_still_pending": pending,
+    }
+
 
 def build_live_brain_refresh_message(
     snapshot: dict[str, Any],

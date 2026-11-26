@@ -1,0 +1,162 @@
+"""Durable conversation finalization outbox regression tests."""
+from __future__ import annotations
+
+from pathlib import Path
+import sqlite3
+import sys
+
+import pytest
+
+BACKEND = Path(__file__).resolve().parents[1]
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+import server
+from memory.conversation_outbox import (
+    enqueue_conversation_finalization,
+    init_conversation_finalization_outbox,
+    list_pending_conversation_finalizations,
+)
+
+
+def _isolate_database(monkeypatch, path: Path) -> None:
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_DATA_DIR", str(path.parent))
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", path)
+    server.init_db()
+
+
+def test_failed_consolidation_survives_connection_reopen_and_is_recovered(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "outbox-recovery.sqlite3"
+    _isolate_database(monkeypatch, database)
+    real_consolidate = server.consolidate_conversation
+
+    def fail_consolidation(_user_id: str):
+        raise RuntimeError("temporary consolidation failure")
+
+    monkeypatch.setattr(server, "consolidate_conversation", fail_consolidation)
+    for index in range(5):
+        server.save_conversation_turn(
+            "creator",
+            f"Message de test numéro {index}.",
+            f"Réponse de test numéro {index}.",
+        )
+
+    # A fresh connection observes the durable pending job and its failed attempt.
+    with server.db_connection() as db:
+        pending = list_pending_conversation_finalizations(db)
+        row = db.execute(
+            "SELECT attempts, status, last_error FROM conversation_finalization_outbox "
+            "WHERE status='pending' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert len(pending) == 1
+    assert row["attempts"] == 1
+    assert row["status"] == "pending"
+    assert row["last_error"] == "temporary consolidation failure"
+
+    monkeypatch.setattr(server, "consolidate_conversation", real_consolidate)
+    report = server.recover_pending_conversation_finalizations()
+    assert report == {
+        "users_checked": 1,
+        "jobs_completed": 1,
+        "jobs_still_pending": 0,
+    }
+    with server.db_connection() as db:
+        assert list_pending_conversation_finalizations(db) == []
+        summary = db.execute(
+            "SELECT through_conversation_id FROM conversation_summaries "
+            "WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            ("creator",),
+        ).fetchone()
+        completed = db.execute(
+            "SELECT status, attempts, completed_at FROM conversation_finalization_outbox "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert summary["through_conversation_id"] == 10
+    assert completed["status"] == "completed"
+    assert completed["attempts"] == 2
+    assert completed["completed_at"]
+
+
+def test_conversation_and_outbox_marker_roll_back_together(tmp_path, monkeypatch):
+    database = tmp_path / "outbox-atomicity.sqlite3"
+    _isolate_database(monkeypatch, database)
+    with server.db_connection() as db:
+        init_conversation_finalization_outbox(db)
+        db.commit()
+
+    original_enqueue = server.enqueue_conversation_finalization
+
+    def enqueue_then_fail(db, user_id, through_id):
+        original_enqueue(db, user_id, through_id)
+        raise RuntimeError("injected failure after outbox insert")
+
+    monkeypatch.setattr(server, "enqueue_conversation_finalization", enqueue_then_fail)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        server.save_conversation_turn(
+            "creator", "Message atomique.", "Réponse atomique."
+        )
+
+    with server.db_connection() as db:
+        conversation_count = db.execute(
+            "SELECT COUNT(*) FROM conversations WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0]
+        journal_count = db.execute(
+            "SELECT COUNT(*) FROM journal WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0]
+        outbox_count = db.execute(
+            "SELECT COUNT(*) FROM conversation_finalization_outbox WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0]
+    assert conversation_count == 0
+    assert journal_count == 0
+    assert outbox_count == 0
+
+
+def test_outbox_enqueue_is_idempotent_for_user_and_cursor(tmp_path):
+    database = tmp_path / "outbox-idempotence.sqlite3"
+    db = sqlite3.connect(database)
+    db.row_factory = sqlite3.Row
+    try:
+        init_conversation_finalization_outbox(db)
+        assert enqueue_conversation_finalization(db, "creator", 42) is True
+        assert enqueue_conversation_finalization(db, "creator", 42) is False
+        assert enqueue_conversation_finalization(db, "another-user", 42) is True
+        db.commit()
+        rows = db.execute(
+            "SELECT user_id, through_conversation_id FROM conversation_finalization_outbox "
+            "ORDER BY user_id"
+        ).fetchall()
+        assert [(row["user_id"], row["through_conversation_id"]) for row in rows] == [
+            ("another-user", 42),
+            ("creator", 42),
+        ]
+    finally:
+        db.close()
+
+
+def test_outbox_works_with_real_local_libsql_adapter():
+    libsql = pytest.importorskip("libsql")
+    from storage.libsql_adapter import adapt_libsql_connection
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        init_conversation_finalization_outbox(db)
+        assert enqueue_conversation_finalization(db, "creator", 17) is True
+        pending = list_pending_conversation_finalizations(db)
+        assert pending == [{
+            "id": 1,
+            "user_id": "creator",
+            "through_conversation_id": 17,
+            "attempts": 0,
+        }]
+        db.commit()
+    finally:
+        db.close()

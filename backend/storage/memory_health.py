@@ -43,6 +43,19 @@ def inspect_memory_persistence(connection: Any, user_id: str, backend: str) -> d
             "rows": int(count[0]),
         }
 
+    pending_finalization_jobs = None
+    failed_finalization_jobs = None
+    if "conversation_finalization_outbox" in existing:
+        finalization_row = connection.execute(
+            """SELECT COUNT(*),
+                      COALESCE(SUM(CASE WHEN attempts > 0 THEN 1 ELSE 0 END), 0)
+               FROM conversation_finalization_outbox
+               WHERE user_id=? AND status='pending'""",
+            (user_id,),
+        ).fetchone()
+        pending_finalization_jobs = int(finalization_row[0])
+        failed_finalization_jobs = int(finalization_row[1])
+
     missing = [name for name, info in tables.items() if not info["exists"]]
     return {
         "backend": str(backend),
@@ -55,6 +68,8 @@ def inspect_memory_persistence(connection: Any, user_id: str, backend: str) -> d
         "episodic_memory_rows": tables["memories_v19"]["rows"],
         "legacy_memory_rows": tables["memories"]["rows"],
         "autobiographical_event_rows": tables["autobiographical_events"]["rows"],
+        "pending_finalization_jobs": pending_finalization_jobs,
+        "failed_finalization_jobs": failed_finalization_jobs,
         "note": (
             "Les compteurs confirment la présence des données dans le backend "
             "actif, pas à eux seuls leur restauration après redémarrage."

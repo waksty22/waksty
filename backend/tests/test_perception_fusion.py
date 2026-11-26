@@ -195,3 +195,36 @@ def test_temporal_fusion_preserves_subsecond_window_and_timezone_order(db):
     assert result[0]["audio_observation_id"] == audio["observation_id"]
     assert result[0]["vision_observation_id"] == vision["observation_id"]
     assert result[0]["time_delta_seconds"] == pytest.approx(0.8)
+
+
+def test_fusion_listing_orders_mixed_timezone_timestamps_by_instant(db):
+    audio, vision = make_audio_and_vision(db)
+    db.execute(
+        "INSERT INTO perception_fusion_candidates "
+        "(user_id,audio_observation_id,vision_observation_id,time_delta_seconds,status,evidence_json,created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        ("creator", audio["observation_id"], vision["observation_id"], 0.1, "candidate", "{}", "2026-11-26T09:00:00.100+02:00"),
+    )
+    db.execute(
+        "INSERT INTO sensory_observations "
+        "(observation_id,user_id,modality,content,source,confidence,metadata_json,created_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        ("audio-later", "creator", "audio", "Son ultérieur", "microphone", 0.9, "{}", "2026-11-26T07:00:00.900Z"),
+    )
+    db.execute(
+        "INSERT INTO sensory_observations "
+        "(observation_id,user_id,modality,content,source,confidence,metadata_json,created_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        ("vision-later", "creator", "vision", "Image ultérieure", "camera", 0.9, "{}", "2026-11-26T07:00:00.900Z"),
+    )
+    db.execute(
+        "INSERT INTO perception_fusion_candidates "
+        "(user_id,audio_observation_id,vision_observation_id,time_delta_seconds,status,evidence_json,created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        ("creator", "audio-later", "vision-later", 0.1, "candidate", "{}", "2026-11-26T07:00:00.900Z"),
+    )
+
+    listed = list_perception_fusions(db, "creator")
+
+    assert listed[0]["audio_observation_id"] == "audio-later"
+    assert listed[1]["audio_observation_id"] == audio["observation_id"]

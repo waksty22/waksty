@@ -11,7 +11,7 @@ import math
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -61,7 +61,7 @@ def _timestamp(value: Any) -> str:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("Horodatage invalide : un fuseau horaire explicite est obligatoire.")
     normalized = parsed.astimezone(timezone.utc)
-    if normalized > datetime.now(timezone.utc).replace(microsecond=0) + __import__("datetime").timedelta(minutes=5):
+    if normalized > datetime.now(timezone.utc).replace(microsecond=0) + timedelta(minutes=5):
         raise ValueError("Horodatage futur : vérifie l'horloge de l'appareil.")
     return normalized.isoformat()
 

@@ -48,6 +48,19 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _timestamp_sort_key(value: Any) -> float:
+    """Normalize ISO timestamps to absolute UTC instants for stable ranking."""
+    if not isinstance(value, str) or not value.strip():
+        return float("-inf")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except (OverflowError, OSError, TypeError, ValueError):
+        return float("-inf")
+
+
 def _normalize_user_id(user_id: str) -> str:
     """Valide et normalise l'identifiant utilisateur."""
     if not isinstance(user_id, str):
@@ -515,7 +528,7 @@ def search_episodic_memories(
     """
     if not terms:
         cursor = db.execute(
-            columns + " ORDER BY importance DESC, access_count DESC, updated_at DESC LIMIT ?",
+            columns + " ORDER BY importance DESC, access_count DESC, COALESCE(julianday(updated_at), -1.0) DESC, id DESC LIMIT ?",
             (user_id, limit),
         )
         rows = cursor.fetchall()
@@ -525,7 +538,7 @@ def search_episodic_memories(
         # Unicode accent folding; a deeply nested SQL REPLACE expression is
         # not portable to libSQL and can overflow its parser.
         recent_cursor = db.execute(
-            columns + " ORDER BY importance DESC, updated_at DESC LIMIT 2000",
+            columns + " ORDER BY importance DESC, COALESCE(julianday(updated_at), -1.0) DESC, id DESC LIMIT 2000",
             (user_id,),
         )
         recent_rows = [
@@ -688,7 +701,7 @@ def search_episodic_memories(
                 int(item.get("importance") or 0),
                 float(item.get("confidence") or 0),
                 int(item.get("access_count") or 0),
-                str(item.get("updated_at") or ""),
+                _timestamp_sort_key(item.get("updated_at")),
             ),
             reverse=True,
         )

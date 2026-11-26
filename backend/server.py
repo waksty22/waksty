@@ -3715,7 +3715,7 @@ def execute_tool(
                 raise ValueError("La recherche sensorielle doit contenir entre 1 et 1000 caractères.")
             with db_connection() as sensory_db:
                 snapshot = get_shared_brain_snapshot(
-                    sensory_db, user_id, limit=30, query=query
+                    sensory_db, user_id, limit=10, query=query
                 )
             observations = snapshot.get("sensory_observations", [])
             return {

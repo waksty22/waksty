@@ -858,6 +858,7 @@ def test_live_audio_can_search_older_shared_sensory_observations_via_read_only_t
     assert result["read_only"] is True
     assert result["user_scoped"] is True
     assert result["observations_are_not_confirmed_facts"] is True
+    assert len(result["observations"]) <= 10
     encoded = json.dumps(result, ensure_ascii=False)
     assert unique_memory in encoded
     assert "secret autre utilisateur" not in encoded

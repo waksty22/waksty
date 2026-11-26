@@ -44,6 +44,28 @@ def _text(value: Any, name: str, limit: int, required: bool = False) -> str:
     return result
 
 
+def _timestamp(value: Any) -> str:
+    """Validate client observation time and normalize it to UTC.
+
+    Requiring an explicit timezone prevents ambiguous local timestamps.
+    A small future tolerance accommodates ordinary device clock skew while
+    preventing future-dated samples from distorting the remembered timeline.
+    """
+    if value is None or value == "":
+        return _now()
+    raw = _text(value, "Horodatage", 64, True)
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Horodatage invalide : format ISO 8601 attendu.") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("Horodatage invalide : un fuseau horaire explicite est obligatoire.")
+    normalized = parsed.astimezone(timezone.utc)
+    if normalized > datetime.now(timezone.utc).replace(microsecond=0) + __import__("datetime").timedelta(minutes=5):
+        raise ValueError("Horodatage futur : vérifie l'horloge de l'appareil.")
+    return normalized.isoformat()
+
+
 def init_spatial_tables(db: sqlite3.Connection) -> None:
     db.executescript("""
         CREATE TABLE IF NOT EXISTS spatial_sessions (
@@ -122,6 +144,7 @@ def start_location_session(
 ) -> dict[str, Any]:
     if consented is not True:
         raise ValueError("Le consentement explicite est nécessaire.")
+    user_id = _text(user_id, "Identifiant utilisateur", 200, True)
     now = _now()
     session_id = str(uuid.uuid4())
     db.execute(
@@ -140,6 +163,7 @@ def start_location_session(
 def stop_location_session(
     db: sqlite3.Connection, user_id: str, session_id: str
 ) -> dict[str, Any]:
+    user_id = _text(user_id, "Identifiant utilisateur", 200, True)
     session_id = _text(session_id, "Session", 80, True)
     row = db.execute(
         "SELECT * FROM spatial_sessions WHERE session_id=? AND user_id=?",
@@ -162,6 +186,7 @@ def record_location(
     altitude_m: Any = None, heading_deg: Any = None, speed_mps: Any = None,
     recorded_at: str = ""
 ) -> dict[str, Any]:
+    user_id = _text(user_id, "Identifiant utilisateur", 200, True)
     session_id = _text(session_id, "Session", 80, True)
     session = db.execute(
         """SELECT session_id FROM spatial_sessions
@@ -178,7 +203,7 @@ def record_location(
     altitude = None if altitude_m is None else _finite(altitude_m, "Altitude", -12000, 100000)
     heading = None if heading_deg is None else _finite(heading_deg, "Cap", 0, 360)
     speed = None if speed_mps is None else _finite(speed_mps, "Vitesse", 0, 500)
-    stamp = _text(recorded_at, "Horodatage", 64) or _now()
+    stamp = _timestamp(recorded_at)
     # Avoid duplicate browser samples caused by repeated callbacks.
     previous = db.execute(
         """SELECT latitude,longitude,recorded_at FROM spatial_visits
@@ -233,6 +258,7 @@ def record_place_observation(
     label: str = "", visual_signature: str = "", confidence: Any = 0.0,
     session_id: str = ""
 ) -> dict[str, Any]:
+    user_id = _text(user_id, "Identifiant utilisateur", 200, True)
     description = _text(description, "Description visuelle", 4000, True)
     label = _text(label, "Nom du lieu", 120)
     raw_signature = description if visual_signature is None or visual_signature == "" else visual_signature
@@ -349,6 +375,7 @@ def confirm_place_identity(
     db: sqlite3.Connection, user_id: str, place_id: str,
     label: str, evidence: str
 ) -> dict[str, Any]:
+    user_id = _text(user_id, "Identifiant utilisateur", 200, True)
     place_id = _text(place_id, "Identifiant du lieu", 100, True)
     label = _text(label, "Nom confirmé", 120, True)
     evidence = _text(evidence, "Preuve de confirmation", 1000, True)
@@ -378,7 +405,10 @@ def confirm_place_identity(
 def get_map_state(
     db: sqlite3.Connection, user_id: str, limit: int = 2000
 ) -> dict[str, Any]:
-    limit = max(1, min(int(limit), 5000))
+    user_id = _text(user_id, "Identifiant utilisateur", 200, True)
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("La limite de carte doit être un entier strict.")
+    limit = max(1, min(limit, 5000))
     visits = list(reversed(db.execute(
         """SELECT v.id,v.session_id,v.latitude,v.longitude,v.accuracy_m,
                   v.recorded_at,v.source,s.device_label

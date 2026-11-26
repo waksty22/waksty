@@ -130,7 +130,13 @@ class HranaHttpClient:
         if not auth_token:
             raise ValueError("TURSO_AUTH_TOKEN est requis.")
         self._endpoint = _pipeline_url(database_url)
-        self._http = http_client or httpx.Client(timeout=timeout)
+        if http_client is None:
+            # Retry only connection establishment. Do not replay requests after
+            # a read/write failure, where the transaction outcome may be unknown.
+            transport = httpx.HTTPTransport(retries=2)
+            self._http = httpx.Client(transport=transport, timeout=timeout)
+        else:
+            self._http = http_client
         self._headers = {
             "Authorization": "Bearer " + auth_token,
             "Content-Type": "application/json",

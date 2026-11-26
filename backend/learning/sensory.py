@@ -125,7 +125,7 @@ def list_observations(
         """SELECT observation_id, modality, content, source, confidence,
                   metadata_json, created_at
            FROM sensory_observations
-           WHERE user_id=? ORDER BY datetime(created_at) DESC, observation_id DESC LIMIT ?""",
+           WHERE user_id=? ORDER BY COALESCE(julianday(created_at), -1.0) DESC, observation_id DESC LIMIT ?""",
         (user_id, limit),
     ).fetchall()
     result = []

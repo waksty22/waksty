@@ -261,7 +261,7 @@ def record_place_observation(
     for candidate in db.execute(
         """SELECT place_id,visual_signature,latitude,longitude,description,
                   identity_status,observations_count,confidence,label
-           FROM place_memories WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 250""",
+           FROM place_memories WHERE user_id=? ORDER BY COALESCE(julianday(last_seen_at), -1.0) DESC, place_id DESC LIMIT 250""",
         (user_id,),
     ).fetchall():
         similarity = _signature_similarity(signature, str(candidate["visual_signature"] or ""))
@@ -390,19 +390,19 @@ def get_map_state(
                   v.recorded_at,v.source,s.device_label
            FROM spatial_visits v
            JOIN spatial_sessions s ON s.session_id=v.session_id
-           WHERE v.user_id=? ORDER BY v.recorded_at DESC LIMIT ?""",
+           WHERE v.user_id=? ORDER BY COALESCE(julianday(v.recorded_at), -1.0) DESC, v.id DESC LIMIT ?""",
         (user_id, limit),
     ).fetchall()))
     sessions = db.execute(
         """SELECT session_id,device_label,started_at,ended_at
-           FROM spatial_sessions WHERE user_id=? ORDER BY started_at DESC LIMIT 100""",
+           FROM spatial_sessions WHERE user_id=? ORDER BY COALESCE(julianday(started_at), -1.0) DESC, session_id DESC LIMIT 100""",
         (user_id,),
     ).fetchall()
     places = db.execute(
         """SELECT place_id,label,description,session_id,latitude,longitude,confidence,
                   identity_status,candidate_place_id,similarity_score,confirmation_evidence,
                   confirmed_at,first_seen_at,last_seen_at,observations_count
-           FROM place_memories WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 200""",
+           FROM place_memories WHERE user_id=? ORDER BY COALESCE(julianday(last_seen_at), -1.0) DESC, place_id DESC LIMIT 200""",
         (user_id,),
     ).fetchall()
     return {

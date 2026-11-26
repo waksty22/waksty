@@ -208,3 +208,24 @@ def test_search_does_not_overflow_maximum_sqlite_access_counter():
         assert stored["access_count"] == 9223372036854775807
     finally:
         db.close()
+
+
+def test_episodic_search_orders_mixed_offsets_by_absolute_time():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(db, "owner", "Une montre est posée ici", importance=3)
+        save_episodic_memory(db, "owner", "Une montre est rangée là", importance=3)
+        db.execute("UPDATE memories_v19 SET updated_at=? WHERE content=?",
+                   ("2026-11-26T09:00:00+02:00", "Une montre est posée ici"))
+        db.execute("UPDATE memories_v19 SET updated_at=? WHERE content=?",
+                   ("2026-11-26T08:30:00Z", "Une montre est rangée là"))
+        recent = search_episodic_memories(db, "owner", "")
+        assert [item["content"] for item in recent] == [
+            "Une montre est rangée là", "Une montre est posée ici"]
+        matching = search_episodic_memories(db, "owner", "montre")
+        assert [item["content"] for item in matching] == [
+            "Une montre est rangée là", "Une montre est posée ici"]
+    finally:
+        db.close()

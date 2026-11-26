@@ -735,3 +735,79 @@ def test_empty_interrupted_live_turn_discards_assistant_and_audio_only():
         "audio": [],
         "audio_chars": 0,
     }
+
+
+def test_live_audio_transcription_retrieves_query_relevant_shared_memory(
+    monkeypatch, tmp_path
+):
+    """A spoken Live question retrieves older shared visual memories before turn completion."""
+    import server
+
+    database_path = tmp_path / "live-audio-query-memory.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    monkeypatch.setattr(server, "GEMINI_API_KEY", "test-only-provider-key")
+    server.init_db()
+
+    unique_memory = "souvenir du cristal nebulaire bleu"
+    with server.db_connection() as db:
+        for index in range(12):
+            observation = record_observation_for_test(
+                server, db, "creator", "vision",
+                unique_memory if index == 0 else f"observation visuelle ordinaire numero {index}",
+                "test_visual_memory",
+            )
+            # Make the unique memory older than the eight-item initial snapshot.
+            db.execute(
+                "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+                (f"2025-01-{index + 1:02d}T00:00:00+00:00", observation["observation_id"]),
+            )
+        db.commit()
+        initial = get_shared_brain_snapshot_for_test(server, db, "creator", limit=8)
+        assert unique_memory not in json.dumps(initial, ensure_ascii=False)
+
+    provider = FakeGeminiLiveSocket(
+        user_text="Te souviens-tu du cristal nebulaire ?",
+        assistant_text="bonjour",
+    )
+
+    @asynccontextmanager
+    async def fake_connection(websocket):
+        yield provider
+
+    monkeypatch.setattr(server, "supervised_gemini_connection", fake_connection)
+    fake_client = FakeClientWebSocket([
+        {"action": "audio_chunk", "pcm_data": "AQID"},
+    ])
+    ticket = server.live_ws_tickets.issue("creator")
+    asyncio.run(server.websocket_endpoint(fake_client, ticket=ticket))
+
+    audio_index = next(
+        index for index, payload in enumerate(provider.sent)
+        if isinstance(payload.get("realtimeInput"), dict)
+        and isinstance(payload["realtimeInput"].get("audio"), dict)
+    )
+    query_refreshes = [
+        payload for payload in provider.sent[audio_index + 1:]
+        if isinstance(payload.get("clientContent"), dict)
+    ]
+    assert query_refreshes, "La transcription audio doit déclencher un rappel mémoire ciblé."
+    refreshed_context = json.dumps(query_refreshes[0], ensure_ascii=False)
+    assert unique_memory in refreshed_context
+    assert "MISE À JOUR DU CERVEAU PARTAGÉ" in refreshed_context
+    assert any(item.get("type") == "turn_complete" for item in fake_client.sent)
+
+
+def record_observation_for_test(server, db, user_id, modality, content, source):
+    return server.record_observation(
+        db, user_id, modality, content, source, confidence=0.7,
+        metadata={"test_fixture": True},
+    )
+
+
+def get_shared_brain_snapshot_for_test(server, db, user_id, limit):
+    return server.get_shared_brain_snapshot(db, user_id, limit=limit)

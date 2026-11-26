@@ -186,9 +186,9 @@ def main():
                 need(report["encrypted"] and report["verified_after_packaging"],"Encrypted archive verification failed.")
                 need(report["table_count"]==len(tables) and report["total_rows"]==total,"Backup counts mismatch.")
                 with zipfile.ZipFile(archive) as z:
-                    need(set(z.namelist())=={"chappie-turso.json.enc","chappie-turso.json.enc.sha256"},"Unexpected archive members.")
+                    need(set(z.namelist())=={"chappie-turso-backup.json.enc","chappie-turso-backup.json.enc.sha256"},"Unexpected archive members.")
                     z.extractall(root/"unpacked")
-                enc=root/"unpacked"/"chappie-turso.json.enc"
+                enc=root/"unpacked"/"chappie-turso-backup.json.enc"
                 need(verify_encrypted_logical_backup(enc,key).get("valid") is True,"Independent archive verification failed.")
 
                 # A valid restore must refuse a populated database without

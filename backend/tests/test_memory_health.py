@@ -18,10 +18,18 @@ def make_db():
         CREATE TABLE memories_v19 (id INTEGER, user_id TEXT, content TEXT);
         CREATE TABLE autobiographical_events (id INTEGER, user_id TEXT, content TEXT);
         CREATE TABLE autobiographical_links (id INTEGER, user_id TEXT);
+        CREATE TABLE conversation_finalization_outbox (
+            id INTEGER, user_id TEXT, through_conversation_id INTEGER,
+            status TEXT, attempts INTEGER, last_error TEXT
+        );
         INSERT INTO conversations VALUES (1, 'creator', 'user', 'private text', 't1');
         INSERT INTO conversations VALUES (2, 'other', 'user', 'other text', 't1');
         INSERT INTO memories_v19 VALUES (1, 'creator', 'remembered');
         INSERT INTO autobiographical_events VALUES (1, 'creator', 'episode');
+        INSERT INTO conversation_finalization_outbox
+            VALUES (1, 'creator', 12, 'pending', 1, 'private error detail');
+        INSERT INTO conversation_finalization_outbox
+            VALUES (2, 'other', 14, 'completed', 2, '');
     """)
     return db
 
@@ -35,6 +43,9 @@ def test_memory_health_reports_active_backend_and_user_scoped_counts():
     assert report["conversation_rows"] == 1
     assert report["episodic_memory_rows"] == 1
     assert report["autobiographical_event_rows"] == 1
+    assert report["pending_finalization_jobs"] == 1
+    assert report["failed_finalization_jobs"] == 1
+    assert "private error detail" not in repr(report)
     assert "private text" not in repr(report)
     assert "other text" not in repr(report)
     db.close()
@@ -52,6 +63,7 @@ def test_memory_health_reports_missing_tables_without_writing():
     ).fetchall()
     assert report["schema_ready"] is False
     assert "memories_v19" in report["missing_tables"]
+    assert "conversation_finalization_outbox" in report["missing_tables"]
     assert before == after
     db.close()
 

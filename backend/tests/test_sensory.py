@@ -205,3 +205,27 @@ def test_visual_association_rejects_non_text_word_without_writing(db, invalid_wo
             "Validation explicite du mot"
         )
     assert db.execute("SELECT COUNT(*) FROM word_visual_associations").fetchone()[0] == 0
+
+
+def test_list_observations_orders_mixed_timezone_timestamps_by_instant(db):
+    audio = record_observation(
+        db, "creator", "audio", "Son récent", "microphone"
+    )
+    vision = record_observation(
+        db, "creator", "vision", "Image légèrement plus ancienne", "camera"
+    )
+    db.execute(
+        "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+        ("2026-11-26T10:01:00+00:00", audio["observation_id"]),
+    )
+    db.execute(
+        "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+        ("2026-11-26T12:00:00+02:00", vision["observation_id"]),
+    )
+
+    observations = list_observations(db, "creator")
+
+    assert [item["observation_id"] for item in observations] == [
+        audio["observation_id"],
+        vision["observation_id"],
+    ]

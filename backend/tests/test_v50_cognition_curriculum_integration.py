@@ -84,3 +84,25 @@ def test_reasoning_development_and_curriculum_share_libsql():
         assert stats["passed_tests"] == 1
     finally:
         db.close()
+
+
+def test_competency_test_history_orders_mixed_timezone_instants():
+    native = libsql.connect(database=":memory:")
+    db = adapt_libsql_connection(native)
+    try:
+        init_learning_tables(db)
+        db.executemany(
+            """INSERT INTO competency_tests
+               (user_id, test_name, passed, score, details, tested_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [
+                ("owner", "older", 1, 80, "{}", "2026-11-26T09:00:00+02:00"),
+                ("owner", "newer", 1, 90, "{}", "2026-11-26T08:30:00Z"),
+            ],
+        )
+        from learning.curriculum import get_competency_test_history
+
+        history = get_competency_test_history(db, "owner")
+        assert [item["test_name"] for item in history] == ["newer", "older"]
+    finally:
+        db.close()

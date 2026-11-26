@@ -12,7 +12,6 @@ MEMORY_TABLES = (
     "memories_v19",
     "autobiographical_events",
     "autobiographical_links",
-    "conversation_finalization_outbox",
 )
 
 
@@ -46,7 +45,7 @@ def inspect_memory_persistence(connection: Any, user_id: str, backend: str) -> d
 
     pending_finalization_jobs = None
     failed_finalization_jobs = None
-    if tables["conversation_finalization_outbox"]["exists"]:
+    if "conversation_finalization_outbox" in existing:
         finalization_row = connection.execute(
             """SELECT COUNT(*),
                       COALESCE(SUM(CASE WHEN attempts > 0 THEN 1 ELSE 0 END), 0)

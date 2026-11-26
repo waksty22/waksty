@@ -255,7 +255,7 @@ def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, A
         """SELECT e.id, e.properties_json
            FROM world_entities e
            WHERE e.user_id=? AND e.entity_type='object'
-           ORDER BY e.last_observed_at DESC""",
+           ORDER BY COALESCE(julianday(e.last_observed_at), -1.0) DESC, e.id DESC""",
         (user_id,),
     ).fetchall()
     result = []
@@ -277,7 +277,7 @@ def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, A
             """SELECT action, outcome, evidence, source_type, confidence,
                       autobiographical_event_id, created_at
                FROM object_experiences WHERE user_id=? AND object_id=?
-               ORDER BY created_at DESC LIMIT 20""",
+               ORDER BY COALESCE(julianday(created_at), -1.0) DESC, id DESC LIMIT 20""",
             (user_id, entity["id"]),
         ).fetchall()
         result.append({

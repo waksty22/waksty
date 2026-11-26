@@ -265,7 +265,12 @@ def record_place_observation(
         (user_id,),
     ).fetchall():
         similarity = _signature_similarity(signature, str(candidate["visual_signature"] or ""))
-        if lat is not None and candidate["latitude"] is not None and candidate["longitude"] is not None:
+        candidate_has_location = (
+            candidate["latitude"] is not None and candidate["longitude"] is not None
+        )
+        incoming_has_location = lat is not None
+        spatially_comparable = candidate_has_location == incoming_has_location
+        if incoming_has_location and candidate_has_location:
             distance = _distance_meters(
                 lat, lon, float(candidate["latitude"]), float(candidate["longitude"])
             )
@@ -275,6 +280,7 @@ def record_place_observation(
             best_match = {
                 "place_id": candidate["place_id"],
                 "similarity": similarity,
+                "spatially_comparable": spatially_comparable,
                 "identity_status": candidate["identity_status"],
                 "description": candidate["description"],
                 "observations_count": candidate["observations_count"],
@@ -285,7 +291,7 @@ def record_place_observation(
             }
 
     now = _now()
-    if best_match and best_match["identity_status"] != "confirmed":
+    if best_match and best_match["identity_status"] != "confirmed" and best_match["spatially_comparable"]:
         # Consolidate repeated observations into one unconfirmed candidate.
         # Similarity never confirms a place identity by itself.
         existing_description = str(best_match["description"] or "")

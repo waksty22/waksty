@@ -113,6 +113,29 @@ def test_replayed_fusion_reports_original_persisted_time_delta(db):
     assert replay[0]["time_delta_seconds"] == 42.125
 
 
+def test_temporal_fusion_compares_instants_across_timezone_offsets(db):
+    audio, vision = make_audio_and_vision(db)
+    # These values describe instants one minute apart, despite different
+    # textual offsets. Lexicographic ISO comparison incorrectly excludes audio.
+    db.execute(
+        "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+        ("2026-11-26T10:01:00+00:00", audio["observation_id"]),
+    )
+    db.execute(
+        "UPDATE sensory_observations SET created_at=? WHERE observation_id=?",
+        ("2026-11-26T12:00:00+02:00", vision["observation_id"]),
+    )
+
+    result = link_temporally_cooccurring_observation(
+        db, "creator", vision["observation_id"], window_seconds=120
+    )
+
+    assert len(result) == 1
+    assert result[0]["audio_observation_id"] == audio["observation_id"]
+    assert result[0]["vision_observation_id"] == vision["observation_id"]
+    assert result[0]["time_delta_seconds"] == 60.0
+
+
 def test_temporal_fusion_never_links_observations_across_users(db):
     record_observation(
         db, "alice", "audio", "Son privé.", "microphone"

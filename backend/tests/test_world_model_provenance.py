@@ -71,3 +71,58 @@ def test_world_relations_remain_user_scoped():
         "SELECT COUNT(*) FROM world_relations WHERE user_id='bob'"
     ).fetchone()[0] == 0
     db.close()
+
+
+def test_world_entity_search_orders_by_absolute_timestamp():
+    from world.world_model import search_world_entities
+
+    db = make_db()
+    upsert_world_entity(
+        db, "creator", "object:first", "object", {"label": "clock"},
+        source_type="observed", confidence=0.5,
+    )
+    upsert_world_entity(
+        db, "creator", "object:second", "object", {"label": "clock"},
+        source_type="observed", confidence=0.5,
+    )
+    db.execute(
+        "UPDATE world_entities SET last_observed_at=? WHERE id=?",
+        ("2026-11-26T09:00:00+02:00", "object:first"),
+    )
+    db.execute(
+        "UPDATE world_entities SET last_observed_at=? WHERE id=?",
+        ("2026-11-26T08:30:00Z", "object:second"),
+    )
+    results = search_world_entities(db, "creator", "clock")
+    assert [item["id"] for item in results] == ["object:second", "object:first"]
+    db.close()
+
+
+def test_entity_relations_order_by_absolute_timestamp():
+    from world.world_model import get_entity_relations
+
+    db = make_db()
+    for entity_id in ("person:creator", "place:home", "place:work"):
+        upsert_world_entity(
+            db, "creator", entity_id, "place", {"label": entity_id},
+            source_type="taught", confidence=0.8,
+        )
+    add_world_relation(
+        db, "creator", "person:creator", "lives_at", "place:home",
+        relation_type="lives_at", source_type="observed", confidence=0.7,
+    )
+    add_world_relation(
+        db, "creator", "person:creator", "works_at", "place:work",
+        relation_type="works_at", source_type="observed", confidence=0.7,
+    )
+    db.execute(
+        "UPDATE world_relations SET updated_at=? WHERE predicate=?",
+        ("2026-11-26T09:00:00+02:00", "lives_at"),
+    )
+    db.execute(
+        "UPDATE world_relations SET updated_at=? WHERE predicate=?",
+        ("2026-11-26T08:30:00Z", "works_at"),
+    )
+    results = get_entity_relations(db, "creator", "person:creator")
+    assert [item["predicate"] for item in results] == ["works_at", "lives_at"]
+    db.close()

@@ -3,12 +3,26 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime, timezone
 from typing import Any
 
 from cognition.catalog import COGNITIVE_CATALOG
 
 MIN_EVIDENCE_LENGTH = 20
 MAX_EVIDENCE_LENGTH = 2000
+
+
+def _timestamp_instant(value: str) -> datetime | None:
+    """Parse a stored ISO timestamp as an absolute UTC instant."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def normalize_evidence_text(value: str) -> str:
@@ -107,8 +121,11 @@ def build_validated_skill_data(
         if existing is None:
             evidence_map[evidence_key] = candidate
         else:
-            existing_date = existing["tested_at"]
-            if tested_at and (not existing_date or tested_at < existing_date):
+            existing_instant = _timestamp_instant(existing["tested_at"])
+            candidate_instant = _timestamp_instant(tested_at)
+            if candidate_instant is not None and (
+                existing_instant is None or candidate_instant < existing_instant
+            ):
                 evidence_map[evidence_key] = candidate
 
     engine_data: dict[str, Any] = {}

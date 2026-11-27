@@ -260,10 +260,15 @@ def test_object_experience_links_only_to_exact_persisted_autobiographical_source
 def test_object_experience_ignores_matching_episode_with_invalid_source(object_api_db):
     source = "J'ai poussé la pomme et elle est tombée."
     timestamp = "2026-11-27T14:00:00Z"
-    object_api_db.execute(
+    object_api_db.executemany(
         """INSERT INTO conversations (id, user_id, role, content, created_at)
-           VALUES (101, 'creator', 'user', ?, ?)""",
-        (source, timestamp),
+           VALUES (?, 'creator', 'user', ?, ?)""",
+        [
+            (101, source, timestamp),
+            # Existing source row, but its content no longer matches the
+            # copied autobiographical episode.
+            (999, "Contenu source différent.", timestamp),
+        ],
     )
     object_api_db.executemany(
         """

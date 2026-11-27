@@ -242,6 +242,9 @@ def test_comparison_returns_provenance_and_confidence_for_each_value(db):
     assert details["banane"][0]["value"] == "jaune"
     assert details["banane"][0]["source_type"] == "observed"
     assert details["banane"][0]["confidence"] == 0.6
+    listed = next(item for item in list_known_objects(db, "creator")
+                  if item["word"] == "pomme")
+    assert listed["property_conflicts"] == {}
 
 
 def test_confirmed_world_entity_cannot_be_overwritten_by_higher_confidence_observation(db):
@@ -626,3 +629,52 @@ def test_known_objects_are_ordered_by_absolute_observation_time(db):
                ("2026-11-26T08:30:00Z", "object:banane"))
     assert [item["word"] for item in list_known_objects(db, "creator")] == [
         "banane", "pomme"]
+
+def test_multiple_values_for_one_object_property_are_flagged_as_conflicting(db):
+    add_recognized_object(db, "pomme")
+    first = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Première information enseignée.",
+    )
+    second = teach_object_property(
+        db, "creator", "pomme", "couleur", "verte",
+        evidence="Deuxième information enseignée.",
+    )
+
+    listed = next(item for item in list_known_objects(db, "creator")
+                  if item["word"] == "pomme")
+    colors = [item for item in listed["properties"]
+              if item["property_key"] == "couleur"]
+
+    assert {item["property_value"] for item in colors} == {"rouge", "verte"}
+    assert listed["property_conflicts"] == {"couleur": ["rouge", "verte"]}
+    # The conflict is surfaced, not silently resolved or deleted.
+    assert db.execute(
+        "SELECT COUNT(*) FROM object_properties WHERE user_id='creator' "
+        "AND object_id='object:pomme' AND property_key='couleur'"
+    ).fetchone()[0] == 2
+
+
+def test_object_comparison_surfaces_unresolved_property_conflicts(db):
+    add_recognized_object(db, "pomme")
+    add_recognized_object(db, "banane")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    teach_object_property(db, "creator", "pomme", "couleur", "verte")
+    teach_object_property(db, "creator", "banane", "couleur", "jaune")
+
+    result = compare_known_objects(db, "creator", "pomme", "banane")
+
+    assert result["property_conflicts"] == {
+        "pomme": {"couleur": ["rouge", "verte"]},
+        "banane": {},
+    }
+    assert "conflit non résolu" in result["warning"]
+
+def test_repeated_identical_object_property_is_not_a_conflict(db):
+    add_recognized_object(db, "pomme")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+
+    listed = next(item for item in list_known_objects(db, "creator")
+                  if item["word"] == "pomme")
+    assert listed["property_conflicts"] == {}

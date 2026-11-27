@@ -364,10 +364,22 @@ def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, A
                ORDER BY COALESCE(julianday(created_at), -1.0) DESC, id DESC LIMIT 20""",
             (user_id, entity["id"]),
         ).fetchall()
+        property_values: dict[str, set[str]] = {}
+        for row in properties:
+            property_values.setdefault(row["property_key"], set()).add(
+                row["property_value"]
+            )
+        property_conflicts = {
+            key: sorted(values)
+            for key, values in property_values.items()
+            if len(values) > 1
+        }
+        property_details = [dict(row) for row in properties]
         result.append({
             "word": word,
             "vocabulary_state": vocab["state"],
-            "properties": [dict(row) for row in properties],
+            "properties": property_details,
+            "property_conflicts": property_conflicts,
             "experiences": [dict(row) for row in experiences],
         })
     return result
@@ -418,14 +430,25 @@ def compare_known_objects(
                 first_word: only_a,
                 second_word: only_b,
             }
+    property_conflicts = {
+        first_word: {
+            key: sorted(values) for key, values in first_values.items()
+            if len(values) > 1
+        },
+        second_word: {
+            key: sorted(values) for key, values in second_values.items()
+            if len(values) > 1
+        },
+    }
     return {
         "first": first_word,
         "second": second_word,
         "shared_properties": shared,
         "differences": differences,
         "property_details": property_details,
+        "property_conflicts": property_conflicts,
         "compared_property_count": len(set(first_values) | set(second_values)),
-        "warning": "Une propriété absente signifie inconnue, pas opposée.",
+        "warning": "Une propriété absente signifie inconnue, pas opposée. Plusieurs valeurs pour une même propriété signalent un conflit non résolu.",
     }
 
 

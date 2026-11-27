@@ -334,6 +334,16 @@ def test_autobiographical_list_orders_mixed_timezone_events_by_instant():
         "UPDATE autobiographical_events SET happened_at=? WHERE id=2",
         ("2026-11-26T12:00:00+02:00",),
     )
+    db.execute(
+        """
+        UPDATE conversations
+        SET created_at=(
+            SELECT happened_at FROM autobiographical_events
+            WHERE source_conversation_id=conversations.id
+        )
+        WHERE user_id='creator'
+        """
+    )
     results = list_autobiographical_events(db, "creator")
     assert [item["id"] for item in results] == [1, 2]
     db.close()
@@ -350,6 +360,16 @@ def test_autobiographical_search_uses_absolute_time_for_equal_relevance():
     db.execute(
         "UPDATE autobiographical_events SET happened_at=? WHERE id=2",
         ("2026-11-26T12:00:00+02:00",),
+    )
+    db.execute(
+        """
+        UPDATE conversations
+        SET created_at=(
+            SELECT happened_at FROM autobiographical_events
+            WHERE source_conversation_id=conversations.id
+        )
+        WHERE user_id='creator'
+        """
     )
     results = search_autobiographical_events(db, "creator", "vélo rouge")
     assert [item["id"] for item in results] == [1, 2]
@@ -374,6 +394,16 @@ def test_autobiographical_timeline_pagination_follows_chronological_cursor():
         ("2026-11-26T10:00:00+00:00",),
     )
 
+    db.execute(
+        """
+        UPDATE conversations
+        SET created_at=(
+            SELECT happened_at FROM autobiographical_events
+            WHERE source_conversation_id=conversations.id
+        )
+        WHERE user_id='creator'
+        """
+    )
     first_page = list_autobiographical_events(db, "creator", limit=2)
     second_page = list_autobiographical_events(
         db, "creator", limit=2, before_id=first_page[-1]["id"]

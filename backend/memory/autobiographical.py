@@ -69,6 +69,37 @@ def _is_valid_autobiographical_event(item: dict[str, Any]) -> bool:
     )
 
 
+
+def _source_matches_event(
+    db: sqlite3.Connection, user_id: str, item: dict[str, Any]
+) -> bool:
+    """Verify that a copied episode still matches its same-user source message."""
+    table = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'"
+    ).fetchone()
+    # Lightweight unit callers may exercise this module without the source table.
+    if table is None:
+        return True
+    source = db.execute(
+        """
+        SELECT user_id, role, content, created_at
+        FROM conversations
+        WHERE id=?
+        """,
+        (item.get("source_conversation_id"),),
+    ).fetchone()
+    if source is None:
+        return False
+    content = source["content"]
+    return (
+        source["user_id"] == user_id
+        and source["role"] == item.get("actor")
+        and isinstance(content, str)
+        and content.strip()[:8000] == item.get("content")
+        and source["created_at"] == item.get("happened_at")
+    )
+
+
 def init_autobiographical_tables(db: sqlite3.Connection) -> None:
     db.executescript("""
         CREATE TABLE IF NOT EXISTS autobiographical_events (
@@ -314,7 +345,11 @@ def list_autobiographical_events(
         """,
         params,
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [
+        item for row in rows
+        if _is_valid_autobiographical_event(item := dict(row))
+        and _source_matches_event(db, user_id, item)
+    ]
 
 
 def _normalize_search_text(value: str) -> str:
@@ -412,6 +447,8 @@ def search_autobiographical_events(
             present = len(matched_tokens)
             if not present:
                 continue
+            if not _source_matches_event(db, user_id, item):
+                continue
             coverage = present / max(1, len(set(tokens)))
             phrase_bonus = 0.35 if normalized_query and normalized_query in normalized_content else 0.0
             importance = max(1, min(5, int(item.get("importance") or 1)))
@@ -470,7 +507,10 @@ def search_autobiographical_events(
         ).fetchall()
         for row in linked:
             item = dict(row)
-            if not _is_valid_autobiographical_event(item):
+            if (
+                not _is_valid_autobiographical_event(item)
+                or not _source_matches_event(db, user_id, item)
+            ):
                 continue
             if int(item["id"]) in selected_ids:
                 continue
@@ -520,7 +560,11 @@ def find_related_autobiographical_events(
         """,
         (user_id, event_id),
     ).fetchone()
-    if source is None or not _is_valid_autobiographical_event(dict(source)):
+    if (
+        source is None
+        or not _is_valid_autobiographical_event(dict(source))
+        or not _source_matches_event(db, user_id, dict(source))
+    ):
         return []
 
     def terms(value: str) -> set[str]:
@@ -571,6 +615,8 @@ def find_related_autobiographical_events(
             common = sorted(source_terms & candidate_terms)
             # Require at least two meaningful shared terms to reduce weak matches.
             if len(common) < 2:
+                continue
+            if not _source_matches_event(db, user_id, item):
                 continue
             union = source_terms | candidate_terms
             score = len(common) / max(1, len(union))

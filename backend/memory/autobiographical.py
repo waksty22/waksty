@@ -435,10 +435,7 @@ def search_autobiographical_events(
             break
         for row in rows:
             item = dict(row)
-            if (
-                not _is_valid_autobiographical_event(item)
-                or not _source_matches_event(db, user_id, item)
-            ):
+            if not _is_valid_autobiographical_event(item):
                 continue
             normalized_content = _normalize_search_text(item["content"])
             content_tokens = set(normalized_content.split())
@@ -449,6 +446,8 @@ def search_autobiographical_events(
             matched_tokens = set(tokens) & content_tokens
             present = len(matched_tokens)
             if not present:
+                continue
+            if not _source_matches_event(db, user_id, item):
                 continue
             coverage = present / max(1, len(set(tokens)))
             phrase_bonus = 0.35 if normalized_query and normalized_query in normalized_content else 0.0
@@ -610,15 +609,14 @@ def find_related_autobiographical_events(
             break
         for row in rows:
             item = dict(row)
-            if (
-                not _is_valid_autobiographical_event(item)
-                or not _source_matches_event(db, user_id, item)
-            ):
+            if not _is_valid_autobiographical_event(item):
                 continue
             candidate_terms = terms(item["content"])
             common = sorted(source_terms & candidate_terms)
             # Require at least two meaningful shared terms to reduce weak matches.
             if len(common) < 2:
+                continue
+            if not _source_matches_event(db, user_id, item):
                 continue
             union = source_terms | candidate_terms
             score = len(common) / max(1, len(union))

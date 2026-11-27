@@ -3369,33 +3369,63 @@ def build_world_model_context(
             )
             fusion_rows = _merge_query_matches(fusion_rows, fusion_matches, "id")
 
-        if "object_properties" in available_tables:
-            # Conflict counts cover the complete user-scoped property set,
-            # even when the prompt includes only a bounded recent/matching row window.
-            property_keys = {
+        if "object_properties" in available_tables and property_rows:
+            # Aggregate all represented object/property pairs in one indexed
+            # query. This avoids two round trips per pair on the small Render
+            # instance while still counting the complete user-scoped history.
+            property_keys = sorted({
                 (str(row["object_id"]), str(row["property_key"]))
                 for row in property_rows
-            }
-            for object_id, property_key in property_keys:
-                count = db.execute(
-                    """SELECT COUNT(DISTINCT property_value)
-                       FROM object_properties
-                       WHERE user_id=? AND object_id=? AND property_key=?""",
-                    (user_id, object_id, property_key),
-                ).fetchone()[0]
-                if count > 1:
-                    values = db.execute(
-                        """SELECT DISTINCT property_value
-                           FROM object_properties
-                           WHERE user_id=? AND object_id=? AND property_key=?
-                           ORDER BY property_value LIMIT 20""",
-                        (user_id, object_id, property_key),
-                    ).fetchall()
-                    property_conflict_metadata[(object_id, property_key)] = {
-                        "count": int(count),
-                        "values": [str(value[0])[:500] for value in values],
-                        "truncated": int(count) > len(values),
-                    }
+            })
+            requested_pairs = ", ".join("(?, ?)" for _ in property_keys)
+            parameters = [
+                value for pair in property_keys for value in pair
+            ]
+            parameters.append(user_id)
+            conflict_rows = db.execute(
+                f"""
+                WITH requested(object_id, property_key) AS (
+                    VALUES {requested_pairs}
+                ),
+                distinct_values AS (
+                    SELECT DISTINCT property.object_id,
+                           property.property_key, property.property_value
+                    FROM object_properties AS property
+                    JOIN requested
+                      ON requested.object_id=property.object_id
+                     AND requested.property_key=property.property_key
+                    WHERE property.user_id=?
+                ),
+                ranked_values AS (
+                    SELECT object_id, property_key, property_value,
+                           COUNT(*) OVER (
+                               PARTITION BY object_id, property_key
+                           ) AS value_count,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY object_id, property_key
+                               ORDER BY property_value
+                           ) AS value_rank
+                    FROM distinct_values
+                )
+                SELECT object_id, property_key, property_value,
+                       value_count, value_rank
+                FROM ranked_values
+                WHERE value_count > 1 AND value_rank <= 20
+                ORDER BY object_id, property_key, value_rank
+                """,
+                parameters,
+            ).fetchall()
+            for conflict in conflict_rows:
+                key = (str(conflict["object_id"]), str(conflict["property_key"]))
+                metadata = property_conflict_metadata.setdefault(
+                    key,
+                    {
+                        "count": int(conflict["value_count"]),
+                        "values": [],
+                        "truncated": int(conflict["value_count"]) > 20,
+                    },
+                )
+                metadata["values"].append(str(conflict["property_value"])[:500])
 
     for row in entity_rows:
         item = dict(row)

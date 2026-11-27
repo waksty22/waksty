@@ -7,6 +7,7 @@ from memory.autobiographical import (
     init_autobiographical_tables,
     search_autobiographical_events,
     find_related_autobiographical_events,
+    list_autobiographical_events,
 )
 
 
@@ -41,11 +42,30 @@ def test_autobiographical_recall_skips_malformed_persisted_candidates():
         (sqlite3.Binary(b"broken-importance"),),
     )
     db.commit()
+    db.execute(
+        """INSERT INTO autobiographical_events
+           (user_id, source_conversation_id, actor, event_type, content,
+            happened_at, importance, created_at)
+           VALUES ('creator', 4, 'user', 'user_statement',
+                   'Horloge mécanique avec date corrompue',
+                   '2026-11-28T10:00:00Z', 3, '2026-11-28T10:00:00Z')"""
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events
+           (user_id, source_conversation_id, actor, event_type, content,
+            happened_at, importance, created_at)
+           VALUES ('creator', 5, 'user', 'user_statement',
+                   'Souvenir valide à conserver',
+                   '2026-11-27T12:00:00Z', 3, '2026-11-27T12:00:00Z')"""
+    )
+    db.commit()
 
     recalled = search_autobiographical_events(
         db, "creator", "horloge mécanique", limit=5
     )
     assert [item["id"] for item in recalled] == [1]
+    listed = list_autobiographical_events(db, "creator", limit=1)
+    assert [item["id"] for item in listed] == [5]
     assert find_related_autobiographical_events(
         db, "creator", event_id=1, limit=5
     ) == []

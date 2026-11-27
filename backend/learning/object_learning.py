@@ -435,14 +435,25 @@ def compare_known_objects(
                 first_word: only_a,
                 second_word: only_b,
             }
+    property_conflicts = {
+        first_word: {
+            key: sorted(values) for key, values in first_values.items()
+            if len(values) > 1
+        },
+        second_word: {
+            key: sorted(values) for key, values in second_values.items()
+            if len(values) > 1
+        },
+    }
     return {
         "first": first_word,
         "second": second_word,
         "shared_properties": shared,
         "differences": differences,
         "property_details": property_details,
+        "property_conflicts": property_conflicts,
         "compared_property_count": len(set(first_values) | set(second_values)),
-        "warning": "Une propriété absente signifie inconnue, pas opposée.",
+        "warning": "Une propriété absente signifie inconnue, pas opposée. Plusieurs valeurs pour une même propriété signalent un conflit non résolu.",
     }
 
 

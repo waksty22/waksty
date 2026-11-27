@@ -70,6 +70,24 @@ def init_object_learning_tables(db: sqlite3.Connection) -> None:
             "ADD COLUMN autobiographical_event_id INTEGER"
         )
 
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS object_property_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            object_id TEXT NOT NULL,
+            property_key TEXT NOT NULL,
+            previous_value TEXT NOT NULL,
+            corrected_value TEXT NOT NULL,
+            previous_source_type TEXT NOT NULL,
+            previous_confidence REAL NOT NULL,
+            previous_evidence TEXT NOT NULL,
+            correction_evidence TEXT NOT NULL,
+            corrected_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_object_property_history_owner
+        ON object_property_history(user_id, object_id, property_key, id DESC);
+    """)
+
 
 def _clean(value: Any, label: str, maximum: int) -> str:
     if not isinstance(value, str):
@@ -201,6 +219,72 @@ def teach_object_property(
         (user_id, object_id, key, value),
     ).fetchone()
     return {"word": word, **dict(row)}
+
+
+
+def correct_object_property(
+    db: sqlite3.Connection,
+    user_id: str,
+    word: str,
+    property_key: str,
+    previous_value: str,
+    corrected_value: str,
+    evidence: str,
+) -> dict[str, Any]:
+    """Correct one learned object property while retaining its prior evidence."""
+    word, object_id = _require_known_object(db, user_id, word)
+    key = _clean(property_key, "Propriété", 40).casefold()
+    if key not in ALLOWED_PROPERTY_KEYS:
+        raise ValueError("Type de propriété non autorisé.")
+    previous = _clean(previous_value, "Ancienne valeur", MAX_VALUE_LENGTH)
+    corrected = _clean(corrected_value, "Nouvelle valeur", MAX_VALUE_LENGTH)
+    if previous == corrected:
+        raise ValueError("La nouvelle valeur doit être différente de l'ancienne.")
+    evidence = _clean_optional_evidence(evidence)
+    if not evidence:
+        raise ValueError("Une preuve explicite du Créateur est obligatoire pour corriger cette propriété.")
+
+    row = db.execute(
+        """SELECT id, source_type, confidence, evidence
+           FROM object_properties
+           WHERE user_id=? AND object_id=? AND property_key=? AND property_value=?""",
+        (user_id, object_id, key, previous),
+    ).fetchone()
+    if row is None:
+        raise ValueError("La propriété à corriger est introuvable pour cet utilisateur.")
+    duplicate = db.execute(
+        """SELECT 1 FROM object_properties
+           WHERE user_id=? AND object_id=? AND property_key=? AND property_value=?""",
+        (user_id, object_id, key, corrected),
+    ).fetchone()
+    if duplicate is not None:
+        raise ValueError("La nouvelle valeur existe déjà pour cette propriété.")
+
+    now = utc_now()
+    history = db.execute(
+        """INSERT INTO object_property_history
+           (user_id, object_id, property_key, previous_value, corrected_value,
+            previous_source_type, previous_confidence, previous_evidence,
+            correction_evidence, corrected_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, object_id, key, previous, corrected, row["source_type"],
+         row["confidence"], row["evidence"], evidence, now),
+    )
+    updated = db.execute(
+        """UPDATE object_properties
+           SET property_value=?, source_type='confirmed', confidence=1.0,
+               evidence=?, updated_at=?
+           WHERE id=? AND user_id=?""",
+        (corrected, evidence, now, row["id"], user_id),
+    )
+    if updated.rowcount != 1:
+        raise RuntimeError("La correction de propriété n'a pas pu être vérifiée.")
+    return {
+        "word": word, "property_key": key, "previous_value": previous,
+        "property_value": corrected, "source_type": "confirmed",
+        "confidence": 1.0, "history_id": history.lastrowid,
+        "history_preserved": True,
+    }
 
 
 def confirm_object_property(

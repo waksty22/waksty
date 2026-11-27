@@ -13,6 +13,7 @@ from learning.object_learning import (
     init_object_learning_tables,
     teach_object_property,
     confirm_object_property,
+    correct_object_property,
     list_known_objects,
     compare_known_objects,
     record_object_experience,
@@ -53,13 +54,19 @@ def validate_visual_association(db, word):
     )
 
 
-def add_recognized_object(db, word):
-    record_heard_word(db, "creator", word)
-    advance_word(db, "creator", word, "imitated")
-    advance_word(db, "creator", word, "recognized")
-    validate_visual_association(db, word)
+def add_recognized_object(db, word, user_id="creator"):
+    record_heard_word(db, user_id, word)
+    advance_word(db, user_id, word, "imitated")
+    advance_word(db, user_id, word, "recognized")
+    observation = record_observation(
+        db, user_id, "vision", f"image de {word}", "camera_frame", 0.9
+    )
+    associate_word_with_observation(
+        db, user_id, word, observation["observation_id"],
+        "Association visuelle explicitement validée",
+    )
     upsert_world_entity(
-        db, "creator", "object:" + word, "object",
+        db, user_id, "object:" + word, "object",
         {"label": word}, source_type="taught", confidence=0.65,
     )
 
@@ -386,6 +393,93 @@ def test_owner_can_confirm_only_an_existing_object_property(db):
     )
     assert later_teaching["source_type"] == "confirmed"
     assert later_teaching["evidence"] == "Vérification explicite du Créateur."
+
+
+def test_creator_correction_preserves_old_object_property_evidence(db):
+    add_recognized_object(db, "pomme")
+    original = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Première leçon du Créateur.", confidence=0.8,
+    )
+
+    corrected = correct_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        "jaune", "Correction explicite du Créateur après vérification.",
+    )
+
+    assert corrected["previous_value"] == "rouge"
+    assert corrected["property_value"] == "jaune"
+    assert corrected["source_type"] == "confirmed"
+    assert corrected["confidence"] == 1.0
+    assert corrected["history_preserved"] is True
+
+    current = db.execute(
+        """SELECT property_value, source_type, confidence, evidence
+           FROM object_properties WHERE id=?""",
+        (db.execute("SELECT id FROM object_properties WHERE user_id='creator'").fetchone()[0],),
+    ).fetchone()
+    assert current["property_value"] == "jaune"
+    assert current["source_type"] == "confirmed"
+    history = db.execute(
+        """SELECT previous_value, corrected_value, previous_source_type,
+                  previous_confidence, previous_evidence, correction_evidence
+           FROM object_property_history WHERE id=?""",
+        (corrected["history_id"],),
+    ).fetchone()
+    assert dict(history) == {
+        "previous_value": "rouge",
+        "corrected_value": "jaune",
+        "previous_source_type": "taught",
+        "previous_confidence": 0.8,
+        "previous_evidence": "Première leçon du Créateur.",
+        "correction_evidence": "Correction explicite du Créateur après vérification.",
+    }
+
+
+def test_object_property_correction_is_user_scoped_and_requires_existing_value(db):
+    add_recognized_object(db, "poire")
+    teach_object_property(db, "creator", "poire", "couleur", "rouge")
+    # The global world-entity ID belongs to the Creator; another user must
+    # not gain access to that user's learned property through shared vocabulary
+    # or a visual association of their own.
+    record_heard_word(db, "other", "poire")
+    advance_word(db, "other", "poire", "imitated")
+    advance_word(db, "other", "poire", "recognized")
+    observation = record_observation(
+        db, "other", "vision", "image de poire", "camera_frame", 0.9
+    )
+    associate_word_with_observation(
+        db, "other", "poire", observation["observation_id"],
+        "Association visuelle validée",
+    )
+    with pytest.raises(ValueError, match="valide son association visuelle"):
+        correct_object_property(
+            db, "other", "poire", "couleur", "rouge", "jaune", "preuve",
+        )
+    with pytest.raises(ValueError, match="introuvable"):
+        correct_object_property(
+            db, "creator", "poire", "couleur", "bleue", "jaune", "preuve",
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_property_history").fetchone()[0] == 0
+
+
+def test_object_property_correction_rejects_empty_or_duplicate_values(db):
+    add_recognized_object(db, "pomme")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    teach_object_property(db, "creator", "pomme", "couleur", "jaune")
+    with pytest.raises(ValueError):
+        correct_object_property(
+            db, "creator", "pomme", "couleur", "rouge", "rouge", "preuve",
+        )
+    with pytest.raises(ValueError, match="existe déjà"):
+        correct_object_property(
+            db, "creator", "pomme", "couleur", "rouge", "jaune", "preuve",
+        )
+    with pytest.raises(ValueError, match="preuve explicite"):
+        correct_object_property(
+            db, "creator", "pomme", "couleur", "rouge", "verte", "",
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_property_history").fetchone()[0] == 0
 
 
 def test_owner_cannot_confirm_missing_property_or_without_evidence(db):

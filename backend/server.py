@@ -205,6 +205,35 @@ def _resolve_db_path() -> Path:
 
 DB_PATH = _resolve_db_path()
 
+
+def _storage_runtime_snapshot() -> dict[str, Any]:
+    """Return non-secret facts about the database selected by this process."""
+    try:
+        settings = StorageSettings.from_env()
+        backend = settings.backend
+        sqlite_path_under_render_data = (
+            backend == "sqlite"
+            and DB_PATH.resolve().is_relative_to(Path("/var/data"))
+        )
+        credentials_configured = bool(
+            settings.turso_database_url and settings.turso_auth_token
+        )
+        return {
+            "diagnostic_available": True,
+            "active_backend": backend,
+            "configuration_valid": backend == "sqlite" or credentials_configured,
+            "turso_credentials_configured": credentials_configured,
+            "sqlite_path_under_render_data_mount": sqlite_path_under_render_data,
+            "turso_backup_endpoint_matches_active_backend": backend == "turso",
+        }
+    except Exception as exc:
+        # Diagnostics must never prevent the application from reporting its
+        # original startup error. Do not expose exception text or secrets.
+        return {
+            "diagnostic_available": False,
+            "error_type": type(exc).__name__,
+        }
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv(
     "GEMINI_MODEL", "gemini-3.6-flash"
@@ -1177,6 +1206,7 @@ async def require_auth(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     startup_started = time.monotonic()
+    log.info("[STORAGE] Runtime selection: %s", _storage_runtime_snapshot())
     log.info(
         "%s runtime phase=before_init_db %s",
         CHAPPIE_VERSION,
@@ -4831,24 +4861,8 @@ async def api_storage_status(auth=Depends(require_auth)):
             detail="Diagnostic réservé au Créateur.",
         )
 
-    settings = StorageSettings.from_env()
-    backend = settings.backend
-    sqlite_path_under_render_data = (
-        backend == "sqlite"
-        and DB_PATH.resolve().is_relative_to(Path("/var/data"))
-    )
-    configuration_valid = (
-        backend == "sqlite"
-        or bool(settings.turso_database_url and settings.turso_auth_token)
-    )
     return {
-        "active_backend": backend,
-        "configuration_valid": configuration_valid,
-        "turso_credentials_configured": bool(
-            settings.turso_database_url and settings.turso_auth_token
-        ),
-        "sqlite_path_under_render_data_mount": sqlite_path_under_render_data,
-        "turso_backup_endpoint_matches_active_backend": backend == "turso",
+        **_storage_runtime_snapshot(),
         "backup_endpoint": "/api/turso/backup",
         "read_only": True,
         "secrets_exposed": False,

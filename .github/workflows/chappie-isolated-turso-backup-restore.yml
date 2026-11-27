@@ -55,6 +55,7 @@ jobs:
 
   isolated-turso-backup-restore:
     name: encrypted-backup-restore-on-isolated-db
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

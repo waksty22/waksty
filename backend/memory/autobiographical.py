@@ -136,6 +136,7 @@ def sync_autobiographical_events(
             validated_ids.append(
                 _validated_integer(conversation_id, "Identifiant de conversation")
             )
+        validated_ids = list(dict.fromkeys(validated_ids))
         if validated_ids:
             source_filter = " AND c.id IN (" + ",".join("?" for _ in validated_ids) + ")"
             params.extend(dict.fromkeys(validated_ids))

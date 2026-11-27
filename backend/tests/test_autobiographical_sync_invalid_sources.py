@@ -164,3 +164,44 @@ def test_targeted_sync_links_only_newly_indexed_dialogue_replies():
     ).fetchall()
     assert [tuple(row) for row in links] == [(1, 2), (3, 4)]
     db.close()
+
+
+
+def test_targeted_sync_deduplicates_conversation_ids_before_sql_binding():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    db.executemany(
+        "INSERT INTO conversations VALUES (?, 'creator', ?, ?, ?)",
+        [
+            (1, "user", "Nouveau message utilisateur", "2026-11-27T10:00:00Z"),
+            (2, "assistant", "Réponse associée", "2026-11-27T10:00:00Z"),
+        ],
+    )
+    db.commit()
+
+    result = sync_autobiographical_events(
+        db, "creator", conversation_ids=[1, 1, 2, 2], include_counts=False
+    )
+
+    assert result == {"inserted": 2}
+    links = db.execute(
+        """
+        SELECT u.source_conversation_id, a.source_conversation_id
+        FROM autobiographical_links l
+        JOIN autobiographical_events u ON u.id=l.source_event_id
+        JOIN autobiographical_events a ON a.id=l.target_event_id
+        WHERE l.user_id='creator'
+        """
+    ).fetchall()
+    assert [tuple(row) for row in links] == [(1, 2)]
+    db.close()

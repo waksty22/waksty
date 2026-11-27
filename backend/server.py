@@ -3864,16 +3864,16 @@ def execute_tool(
                 word, action, outcome, user_source_text
             )):
                 raise ValueError("L'objet, l'action, le résultat et le message source sont obligatoires.")
-            source = re.sub(r"\\s+", " ", user_source_text).strip()
+            source = re.sub(r"\s+", " ", user_source_text).strip()
             uncertain_or_negative = re.compile(
-                r"\\b(?:ne\\s+(?:l'ai|l'avons|l'a)\\s+pas|"
-                r"je\\s+(?:pense|crois)|peut[- ]être|probablement|"
+                r"\b(?:ne\s+(?:l'ai|l'avons|l'a)\s+pas|"
+                r"je\s+(?:pense|crois)|peut[- ]être|probablement|"
                 r"il semble|elle semble|pas sûr|pas certain|"
                 r"pas certaine|j'imagine|j'imaginais)\\b",
                 re.IGNORECASE,
             )
             past_action = re.compile(
-                r"\\b(?:j'ai|nous avons|on a|je viens de|nous venons de)\\b",
+                r"\b(?:j'ai|nous avons|on a|je viens de|nous venons de)\\b",
                 re.IGNORECASE,
             )
             if (

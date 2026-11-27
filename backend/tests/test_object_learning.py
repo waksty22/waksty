@@ -55,13 +55,13 @@ def test_world_context_batches_conflicts_without_cross_user_mixing(db, monkeypat
 
     add_recognized_object(db, "balle")
     add_recognized_object(db, "pomme")
-    add_recognized_object(db, "balle", user_id="other")
+    add_recognized_object(db, "balle-autre", user_id="other")
     teach_object_property(db, "creator", "balle", "couleur", "rouge")
     teach_object_property(db, "creator", "balle", "couleur", "bleue")
     teach_object_property(db, "creator", "pomme", "forme", "ronde")
     teach_object_property(db, "creator", "pomme", "forme", "ovale")
-    teach_object_property(db, "other", "balle", "couleur", "jaune")
-    teach_object_property(db, "other", "balle", "couleur", "verte")
+    teach_object_property(db, "other", "balle-autre", "couleur", "jaune")
+    teach_object_property(db, "other", "balle-autre", "couleur", "verte")
     monkeypatch.setattr(server, "db_connection", lambda: db)
 
     context = server.build_world_model_context("creator")
@@ -81,6 +81,7 @@ def test_world_context_batches_conflicts_without_cross_user_mixing(db, monkeypat
     assert {item["value"] for item in shapes} == {"ronde", "ovale"}
     assert all(item["conflicting_values"] == ["ovale", "ronde"] for item in shapes)
     assert all(item["conflicting_value_count"] == 2 for item in shapes)
+    assert "object:balle-autre" not in context
 
 
 def test_world_context_marks_conflicting_object_properties_for_chat_and_live(db, monkeypatch):

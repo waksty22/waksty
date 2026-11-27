@@ -25,6 +25,31 @@ from world.world_model import init_world_tables, upsert_world_entity, add_world_
 from cognition.shared_brain import get_shared_brain_snapshot
 
 
+def test_world_context_counts_conflicts_beyond_bounded_recent_rows(db, monkeypatch):
+    import server
+
+    add_recognized_object(db, "balle")
+    for index in range(45):
+        teach_object_property(
+            db, "creator", "balle", "couleur", f"valeur-{index:02d}",
+            evidence=f"Information enseignée {index}.",
+        )
+    monkeypatch.setattr(server, "db_connection", lambda: db)
+
+    context = server.build_world_model_context("creator")
+    payload = json.loads(context.splitlines()[1])
+    colors = [
+        item for item in payload["object_properties"]
+        if item["object"] == "object:balle" and item["property"] == "couleur"
+    ]
+
+    assert colors
+    assert all(item["conflict"] is True for item in colors)
+    assert all(item["conflicting_value_count"] == 45 for item in colors)
+    assert all(len(item["conflicting_values"]) == 20 for item in colors)
+    assert all(item["conflicting_values_truncated"] is True for item in colors)
+
+
 def test_world_context_marks_conflicting_object_properties_for_chat_and_live(db, monkeypatch):
     import json
     import server

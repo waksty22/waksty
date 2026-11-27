@@ -400,23 +400,33 @@ def search_autobiographical_events(
     # Add the paired Chappie reply for a matching user statement, but only via
     # the explicit same-dialogue-turn relation stored at ingestion time.
     selected_ids = {int(item["id"]) for item in selected}
-    user_event_ids = [
-        int(item["id"]) for item in selected if item.get("actor") == "user"
-    ]
-    if user_event_ids and len(selected) < limit:
-        placeholders = ",".join("?" for _ in user_event_ids)
+    # Preserve the response paired with the strongest matching user episode.
+    # A full result page must not silently discard dialogue context: reserve a
+    # slot by evicting the lowest-ranked *other* episode only when necessary.
+    preferred_user_event = next(
+        (
+            item for item in selected
+            if item.get("actor") == "user"
+            and isinstance(item.get("id"), int)
+            and not isinstance(item.get("id"), bool)
+        ),
+        None,
+    )
+    if preferred_user_event is not None and limit > 1:
+        source_event_id = int(preferred_user_event["id"])
         linked = db.execute(
-            f"""
+            """
             SELECT a.id, a.source_conversation_id, a.actor, a.event_type,
                    a.content, a.happened_at, a.importance
             FROM autobiographical_links l
             JOIN autobiographical_events a
               ON a.id=l.target_event_id AND a.user_id=l.user_id
             WHERE l.user_id=? AND l.relation_type='same_dialogue_turn'
-              AND l.source_event_id IN ({placeholders})
+              AND l.source_event_id=?
             ORDER BY a.id DESC
+            LIMIT 1
             """,
-            [user_id, *user_event_ids],
+            (user_id, source_event_id),
         ).fetchall()
         for row in linked:
             item = dict(row)
@@ -427,10 +437,22 @@ def search_autobiographical_events(
             item["relevance_score"] = 0.0
             item["matched_terms"] = []
             item["dialogue_context"] = True
+            if len(selected) >= limit:
+                # The preferred source is first among ranked results; never
+                # evict it. Keep the highest-ranked context within the bound.
+                evict_index = next(
+                    (
+                        index for index in range(len(selected) - 1, -1, -1)
+                        if int(selected[index].get("id") or 0) != source_event_id
+                    ),
+                    None,
+                )
+                if evict_index is None:
+                    break
+                selected.pop(evict_index)
             selected.append(item)
             selected_ids.add(int(item["id"]))
-            if len(selected) >= limit:
-                break
+            break
     return selected
 
 

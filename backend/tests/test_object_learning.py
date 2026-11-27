@@ -649,3 +649,17 @@ def test_known_objects_are_ordered_by_absolute_observation_time(db):
         "SELECT COUNT(*) FROM object_properties WHERE user_id='creator' "
         "AND object_id='object:pomme' AND property_key='couleur'"
     ).fetchone()[0] == 2
+\n\ndef test_object_comparison_surfaces_unresolved_property_conflicts(db):
+    add_recognized_object(db, "pomme")
+    add_recognized_object(db, "banane")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    teach_object_property(db, "creator", "pomme", "couleur", "verte")
+    teach_object_property(db, "creator", "banane", "couleur", "jaune")
+
+    result = compare_known_objects(db, "creator", "pomme", "banane")
+
+    assert result["property_conflicts"] == {
+        "pomme": {"couleur": ["rouge", "verte"]},
+        "banane": {},
+    }
+    assert "conflit non résolu" in result["warning"]

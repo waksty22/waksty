@@ -9,7 +9,10 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 import server
-from memory.conversation_outbox import (\n    enqueue_conversation_finalization,\n    list_pending_conversation_finalizations,\n)
+from memory.conversation_outbox import (
+    enqueue_conversation_finalization,
+    list_pending_conversation_finalizations,
+)
 
 
 def test_outbox_retry_after_summary_commit_does_not_duplicate_summary(

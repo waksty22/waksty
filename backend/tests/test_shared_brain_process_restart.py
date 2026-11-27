@@ -81,3 +81,77 @@ db.close()
     assert second.returncode == 0, second.stdout + second.stderr
     assert '"visual_associations": 1' in second.stdout
     assert '"fusion_candidates": 1' in second.stdout
+
+
+def test_autobiographical_memory_survives_independent_process_restart(tmp_path):
+    """The durable autobiographical journal remains searchable after a new process."""
+    database = tmp_path / "chappie-autobiographical.sqlite3"
+    writer = r'''
+import sqlite3, sys
+from memory.autobiographical import init_autobiographical_tables, sync_autobiographical_events
+
+db = sqlite3.connect(sys.argv[1])
+db.row_factory = sqlite3.Row
+db.execute("PRAGMA foreign_keys=ON")
+db.execute("""
+    CREATE TABLE conversations (
+        id INTEGER PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+""")
+init_autobiographical_tables(db)
+stamp = "2026-11-27T10:00:00+00:00"
+db.executemany(
+    "INSERT INTO conversations(id,user_id,role,content,created_at) VALUES (?,?,?,?,?)",
+    [
+        (1, "creator", "user", "J'ai acheté un vélo rouge pour aller au travail.", stamp),
+        (2, "creator", "assistant", "Je note cette information pour plus tard.", stamp),
+    ],
+)
+result = sync_autobiographical_events(db, "creator")
+assert result["inserted"] == 2, result
+assert result["dialogue_links"] == 1, result
+db.close()
+'''
+    first = _run_python(writer, database)
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    reader = r'''
+import json, sqlite3, sys
+from memory.autobiographical import (
+    autobiographical_statistics,
+    list_autobiographical_events,
+    search_autobiographical_events,
+)
+
+db = sqlite3.connect(sys.argv[1])
+db.row_factory = sqlite3.Row
+stats = autobiographical_statistics(db, "creator")
+assert stats == {
+    "total_events": 2,
+    "user_events": 1,
+    "chappie_events": 1,
+    "dialogue_links": 1,
+}, stats
+events = list_autobiographical_events(db, "creator", limit=10)
+assert {item["source_conversation_id"] for item in events} == {1, 2}
+results = search_autobiographical_events(db, "creator", "vélo rouge", limit=5)
+assert [item["id"] for item in results] == [1, 2], results
+assert results[0]["dialogue_context"] is False
+assert results[1]["dialogue_context"] is True
+print(json.dumps({
+    "events": stats["total_events"],
+    "dialogue_links": stats["dialogue_links"],
+    "search_results": len(results),
+    "assistant_context": results[1]["dialogue_context"],
+}))
+db.close()
+'''
+    second = _run_python(reader, database)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert '"events": 2' in second.stdout
+    assert '"dialogue_links": 1' in second.stdout
+    assert '"assistant_context": true' in second.stdout

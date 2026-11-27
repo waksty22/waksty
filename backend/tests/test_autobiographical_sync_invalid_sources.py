@@ -25,7 +25,8 @@ def test_invalid_early_conversations_do_not_starve_valid_autobiographical_sync()
             (1, "user", sqlite3.Binary(b"broken"), "2026-11-27T10:00:00Z"),
             (2, "user", "   ", "2026-11-27T10:01:00Z"),
             (3, "system", "Type non indexable", "2026-11-27T10:02:00Z"),
-            (4, "user", "Mon souvenir valide", "2026-11-27T10:03:00Z"),
+            (4, "user", "Horodatage impossible", "not-a-date"),
+            (5, "user", "Mon souvenir valide", "2026-11-27T10:03:00Z"),
         ],
     )
     db.commit()
@@ -37,6 +38,6 @@ def test_invalid_early_conversations_do_not_starve_valid_autobiographical_sync()
     row = db.execute(
         "SELECT source_conversation_id, content FROM autobiographical_events"
     ).fetchone()
-    assert tuple(row) == (4, "Mon souvenir valide")
+    assert tuple(row) == (5, "Mon souvenir valide")
     assert sync_autobiographical_events(db, "creator", limit=1)["inserted"] == 0
     db.close()

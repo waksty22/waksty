@@ -3869,11 +3869,11 @@ def execute_tool(
                 r"\b(?:ne\s+(?:l'ai|l'avons|l'a)\s+pas|"
                 r"je\s+(?:pense|crois)|peut[- ]être|probablement|"
                 r"il semble|elle semble|pas sûr|pas certain|"
-                r"pas certaine|j'imagine|j'imaginais)\\b",
+                r"pas certaine|j'imagine|j'imaginais)\b",
                 re.IGNORECASE,
             )
             past_action = re.compile(
-                r"\b(?:j'ai|nous avons|on a|je viens de|nous venons de)\\b",
+                r"\b(?:j'ai|nous avons|on a|je viens de|nous venons de)\b",
                 re.IGNORECASE,
             )
             if (

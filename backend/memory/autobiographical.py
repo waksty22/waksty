@@ -691,6 +691,7 @@ def find_related_autobiographical_events(
             ).fetchall()
         if not rows:
             break
+        page_candidates: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
             if not _is_valid_autobiographical_event(item):
@@ -699,8 +700,6 @@ def find_related_autobiographical_events(
             common = sorted(source_terms & candidate_terms)
             # Require at least two meaningful shared terms to reduce weak matches.
             if len(common) < 2:
-                continue
-            if not _source_matches_event(db, user_id, item):
                 continue
             union = source_terms | candidate_terms
             score = len(common) / max(1, len(union))
@@ -711,8 +710,17 @@ def find_related_autobiographical_events(
                 "Chevauchement lexical uniquement : identité, causalité et "
                 "équivalence entre expériences non confirmées."
             )
+            page_candidates.append(item)
+
+        # Batch provenance checks for lexical candidates in this history page.
+        valid_source_event_ids = _matching_autobiographical_source_event_ids(
+            db, user_id, page_candidates
+        )
+        for item in page_candidates:
+            if int(item["id"]) not in valid_source_event_ids:
+                continue
             rank = (
-                score,
+                item["lexical_similarity"],
                 _timestamp_sort_key(item.get("happened_at")),
                 int(item.get("id") or 0),
                 item,

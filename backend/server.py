@@ -3522,6 +3522,20 @@ TOOLS = [{
             },
         },
         {
+            "name": "correct_object_property",
+            "description": "Corriger une propriété déjà apprise d'un objet UNIQUEMENT lorsque le Créateur authentifié formule explicitement une correction dans son message actuel (ex. « Non, la poire est verte » ou « je me suis trompé, elle est jaune »). La nouvelle valeur et le mot de l'objet doivent apparaître littéralement dans ce message. Ne jamais appeler pour une hypothèse, une question, une observation incertaine ou un utilisateur autre que le Créateur. Fournir l'ancienne valeur réellement retrouvée dans le modèle du monde ; l'outil conserve son historique et marque la correction comme confirmée.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "word": {"type": "STRING"},
+                    "property": {"type": "STRING"},
+                    "previous_value": {"type": "STRING"},
+                    "value": {"type": "STRING"},
+                },
+                "required": ["word", "property", "previous_value", "value"],
+            },
+        },
+        {
             "name": "search_memories",
             "description": "Rechercher des souvenirs épisodiques de cet utilisateur. OBLIGATOIRE avant de répondre à une question vocale ou écrite sur une conversation passée, un fait personnel ou un événement qui n'est pas clairement présent dans le contexte courant. Les résultats sont des souvenirs sourcés, pas une preuve indépendante.",
             "parameters": {
@@ -3707,6 +3721,71 @@ def execute_tool(
                 user_id, content, category, importance,
                 source_type, confidence, tags,
             )
+
+        if name == "correct_object_property":
+            word = args.get("word", "")
+            property_key = args.get("property", "")
+            previous_value = args.get("previous_value", "")
+            corrected_value = args.get("value", "")
+            if user_id != CHAPPIE_OWNER_ID:
+                return {"corrected": False, "error": "Seul le Créateur authentifié peut corriger les connaissances de Chappie."}
+            if not all(isinstance(value, str) and value.strip() for value in (
+                word, property_key, previous_value, corrected_value, user_source_text
+            )):
+                raise ValueError("Les informations de correction sont incomplètes.")
+            source = re.sub(r"\\s+", " ", user_source_text).strip()
+            clauses = re.split(r"[.!?;\\n]+", source)
+            correction_intent = re.compile(
+                r"\\b(?:non|corrige(?:r)?|correction|je me suis tromp[ée]|"
+                r"en réalité|en fait|je rectifie|c'est plutôt|ce n'est pas)\\b",
+                re.IGNORECASE,
+            )
+            negative_intent = re.compile(
+                r"\\b(?:ne\\s+(?:corrige|change|modifie)\\s+pas|"
+                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction)\\b",
+                re.IGNORECASE,
+            )
+            grounded_clause = any(
+                correction_intent.search(clause)
+                and not negative_intent.search(clause)
+                and word.casefold() in clause.casefold()
+                and corrected_value.casefold() in clause.casefold()
+                for clause in clauses
+            )
+            if not grounded_clause:
+                return {
+                    "corrected": False,
+                    "error": "Correction refusée : le message actuel du Créateur doit contenir explicitement le mot de l'objet, la nouvelle valeur et une formulation de correction non ambiguë.",
+                }
+            evidence = source.strip()
+            if len(evidence) > 1000:
+                raise ValueError("Le message de correction est trop long pour être conservé comme preuve.")
+            with db_connection() as correction_db:
+                result = correct_object_property(
+                    correction_db, user_id, word, property_key,
+                    previous_value, corrected_value, evidence,
+                )
+                object_id = "object:" + result["word"]
+                entity = get_world_entity(correction_db, user_id, object_id) or {}
+                properties = dict(entity.get("properties") or {})
+                learned = dict(properties.get("learned_properties") or {})
+                values = list(learned.get(result["property_key"]) or [])
+                values = [value for value in values if value != result["previous_value"]]
+                if result["property_value"] not in values:
+                    values.append(result["property_value"])
+                learned[result["property_key"]] = values
+                properties["learned_properties"] = learned
+                upsert_world_entity(
+                    correction_db, user_id, object_id, "object", properties,
+                    source_type="confirmed", confidence=1.0,
+                )
+                correction_db.commit()
+            return {
+                "corrected": True,
+                "property": result,
+                "history_preserved": True,
+                "approval_basis": "explicit_authenticated_creator_message",
+            }
 
         if name == "search_memories":
             query = args.get("query", "")

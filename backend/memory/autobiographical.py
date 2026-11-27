@@ -59,6 +59,8 @@ def _is_valid_autobiographical_event(item: dict[str, Any]) -> bool:
         return False
     if not isinstance(item.get("happened_at"), str) or not item["happened_at"].strip():
         return False
+    if _timestamp_sort_key(item["happened_at"]) == float("-inf"):
+        return False
     importance = item.get("importance")
     return (
         isinstance(importance, int)
@@ -131,6 +133,7 @@ def sync_autobiographical_events(
           AND c.role IN ('user', 'assistant')
           AND typeof(c.content)='text' AND length(trim(c.content)) > 0
           AND typeof(c.created_at)='text' AND length(trim(c.created_at)) > 0
+          AND julianday(c.created_at) IS NOT NULL
         ORDER BY c.id ASC
         LIMIT ?
         """,

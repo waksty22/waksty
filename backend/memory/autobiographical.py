@@ -325,26 +325,26 @@ def search_autobiographical_events(
             break
         for row in rows:
             item = dict(row)
-        normalized_content = _normalize_search_text(item.get("content", ""))
-        content_tokens = set(normalized_content.split())
-        if not content_tokens:
-            continue
-        # Match complete normalized tokens only: substring matches can create
-        # false autobiographical recalls (e.g. "art" inside "partage").
-        matched_tokens = set(tokens) & content_tokens
-        present = len(matched_tokens)
-        if not present:
-            continue
-        coverage = present / max(1, len(set(tokens)))
-        phrase_bonus = 0.35 if normalized_query and normalized_query in normalized_content else 0.0
-        importance = max(1, min(5, int(item.get("importance") or 1)))
-        # Relevance dominates importance: an unrelated important episode cannot win.
-        score = coverage * 4.0 + phrase_bonus + importance * 0.04
-        item["relevance_score"] = round(score, 4)
-        item["matched_terms"] = [
-            token for token in dict.fromkeys(tokens) if token in content_tokens
-        ]
-        item["dialogue_context"] = False
+            normalized_content = _normalize_search_text(item.get("content", ""))
+            content_tokens = set(normalized_content.split())
+            if not content_tokens:
+                continue
+            # Match complete normalized tokens only: substring matches can create
+            # false autobiographical recalls (e.g. "art" inside "partage").
+            matched_tokens = set(tokens) & content_tokens
+            present = len(matched_tokens)
+            if not present:
+                continue
+            coverage = present / max(1, len(set(tokens)))
+            phrase_bonus = 0.35 if normalized_query and normalized_query in normalized_content else 0.0
+            importance = max(1, min(5, int(item.get("importance") or 1)))
+            # Relevance dominates importance: an unrelated important episode cannot win.
+            score = coverage * 4.0 + phrase_bonus + importance * 0.04
+            item["relevance_score"] = round(score, 4)
+            item["matched_terms"] = [
+                token for token in dict.fromkeys(tokens) if token in content_tokens
+            ]
+            item["dialogue_context"] = False
             rank = (
                 score,
                 importance,
@@ -463,20 +463,20 @@ def find_related_autobiographical_events(
             break
         for row in rows:
             item = dict(row)
-        candidate_terms = terms(item.get("content", ""))
-        common = sorted(source_terms & candidate_terms)
-        # Require at least two meaningful shared terms to reduce weak matches.
-        if len(common) < 2:
-            continue
-        union = source_terms | candidate_terms
-        score = len(common) / max(1, len(union))
-        item["shared_terms"] = common[:12]
-        item["lexical_similarity"] = round(score, 4)
-        item["relation_status"] = "candidate_only"
-        item["interpretation_warning"] = (
-            "Chevauchement lexical uniquement : identité, causalité et "
-            "équivalence entre expériences non confirmées."
-        )
+            candidate_terms = terms(item.get("content", ""))
+            common = sorted(source_terms & candidate_terms)
+            # Require at least two meaningful shared terms to reduce weak matches.
+            if len(common) < 2:
+                continue
+            union = source_terms | candidate_terms
+            score = len(common) / max(1, len(union))
+            item["shared_terms"] = common[:12]
+            item["lexical_similarity"] = round(score, 4)
+            item["relation_status"] = "candidate_only"
+            item["interpretation_warning"] = (
+                "Chevauchement lexical uniquement : identité, causalité et "
+                "équivalence entre expériences non confirmées."
+            )
             candidates.append(item)
         last_seen_id = int(rows[-1]["id"])
 

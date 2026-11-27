@@ -123,7 +123,18 @@ def test_targeted_sync_links_only_newly_indexed_dialogue_replies():
     )
     db.commit()
 
-    sync_autobiographical_events(db, "creator", conversation_ids=[3, 4])
+    traced_sql: list[str] = []
+    db.set_trace_callback(traced_sql.append)
+    targeted_result = sync_autobiographical_events(
+        db, "creator", conversation_ids=[3, 4], include_counts=False
+    )
+    db.set_trace_callback(None)
+    assert targeted_result == {"inserted": 0}
+    assert not any(
+        "COUNT(*)" in statement.upper()
+        and "AUTOBIOGRAPHICAL_" in statement.upper()
+        for statement in traced_sql
+    )
     links = db.execute(
         """
         SELECT u.source_conversation_id, a.source_conversation_id

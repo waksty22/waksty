@@ -510,7 +510,7 @@ def format_acquired_knowledge_context(
                 item, ensure_ascii=False, allow_nan=False,
                 separators=(",", ":"), sort_keys=True,
             )
-        except (TypeError, ValueError, OverflowError):
+        except (TypeError, ValueError, OverflowError, RecursionError):
             omitted = True
             continue
         line = "ENREGISTREMENT_JSON_NON_FIABLE: " + encoded

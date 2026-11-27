@@ -547,3 +547,13 @@ def test_query_retrieval_expands_latin_ligatures_consistently():
     assert any(item["source_id"] == 1 for item in coeur["items"])
     assert any(item["source_id"] == 2 for item in aether["items"])
     db.close()
+
+
+
+def test_context_omits_circular_json_records_without_crashing():
+    circular = {"kind": "memory", "source_id": 11}
+    circular["content"] = circular
+    context = format_acquired_knowledge_context({"items": [circular]})
+    assert "CONTEXTE PARTIEL" in context
+    assert "ENREGISTREMENT_JSON_NON_FIABLE:" not in context
+    assert context.endswith("présentée comme une connaissance acquise.")

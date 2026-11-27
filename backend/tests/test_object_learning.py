@@ -669,3 +669,12 @@ def test_object_comparison_surfaces_unresolved_property_conflicts(db):
         "banane": {},
     }
     assert "conflit non résolu" in result["warning"]
+
+def test_repeated_identical_object_property_is_not_a_conflict(db):
+    add_recognized_object(db, "pomme")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+
+    listed = next(item for item in list_known_objects(db, "creator")
+                  if item["word"] == "pomme")
+    assert listed["property_conflicts"] == {}

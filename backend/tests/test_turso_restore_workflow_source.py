@@ -21,7 +21,7 @@ def test_daily_backup_artifact_triggers_local_recovery_without_production_connec
         / "chappie-isolated-turso-backup-restore.yml"
     ).read_text(encoding="utf-8")
     recovery = (
-        root / "scripts" / "test_daily_encrypted_backup_recovery.py"
+        root / "backend" / "scripts" / "test_daily_encrypted_backup_recovery.py"
     ).read_text(encoding="utf-8")
 
     assert "workflow_run:" in workflow

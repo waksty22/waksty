@@ -433,6 +433,20 @@ def test_creator_correction_preserves_old_object_property_evidence(db):
 def test_object_property_correction_is_user_scoped_and_requires_existing_value(db):
     add_recognized_object(db, "pomme")
     teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    record_heard_word(db, "other", "pomme")
+    advance_word(db, "other", "pomme", "imitated")
+    advance_word(db, "other", "pomme", "recognized")
+    observation = record_observation(
+        db, "other", "vision", "image de pomme", "camera_frame", 0.9
+    )
+    associate_word_with_observation(
+        db, "other", "pomme", observation["observation_id"],
+        "Association visuelle validée",
+    )
+    upsert_world_entity(
+        db, "other", "object:pomme", "object",
+        {"label": "pomme"}, source_type="taught", confidence=0.65,
+    )
     with pytest.raises(ValueError, match="introuvable"):
         correct_object_property(
             db, "other", "pomme", "couleur", "rouge", "jaune", "preuve",

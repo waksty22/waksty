@@ -34,7 +34,8 @@ def _timestamp_sort_key(value: Any) -> float:
         return float("-inf")
 
 def _terms(value: str) -> list[str]:
-    normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+    folded = str(value or "").casefold().replace("œ", "oe").replace("æ", "ae")
+    normalized = unicodedata.normalize("NFKD", folded)
     normalized = "".join(c for c in normalized if not unicodedata.combining(c))
     return list(dict.fromkeys(
         token for token in re.findall(r"[a-z0-9]+", normalized)
@@ -76,6 +77,16 @@ def _folded_sql(column: str) -> str:
     ):
         expression = f"REPLACE({expression}, '{source}', '{target}')"
     expression = f"LOWER({expression})"
+    # Python NFKD removes combining marks. SQLite has no Unicode
+    # normalization, so strip the common Latin combining marks explicitly
+    # to keep SQL candidate matching consistent with the Python tokenizer.
+    for combining_mark in (
+        "\u0300", "\u0301", "\u0302", "\u0303",
+        "\u0304", "\u0306", "\u0307", "\u0308",
+        "\u030a", "\u030b", "\u030c", "\u0327",
+        "\u0328",
+    ):
+        expression = f"REPLACE({expression}, '{combining_mark}', '')"
     for source, target in (
         ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"), ("ã", "a"),
         ("ç", "c"), ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),

@@ -4821,6 +4821,40 @@ async def homepage():
 
     return HTMLResponse(index_file.read_text(encoding="utf-8"))
 
+@app.get("/api/storage/status")
+async def api_storage_status(auth=Depends(require_auth)):
+    """Expose safe, authenticated storage-selection diagnostics for the Creator."""
+    user_id = _authenticated_user(auth)
+    if user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(
+            status_code=403,
+            detail="Diagnostic réservé au Créateur.",
+        )
+
+    settings = StorageSettings.from_env()
+    backend = settings.backend
+    sqlite_path_under_render_data = (
+        backend == "sqlite"
+        and DB_PATH.resolve().is_relative_to(Path("/var/data"))
+    )
+    configuration_valid = (
+        backend == "sqlite"
+        or bool(settings.turso_database_url and settings.turso_auth_token)
+    )
+    return {
+        "active_backend": backend,
+        "configuration_valid": configuration_valid,
+        "turso_credentials_configured": bool(
+            settings.turso_database_url and settings.turso_auth_token
+        ),
+        "sqlite_path_under_render_data_mount": sqlite_path_under_render_data,
+        "turso_backup_endpoint_matches_active_backend": backend == "turso",
+        "backup_endpoint": "/api/turso/backup",
+        "read_only": True,
+        "secrets_exposed": False,
+    }
+
+
 @app.get("/health")
 async def health():
     # Liveness only: this endpoint confirms that the process is responding.

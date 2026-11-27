@@ -3896,9 +3896,20 @@ def execute_tool(
             if len(evidence) > 1000:
                 raise ValueError("La preuve de l'expérience dépasse 1000 caractères.")
             with db_connection() as experience_db:
+                # Index only already-persisted conversation messages, then link
+                # by exact user-scoped source text. No fuzzy or cross-user match.
+                sync_autobiographical_events(experience_db, user_id)
+                source_event = experience_db.execute(
+                    """SELECT id FROM autobiographical_events
+                       WHERE user_id=? AND actor='user' AND content=?
+                       ORDER BY id DESC LIMIT 1""",
+                    (user_id, source),
+                ).fetchone()
+                source_event_id = int(source_event["id"]) if source_event else None
                 result = record_object_experience(
                     experience_db, user_id, word, action, outcome,
                     evidence=evidence, confidence=0.9, source_type="taught",
+                    autobiographical_event_id=source_event_id,
                 )
                 experience_db.commit()
             return {

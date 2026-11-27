@@ -117,6 +117,18 @@ def _rows(
     query: str = "",
 ) -> list[dict[str, Any]]:
     try:
+        autobiographical_columns = (
+            {row["name"] for row in db.execute("PRAGMA table_info(autobiographical_events)").fetchall()}
+            if table == "autobiographical_events" else set()
+        )
+        source_conversation_filter = (
+            "AND typeof(source_conversation_id)='integer' AND source_conversation_id > 0 "
+            if "source_conversation_id" in autobiographical_columns else ""
+        )
+        actor_filter = (
+            "AND actor IN ('user', 'assistant') "
+            if "actor" in autobiographical_columns else ""
+        )
         # Query-aware retrieval keeps old words AND their linked visual
         # evidence in the same bounded snapshot consumed by Chat and Live.
         query_terms = _query_terms(query) if table in {
@@ -248,6 +260,13 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
+                    "AND typeof(id)='integer' AND id > 0 "
+                    f"{source_conversation_filter}"
+                    f"{actor_filter}"
+                    "AND typeof(event_type)='text' AND length(trim(event_type)) > 0 "
+                    "AND typeof(content)='text' AND length(trim(content)) > 0 "
+                    "AND typeof(happened_at)='text' AND julianday(happened_at) IS NOT NULL "
+                    "AND typeof(importance)='integer' AND importance BETWEEN 1 AND 5 "
                     f"ORDER BY ({relevance}) DESC, importance DESC, "
                     "COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT ?",
                     (user_id, *parameters, limit),
@@ -419,6 +438,25 @@ def _rows(
                 "AND consent_session.user_id=spatial_visits.user_id "
                 "AND consent_session.consented=1) "
                 f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "autobiographical_events":
+            # Keep the shared Chat/Live snapshot aligned with the dedicated
+            # autobiographical reader: corrupt journal rows must not re-enter
+            # model context through this alternate retrieval path.
+            rows = db.execute(
+                f"""SELECT * FROM autobiographical_events
+                   WHERE user_id=?
+                     AND typeof(id)='integer' AND id > 0
+                     {source_conversation_filter}
+                     {actor_filter}
+                     AND typeof(event_type)='text' AND length(trim(event_type)) > 0
+                     AND typeof(content)='text' AND length(trim(content)) > 0
+                     AND typeof(happened_at)='text'
+                         AND julianday(happened_at) IS NOT NULL
+                     AND typeof(importance)='integer'
+                         AND importance BETWEEN 1 AND 5
+                   ORDER BY id DESC LIMIT ?""",
                 (user_id, limit),
             ).fetchall()
         else:

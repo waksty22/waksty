@@ -6,6 +6,7 @@ Chaque entrée conserve son identifiant source dans la table conversations.
 """
 from __future__ import annotations
 
+import heapq
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -289,22 +290,41 @@ def search_autobiographical_events(
     if not tokens:
         return []
 
-    # Bound the candidate scan to recent source episodes for predictable cost.
-    rows = db.execute(
-        """
-        SELECT id, source_conversation_id, actor, event_type, content,
-               happened_at, importance
-        FROM autobiographical_events
-        WHERE user_id=?
-        ORDER BY id DESC
-        LIMIT 2000
-        """,
-        (user_id,),
-    ).fetchall()
-
-    ranked: list[tuple[float, dict[str, Any]]] = []
-    for row in rows:
-        item = dict(row)
+    # Scan the complete autobiographical history in bounded keyset pages.
+    # Keep only the best requested results in memory so recall remains usable
+    # for very long-lived users without loading the entire journal at once.
+    ranked: list[tuple[float, int, float, int, dict[str, Any]]] = []
+    page_size = 500
+    last_seen_id: int | None = None
+    while True:
+        if last_seen_id is None:
+            rows = db.execute(
+                """
+                SELECT id, source_conversation_id, actor, event_type, content,
+                       happened_at, importance
+                FROM autobiographical_events
+                WHERE user_id=?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, page_size),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT id, source_conversation_id, actor, event_type, content,
+                       happened_at, importance
+                FROM autobiographical_events
+                WHERE user_id=? AND id < ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, last_seen_id, page_size),
+            ).fetchall()
+        if not rows:
+            break
+        for row in rows:
+            item = dict(row)
         normalized_content = _normalize_search_text(item.get("content", ""))
         content_tokens = set(normalized_content.split())
         if not content_tokens:
@@ -325,19 +345,21 @@ def search_autobiographical_events(
             token for token in dict.fromkeys(tokens) if token in content_tokens
         ]
         item["dialogue_context"] = False
-        ranked.append((score, item))
+            rank = (
+                score,
+                importance,
+                _timestamp_sort_key(item.get("happened_at")),
+                int(item.get("id") or 0),
+                item,
+            )
+            if len(ranked) < limit:
+                heapq.heappush(ranked, rank)
+            elif rank[:4] > ranked[0][:4]:
+                heapq.heapreplace(ranked, rank)
+        last_seen_id = int(rows[-1]["id"])
 
-    ranked.sort(
-        key=lambda pair: (
-            pair[0],
-            int(pair[1].get("importance") or 1),
-            _timestamp_sort_key(pair[1].get("happened_at")),
-            int(pair[1].get("id") or 0),
-        ),
-        reverse=True,
-    )
-
-    selected = [item for _, item in ranked[:limit]]
+    ranked.sort(key=lambda rank: rank[:4], reverse=True)
+    selected = [rank[4] for rank in ranked]
     # Add the paired Chappie reply for a matching user statement, but only via
     # the explicit same-dialogue-turn relation stored at ingestion time.
     selected_ids = {int(item["id"]) for item in selected}
@@ -409,21 +431,38 @@ def find_related_autobiographical_events(
     if not source_terms:
         return []
 
-    rows = db.execute(
-        """
-        SELECT id, source_conversation_id, actor, event_type, content,
-               happened_at, importance
-        FROM autobiographical_events
-        WHERE user_id=? AND id<>?
-        ORDER BY id DESC
-        LIMIT 2000
-        """,
-        (user_id, event_id),
-    ).fetchall()
-
     candidates: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
+    page_size = 500
+    last_seen_id: int | None = None
+    while True:
+        if last_seen_id is None:
+            rows = db.execute(
+                """
+                SELECT id, source_conversation_id, actor, event_type, content,
+                       happened_at, importance
+                FROM autobiographical_events
+                WHERE user_id=? AND id<>?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, event_id, page_size),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT id, source_conversation_id, actor, event_type, content,
+                       happened_at, importance
+                FROM autobiographical_events
+                WHERE user_id=? AND id<>? AND id < ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, event_id, last_seen_id, page_size),
+            ).fetchall()
+        if not rows:
+            break
+        for row in rows:
+            item = dict(row)
         candidate_terms = terms(item.get("content", ""))
         common = sorted(source_terms & candidate_terms)
         # Require at least two meaningful shared terms to reduce weak matches.
@@ -438,7 +477,8 @@ def find_related_autobiographical_events(
             "Chevauchement lexical uniquement : identité, causalité et "
             "équivalence entre expériences non confirmées."
         )
-        candidates.append(item)
+            candidates.append(item)
+        last_seen_id = int(rows[-1]["id"])
 
     candidates.sort(
         key=lambda item: (

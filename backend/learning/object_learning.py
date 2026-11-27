@@ -375,11 +375,7 @@ def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, A
             for key, count in property_counts.items()
             if count > 1
         }
-        property_details = []
-        for row in properties:
-            item = dict(row)
-            item["conflicted"] = property_counts[item["property_key"]] > 1
-            property_details.append(item)
+        property_details = [dict(row) for row in properties]
         result.append({
             "word": word,
             "vocabulary_state": vocab["state"],

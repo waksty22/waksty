@@ -54,13 +54,19 @@ def validate_visual_association(db, word):
     )
 
 
-def add_recognized_object(db, word):
-    record_heard_word(db, "creator", word)
-    advance_word(db, "creator", word, "imitated")
-    advance_word(db, "creator", word, "recognized")
-    validate_visual_association(db, word)
+def add_recognized_object(db, word, user_id="creator"):
+    record_heard_word(db, user_id, word)
+    advance_word(db, user_id, word, "imitated")
+    advance_word(db, user_id, word, "recognized")
+    observation = record_observation(
+        db, user_id, "vision", f"image de {word}", "camera_frame", 0.9
+    )
+    associate_word_with_observation(
+        db, user_id, word, observation["observation_id"],
+        "Association visuelle explicitement validée",
+    )
     upsert_world_entity(
-        db, "creator", "object:" + word, "object",
+        db, user_id, "object:" + word, "object",
         {"label": word}, source_type="taught", confidence=0.65,
     )
 
@@ -433,20 +439,7 @@ def test_creator_correction_preserves_old_object_property_evidence(db):
 def test_object_property_correction_is_user_scoped_and_requires_existing_value(db):
     add_recognized_object(db, "poire")
     teach_object_property(db, "creator", "poire", "couleur", "rouge")
-    record_heard_word(db, "other", "poire")
-    advance_word(db, "other", "poire", "imitated")
-    advance_word(db, "other", "poire", "recognized")
-    observation = record_observation(
-        db, "other", "vision", "image de pomme", "camera_frame", 0.9
-    )
-    associate_word_with_observation(
-        db, "other", "poire", observation["observation_id"],
-        "Association visuelle validée",
-    )
-    upsert_world_entity(
-        db, "other", "object:poire", "object",
-        {"label": "poire"}, source_type="taught", confidence=0.65,
-    )
+    add_recognized_object(db, "poire", user_id="other")
     with pytest.raises(ValueError, match="introuvable"):
         correct_object_property(
             db, "other", "poire", "couleur", "rouge", "jaune", "preuve",

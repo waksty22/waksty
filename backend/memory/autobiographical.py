@@ -407,6 +407,8 @@ def search_autobiographical_events(
         ).fetchall()
         for row in linked:
             item = dict(row)
+            if not _is_valid_autobiographical_event(item):
+                continue
             if int(item["id"]) in selected_ids:
                 continue
             item["relevance_score"] = 0.0

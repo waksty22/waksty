@@ -552,11 +552,25 @@ def search_episodic_memories(
         matching_rows: list[dict[str, Any]] = []
 
         def matching_rank(item: dict[str, Any]) -> tuple[float, int, float, int, float]:
+            try:
+                importance = int(item.get("importance") or 0)
+            except (TypeError, ValueError, OverflowError):
+                importance = 0
+            try:
+                confidence = float(item.get("confidence") or 0.0)
+            except (TypeError, ValueError, OverflowError):
+                confidence = 0.0
+            try:
+                access_count = int(item.get("access_count") or 0)
+            except (TypeError, ValueError, OverflowError):
+                access_count = 0
+            if not math.isfinite(confidence):
+                confidence = 0.0
             return (
                 float(item.get("relevance_score") or 0.0),
-                int(item.get("importance") or 0),
-                float(item.get("confidence") or 0.0),
-                int(item.get("access_count") or 0),
+                importance,
+                confidence,
+                access_count,
                 _timestamp_sort_key(item.get("updated_at")),
             )
 

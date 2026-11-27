@@ -270,6 +270,7 @@ def retrieve_acquired_knowledge(
     def add_candidate(
         kind: str, source_id: int, content: str, status: str,
         source: str, timestamp: str, metadata: dict[str, Any] | None = None,
+        searchable_text: str | None = None,
     ) -> None:
         if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id < 1:
             return
@@ -278,7 +279,9 @@ def retrieve_acquired_knowledge(
         text = content.strip()
         if not text:
             return
-        terms = set(_terms(text))
+        # Validate against the same fields as SQL candidate matching.
+        searchable_value = searchable_text if isinstance(searchable_text, str) else text
+        terms = set(_terms(searchable_value))
         matched = len(query_terms & terms)
         if query_terms and matched == 0:
             return
@@ -326,6 +329,9 @@ def retrieve_acquired_knowledge(
             "memories_v19:" + source_type, timestamp,
             {"category": row["category"],
              "confidence": confidence},
+            searchable_text=" ".join(
+                str(row.get(column) or "") for column in ("category", "content")
+            ),
         )
 
     for row in experiences:
@@ -352,6 +358,10 @@ def retrieve_acquired_knowledge(
             row.get("happened_at"),
             {"event_type": event_type or "",
              "source_conversation_id": safe_conversation_id},
+            searchable_text=" ".join(
+                str(row.get(column) or "")
+                for column in ("actor", "event_type", "content")
+            ),
         )
 
     for row in assessments:
@@ -392,6 +402,10 @@ def retrieve_acquired_knowledge(
              "supervisor_approved": approved,
              "goal_id": details.get("goal_id"),
              "goal_step_id": details.get("goal_step_id")},
+            searchable_text=" ".join((
+                skill,
+                row.get("details") if isinstance(row.get("details"), str) else "",
+            )),
         )
 
     # Relevance is primary for a query. Without one, prefer verified sources,

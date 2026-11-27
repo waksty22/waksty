@@ -64,7 +64,7 @@ def list_pending_conversation_finalizations(
         where += " AND user_id=?"
         params.append(user_id.strip())
     if after_id is not None:
-        if isinstance(after_id, bool) or not isinstance(after_id, int) or after_id < 1:
+        if isinstance(after_id, bool) or not isinstance(after_id, int) or after_id < 0:
             raise ValueError("A valid outbox cursor is required")
         where += " AND id>?"
         params.append(after_id)

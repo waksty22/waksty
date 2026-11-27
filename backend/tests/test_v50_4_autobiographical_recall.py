@@ -284,7 +284,7 @@ def test_autobiographical_links_ignore_global_id_gaps_from_other_users():
     db.close()
 
 
-def test_autobiographical_links_still_reject_same_user_intervening_message():
+def test_autobiographical_links_reject_same_user_message_after_other_user_interleaving():
     db = make_db()
     timestamp = "2026-11-24T10:00:00+00:00"
     db.executemany(
@@ -316,7 +316,9 @@ def test_autobiographical_links_still_reject_same_user_intervening_message():
         for row in links
     ]
 
-    assert linked_sources == [(22, 23)]
+    # The previous message for creator is still a user message (id 20),
+    # even though another user's global conversation id is interleaved.
+    assert linked_sources == []
     db.close()
 
 

@@ -162,7 +162,7 @@ def list_perception_fusions(
         """SELECT id,audio_observation_id,vision_observation_id,
                   time_delta_seconds,status,evidence_json,created_at
            FROM perception_fusion_candidates
-           WHERE user_id=? ORDER BY created_at DESC LIMIT ?""",
+           WHERE user_id=? ORDER BY COALESCE(julianday(created_at), -1.0) DESC, id DESC LIMIT ?""",
         (user_id, limit),
     ).fetchall()
     result = []

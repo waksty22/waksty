@@ -244,7 +244,7 @@ def test_comparison_returns_provenance_and_confidence_for_each_value(db):
     assert details["banane"][0]["confidence"] == 0.6
     listed = next(item for item in list_known_objects(db, "creator")
                   if item["word"] == "pomme")
-    assert all(item["conflicted"] is False for item in listed["properties"])
+    assert listed["property_conflicts"] == {}
 
 
 def test_confirmed_world_entity_cannot_be_overwritten_by_higher_confidence_observation(db):
@@ -647,7 +647,6 @@ def test_multiple_values_for_one_object_property_are_flagged_as_conflicting(db):
               if item["property_key"] == "couleur"]
 
     assert {item["property_value"] for item in colors} == {"rouge", "verte"}
-    assert all(item["conflicted"] is True for item in colors)
     assert listed["property_conflicts"] == {"couleur": ["rouge", "verte"]}
     # The conflict is surfaced, not silently resolved or deleted.
     assert db.execute(

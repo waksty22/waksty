@@ -147,8 +147,11 @@ def test_targeted_sync_links_only_newly_indexed_dialogue_replies():
     ).fetchall()
     assert [tuple(row) for row in links] == [(3, 4)]
 
-    # A full historical backfill still discovers the older pair.
-    sync_autobiographical_events(db, "creator")
+    # A full historical backfill still discovers the older pair and
+    # retains the detailed statistics used by the API.
+    full_result = sync_autobiographical_events(db, "creator")
+    assert full_result["total_events"] == 4
+    assert full_result["dialogue_links"] == 2
     links = db.execute(
         """
         SELECT u.source_conversation_id, a.source_conversation_id

@@ -156,3 +156,46 @@ def test_vocabulary_api_can_progress_one_supervised_stage_at_a_time(language_api
 def test_vocabulary_api_rejects_non_boolean_approval():
     with pytest.raises(ValidationError):
         payload("coq", "imitated", supervisor_approved="true")
+
+
+def test_explicit_correction_api_requires_creator_approval_and_preserves_history(
+    language_api_db,
+):
+    from learning.language import record_explicit_word_teaching
+
+    record_explicit_word_teaching(
+        language_api_db, "creator",
+        "Le mot coq signifie un oiseau domestique.",
+    )
+
+    def correction(approved):
+        return server.VocabularyCorrectionRequest(
+            word="coq",
+            meaning="Un oiseau mâle de la famille des gallinacés.",
+            evidence="Le créateur corrige explicitement la définition après vérification.",
+            supervisor_approved=approved,
+        )
+
+    async def run():
+        with pytest.raises(HTTPException) as denied:
+            await server.api_correct_vocabulary(
+                correction(False), auth="creator"
+            )
+        assert denied.value.status_code == 403
+        result = await server.api_correct_vocabulary(
+            correction(True), auth="creator"
+        )
+        assert result["ok"] is True
+        assert result["word"]["history_preserved"] is True
+
+    asyncio.run(run())
+    current = language_api_db.execute(
+        "SELECT meaning, state FROM personal_vocabulary WHERE user_id='creator' AND word='coq'"
+    ).fetchone()
+    history = language_api_db.execute(
+        "SELECT previous_meaning, corrected_meaning FROM personal_vocabulary_history WHERE user_id='creator' AND word='coq'"
+    ).fetchone()
+    assert current["meaning"] == "Un oiseau mâle de la famille des gallinacés."
+    assert current["state"] == "heard"
+    assert history["previous_meaning"] == "un oiseau domestique"
+    assert history["corrected_meaning"] == current["meaning"]

@@ -117,6 +117,14 @@ def _rows(
     query: str = "",
 ) -> list[dict[str, Any]]:
     try:
+        autobiographical_columns = (
+            {row["name"] for row in db.execute("PRAGMA table_info(autobiographical_events)").fetchall()}
+            if table == "autobiographical_events" else set()
+        )
+        source_conversation_filter = (
+            "AND typeof(source_conversation_id)='integer' AND source_conversation_id > 0 "
+            if "source_conversation_id" in autobiographical_columns else ""
+        )
         # Query-aware retrieval keeps old words AND their linked visual
         # evidence in the same bounded snapshot consumed by Chat and Live.
         query_terms = _query_terms(query) if table in {
@@ -249,7 +257,7 @@ def _rows(
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
                     "AND typeof(id)='integer' AND id > 0 "
-                    "AND typeof(source_conversation_id)='integer' AND source_conversation_id > 0 "
+                    f"{source_conversation_filter}"
                     "AND actor IN ('user', 'assistant') "
                     "AND typeof(event_type)='text' AND length(trim(event_type)) > 0 "
                     "AND typeof(content)='text' AND length(trim(content)) > 0 "
@@ -436,8 +444,7 @@ def _rows(
                 """SELECT * FROM autobiographical_events
                    WHERE user_id=?
                      AND typeof(id)='integer' AND id > 0
-                     AND typeof(source_conversation_id)='integer'
-                         AND source_conversation_id > 0
+                     {source_conversation_filter}
                      AND actor IN ('user', 'assistant')
                      AND typeof(event_type)='text' AND length(trim(event_type)) > 0
                      AND typeof(content)='text' AND length(trim(content)) > 0

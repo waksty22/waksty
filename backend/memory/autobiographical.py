@@ -202,6 +202,7 @@ def sync_autobiographical_events(
           ON e.user_id=c.user_id
          AND e.source_conversation_id=c.id
         WHERE c.user_id=? AND e.id IS NULL
+          AND typeof(c.id)='integer' AND c.id > 0
           AND c.role IN ('user', 'assistant')
           AND typeof(c.content)='text' AND length(trim(c.content)) > 0
           AND typeof(c.created_at)='text' AND length(trim(c.created_at)) > 0

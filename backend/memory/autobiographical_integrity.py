@@ -82,26 +82,22 @@ def autobiographical_integrity_report(
         valid += 1
         indexed_source_ids.add(item["source_conversation_id"])
 
-    valid_source_ids: set[int] = set()
-    for source in sources:
-        source_id = source["id"]
-        content = source["content"]
-        if (
-            isinstance(source_id, bool)
-            or not isinstance(source_id, int)
-            or source_id < 1
-            or source["role"] not in {"user", "assistant"}
-            or not isinstance(content, str)
-            or not content.strip()
-            or not isinstance(source["created_at"], str)
-            or not source["created_at"].strip()
-        ):
-            continue
-        timestamp = db.execute(
-            "SELECT julianday(?) IS NOT NULL", (source["created_at"],)
-        ).fetchone()[0]
-        if timestamp:
-            valid_source_ids.add(source_id)
+    valid_source_ids = {
+        row["id"]
+        for row in db.execute(
+            """
+            SELECT id
+            FROM conversations
+            WHERE user_id=?
+              AND typeof(id)='integer' AND id > 0
+              AND role IN ('user', 'assistant')
+              AND typeof(content)='text' AND length(trim(content)) > 0
+              AND typeof(created_at)='text'
+              AND julianday(created_at) IS NOT NULL
+            """,
+            (user_id,),
+        ).fetchall()
+    }
 
     # A source is indexed only when a provenance-valid event was found above.
     # A malformed or mismatched event must not hide an otherwise valid source.

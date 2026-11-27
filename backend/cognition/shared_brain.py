@@ -235,9 +235,12 @@ def _rows(
             elif table == "autobiographical_events":
                 folded_content = _accent_folded_sql("content")
                 folded_type = _accent_folded_sql("event_type")
-                match = " OR ".join(
-                    f"INSTR({folded_content}, ?) > 0 OR "
-                    f"INSTR({folded_type}, ?) > 0"
+                # Prefer events that cover more of the user's query terms.
+                # A single common word must not outrank a precise multiword
+                # autobiographical match solely because it has higher importance.
+                relevance = " + ".join(
+                    f"(CASE WHEN INSTR({folded_content}, ?) > 0 OR "
+                    f"INSTR({folded_type}, ?) > 0 THEN 1 ELSE 0 END)"
                     for _ in query_terms
                 )
                 parameters = tuple(
@@ -245,8 +248,8 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
-                    f"ORDER BY CASE WHEN ({match}) THEN 0 ELSE 1 END, "
-                    f"importance DESC, COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT ?",
+                    f"ORDER BY ({relevance}) DESC, importance DESC, "
+                    "COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT ?",
                     (user_id, *parameters, limit),
                 ).fetchall()
             elif table == "place_memories":

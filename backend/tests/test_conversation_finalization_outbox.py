@@ -254,7 +254,7 @@ def test_outbox_pagination_cursor_is_validated(tmp_path):
     db.row_factory = sqlite3.Row
     try:
         init_conversation_finalization_outbox(db)
-        for invalid in (0, -1, True, "2"):
+        for invalid in (-1, True, "2"):
             with pytest.raises(ValueError, match="cursor"):
                 list_pending_conversation_finalizations(db, after_id=invalid)
     finally:

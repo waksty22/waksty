@@ -2600,7 +2600,9 @@ def finalize_conversation_turn(user_id: str) -> dict[str, int]:
             ).fetchone()[0])
             summary_row = db.execute(
                 """SELECT through_conversation_id FROM conversation_summaries
-                   WHERE user_id=? ORDER BY id DESC LIMIT 1""",
+                   WHERE user_id=?
+                   ORDER BY through_conversation_id DESC, id DESC
+                   LIMIT 1""",
                 (user_id,),
             ).fetchone()
             through = int(summary_row["through_conversation_id"]) if summary_row else 0

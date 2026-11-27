@@ -2531,6 +2531,7 @@ def save_conversation_turn(
             sync_autobiographical_events(
                 db, user_id, commit=False,
                 conversation_ids=source_conversation_ids,
+                include_counts=False,
             )
             through_id = int(db.execute(
                 "SELECT COALESCE(MAX(id), 0) FROM conversations WHERE user_id=?",

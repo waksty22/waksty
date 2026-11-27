@@ -218,3 +218,44 @@ def test_user_finalization_is_not_starved_by_other_users_pending_jobs(
         other_jobs = list_pending_conversation_finalizations(db, limit=500)
     assert creator_jobs == []
     assert len(other_jobs) == 500
+
+
+def test_startup_recovery_scans_all_pending_jobs_in_bounded_pages(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "outbox-startup-pagination.sqlite3"
+    _isolate_database(monkeypatch, database)
+    with server.db_connection() as db:
+        for index in range(501):
+            enqueue_conversation_finalization(db, "creator", index + 1)
+        db.commit()
+
+    monkeypatch.setattr(server, "valid_user", lambda user_id: user_id)
+    calls = []
+
+    def complete_page(user_id):
+        calls.append(user_id)
+        return {"pending": 0, "completed": 500 if len(calls) == 1 else 1}
+
+    monkeypatch.setattr(server, "finalize_conversation_turn", complete_page)
+    report = server.recover_pending_conversation_finalizations()
+
+    assert calls == ["creator", "creator"]
+    assert report == {
+        "users_checked": 1,
+        "jobs_completed": 501,
+        "jobs_still_pending": 0,
+    }
+
+
+def test_outbox_pagination_cursor_is_validated(tmp_path):
+    database = tmp_path / "outbox-cursor-validation.sqlite3"
+    db = sqlite3.connect(database)
+    db.row_factory = sqlite3.Row
+    try:
+        init_conversation_finalization_outbox(db)
+        for invalid in (0, -1, True, "2"):
+            with pytest.raises(ValueError, match="cursor"):
+                list_pending_conversation_finalizations(db, after_id=invalid)
+    finally:
+        db.close()

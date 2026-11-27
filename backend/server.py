@@ -2553,10 +2553,9 @@ def finalize_conversation_turn(user_id: str) -> dict[str, int]:
     """Retry post-commit consolidation while leaving failures durably pending."""
     user_id = valid_user(user_id)
     with db_connection() as db:
-        pending = [
-            job for job in list_pending_conversation_finalizations(db, limit=500)
-            if job["user_id"] == user_id
-        ]
+        pending = list_pending_conversation_finalizations(
+            db, limit=500, user_id=user_id
+        )
     if not pending:
         return {"pending": 0, "completed": 0}
 

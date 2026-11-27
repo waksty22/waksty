@@ -557,3 +557,39 @@ def test_context_omits_circular_json_records_without_crashing():
     assert "CONTEXTE PARTIEL" in context
     assert "ENREGISTREMENT_JSON_NON_FIABLE:" not in context
     assert context.endswith("présentée comme une connaissance acquise.")
+
+ 
+def test_retrieval_excludes_experiences_with_mismatched_or_foreign_sources():
+    db = make_db()
+    seed(db)
+    db.execute("""CREATE TABLE conversations (
+        id INTEGER PRIMARY KEY, user_id TEXT, role TEXT, content TEXT, created_at TEXT
+    )""")
+    db.execute(
+        "INSERT INTO conversations VALUES (12, 'creator', 'user', ?, '2026-11-03')",
+        ("Le Créateur a montré une montre à Chappie",),
+    )
+    db.execute(
+        "INSERT INTO conversations VALUES (13, 'creator', 'user', ?, '2026-11-03')",
+        ("Un autre message sans rapport",),
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events VALUES
+           (2, 'creator', 'user', 'user_statement',
+            'Souvenir modifié qui ne correspond plus à sa source', '2026-11-03', 13)"""
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events VALUES
+           (3, 'creator', 'user', 'user_statement',
+            'Message d’un autre utilisateur', '2026-11-03', 14)"""
+    )
+    db.execute(
+        "INSERT INTO conversations VALUES (14, 'alice', 'user', ?, '2026-11-03')",
+        ("Message d’un autre utilisateur",),
+    )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "montre")
+    experiences = [item for item in result["items"] if item["kind"] == "experience"]
+    assert [item["source_id"] for item in experiences] == [1]
+    db.close()

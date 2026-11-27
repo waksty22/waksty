@@ -431,7 +431,7 @@ def find_related_autobiographical_events(
     if not source_terms:
         return []
 
-    candidates: list[dict[str, Any]] = []
+    candidates: list[tuple[float, float, int, dict[str, Any]]] = []
     page_size = 500
     last_seen_id: int | None = None
     while True:
@@ -477,18 +477,20 @@ def find_related_autobiographical_events(
                 "Chevauchement lexical uniquement : identité, causalité et "
                 "équivalence entre expériences non confirmées."
             )
-            candidates.append(item)
+            rank = (
+                score,
+                _timestamp_sort_key(item.get("happened_at")),
+                int(item.get("id") or 0),
+                item,
+            )
+            if len(candidates) < limit:
+                heapq.heappush(candidates, rank)
+            elif rank[:3] > candidates[0][:3]:
+                heapq.heapreplace(candidates, rank)
         last_seen_id = int(rows[-1]["id"])
 
-    candidates.sort(
-        key=lambda item: (
-            item["lexical_similarity"],
-            _timestamp_sort_key(item.get("happened_at")),
-            int(item.get("id") or 0),
-        ),
-        reverse=True,
-    )
-    return candidates[:limit]
+    candidates.sort(key=lambda rank: rank[:3], reverse=True)
+    return [rank[3] for rank in candidates]
 
 def autobiographical_statistics(
     db: sqlite3.Connection,

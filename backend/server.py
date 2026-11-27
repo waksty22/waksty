@@ -3733,16 +3733,16 @@ def execute_tool(
                 word, property_key, previous_value, corrected_value, user_source_text
             )):
                 raise ValueError("Les informations de correction sont incomplètes.")
-            source = re.sub(r"\\s+", " ", user_source_text).strip()
-            clauses = re.split(r"[.!?;\\n]+", source)
+            source = re.sub(r"\s+", " ", user_source_text).strip()
+            clauses = re.split(r"[.!?;\n]+", source)
             correction_intent = re.compile(
-                r"\\b(?:non|corrige(?:r)?|correction|je me suis tromp[ée]|"
-                r"en réalité|en fait|je rectifie|c'est plutôt|ce n'est pas)\\b",
+                r"\b(?:non|corrige(?:r)?|correction|je me suis tromp[ée]|"
+                r"en réalité|en fait|je rectifie|c'est plutôt|ce n'est pas)\b",
                 re.IGNORECASE,
             )
             negative_intent = re.compile(
-                r"\\b(?:ne\\s+(?:corrige|change|modifie)\\s+pas|"
-                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction)\\b",
+                r"\b(?:ne\s+(?:corrige|change|modifie)\s+pas|"
+                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction)\b",
                 re.IGNORECASE,
             )
             grounded_clause = any(

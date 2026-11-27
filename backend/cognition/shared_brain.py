@@ -441,7 +441,7 @@ def _rows(
             # autobiographical reader: corrupt journal rows must not re-enter
             # model context through this alternate retrieval path.
             rows = db.execute(
-                """SELECT * FROM autobiographical_events
+                f"""SELECT * FROM autobiographical_events
                    WHERE user_id=?
                      AND typeof(id)='integer' AND id > 0
                      {source_conversation_filter}

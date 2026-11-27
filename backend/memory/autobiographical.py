@@ -561,18 +561,58 @@ def autobiographical_statistics(
     user_id: str,
 ) -> dict[str, int]:
     user_id = _validated_user_id(user_id)
+    # Statistics must describe recall-eligible episodes, not merely raw rows.
+    # This keeps dashboards honest when legacy/corrupt records are rejected by
+    # list and search. Links count only when both endpoints are valid episodes.
     row = db.execute(
         """
+        WITH valid_events AS (
+            SELECT id, user_id, actor
+            FROM autobiographical_events
+            WHERE user_id=?
+              AND typeof(id)='integer' AND id > 0
+              AND typeof(source_conversation_id)='integer'
+              AND source_conversation_id > 0
+              AND actor IN ('user', 'assistant')
+              AND typeof(event_type)='text' AND length(trim(event_type)) > 0
+              AND typeof(content)='text' AND length(trim(content)) > 0
+              AND typeof(happened_at)='text'
+              AND julianday(happened_at) IS NOT NULL
+              AND typeof(importance)='integer' AND importance BETWEEN 1 AND 5
+        )
         SELECT COUNT(*) AS total,
                SUM(CASE WHEN actor='user' THEN 1 ELSE 0 END) AS user_events,
                SUM(CASE WHEN actor='assistant' THEN 1 ELSE 0 END) AS chappie_events
-        FROM autobiographical_events WHERE user_id=?
+        FROM valid_events
         """,
         (user_id,),
     ).fetchone()
     links = db.execute(
-        "SELECT COUNT(*) FROM autobiographical_links WHERE user_id=?",
-        (user_id,),
+        """
+        WITH valid_events AS (
+            SELECT id, user_id
+            FROM autobiographical_events
+            WHERE user_id=?
+              AND typeof(id)='integer' AND id > 0
+              AND typeof(source_conversation_id)='integer'
+              AND source_conversation_id > 0
+              AND actor IN ('user', 'assistant')
+              AND typeof(event_type)='text' AND length(trim(event_type)) > 0
+              AND typeof(content)='text' AND length(trim(content)) > 0
+              AND typeof(happened_at)='text'
+              AND julianday(happened_at) IS NOT NULL
+              AND typeof(importance)='integer' AND importance BETWEEN 1 AND 5
+        )
+        SELECT COUNT(*)
+        FROM autobiographical_links l
+        JOIN valid_events source ON source.id=l.source_event_id
+                                AND source.user_id=l.user_id
+        JOIN valid_events target ON target.id=l.target_event_id
+                                AND target.user_id=l.user_id
+        WHERE l.user_id=?
+          AND l.relation_type='same_dialogue_turn'
+        """,
+        (user_id, user_id),
     ).fetchone()[0]
     return {
         "total_events": int(row["total"] or 0),

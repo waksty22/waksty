@@ -240,3 +240,49 @@ def test_targeted_sync_deduplicates_conversation_ids_before_sql_binding():
     ).fetchall()
     assert [tuple(row) for row in links] == [(1, 2)]
     db.close()
+
+def test_sync_does_not_link_events_with_mismatched_source_content():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    timestamp = "2026-11-27T10:00:00Z"
+    db.executemany(
+        "INSERT INTO conversations VALUES (?, 'creator', ?, ?, ?)",
+        [
+            (1, "user", "Texte utilisateur original", timestamp),
+            (2, "assistant", "Réponse de Chappie", timestamp),
+        ],
+    )
+    # The first episode points to the right conversation ID but its copied
+    # content is stale/corrupted. The assistant episode remains valid.
+    db.executemany(
+        """
+        INSERT INTO autobiographical_events
+            (user_id, source_conversation_id, actor, event_type, content,
+             happened_at, importance, created_at)
+        VALUES ('creator', ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (1, "user", "user_statement", "Texte utilisateur modifié", timestamp, 3, timestamp),
+            (2, "assistant", "chappie_response", "Réponse de Chappie", timestamp, 1, timestamp),
+        ],
+    )
+    db.commit()
+
+    sync_autobiographical_events(db, "creator")
+
+    links = db.execute(
+        "SELECT COUNT(*) FROM autobiographical_links WHERE user_id='creator'"
+    ).fetchone()[0]
+    assert links == 0
+    db.close()
+

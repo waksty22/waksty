@@ -4016,9 +4016,23 @@ def execute_tool(
                 # by exact user-scoped source text. No fuzzy or cross-user match.
                 sync_autobiographical_events(experience_db, user_id)
                 source_event = experience_db.execute(
-                    """SELECT id FROM autobiographical_events
-                       WHERE user_id=? AND actor='user' AND content=?
-                       ORDER BY id DESC LIMIT 1""",
+                    """
+                    SELECT e.id
+                    FROM autobiographical_events e
+                    WHERE e.user_id=? AND e.actor='user' AND e.content=?
+                      AND EXISTS (
+                          SELECT 1
+                          FROM conversations source_message
+                          WHERE source_message.id=e.source_conversation_id
+                            AND source_message.user_id=e.user_id
+                            AND source_message.role=e.actor
+                            AND typeof(source_message.content)='text'
+                            AND substr(trim(source_message.content), 1, 8000)=e.content
+                            AND source_message.created_at=e.happened_at
+                      )
+                    ORDER BY e.id DESC
+                    LIMIT 1
+                    """,
                     (user_id, source),
                 ).fetchone()
                 source_event_id = int(source_event["id"]) if source_event else None

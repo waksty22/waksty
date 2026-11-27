@@ -25,6 +25,36 @@ from world.world_model import init_world_tables, upsert_world_entity, add_world_
 from cognition.shared_brain import get_shared_brain_snapshot
 
 
+def test_world_context_marks_conflicting_object_properties_for_chat_and_live(db, monkeypatch):
+    import json
+    import server
+
+    add_recognized_object(db, "pomme")
+    teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Première information enseignée.",
+    )
+    teach_object_property(
+        db, "creator", "pomme", "couleur", "verte",
+        evidence="Deuxième information enseignée.",
+    )
+    monkeypatch.setattr(server, "db_connection", lambda: db)
+
+    context = server.build_world_model_context("creator")
+    payload = json.loads(context.split("\\n", 1)[1])
+    colors = [
+        item for item in payload["object_properties"]
+        if item["object"] == "object:pomme" and item["property"] == "couleur"
+    ]
+
+    assert {item["value"] for item in colors} == {"rouge", "verte"}
+    assert all(item["conflict"] is True for item in colors)
+    assert all(item["conflicting_values"] == ["rouge", "verte"] for item in colors)
+    assert "conflit non résolu" in context
+
+
+
+
 @pytest.fixture
 def db():
     connection = sqlite3.connect(":memory:")

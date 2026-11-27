@@ -397,11 +397,11 @@ def test_creator_correction_preserves_old_object_property_evidence(db):
     )
 
     corrected = correct_object_property(
-        db, "creator", "pomme", "couleur", "verte",
+        db, "creator", "pomme", "couleur", "rouge",
         "jaune", "Correction explicite du Créateur après vérification.",
     )
 
-    assert corrected["previous_value"] == "verte"
+    assert corrected["previous_value"] == "rouge"
     assert corrected["property_value"] == "jaune"
     assert corrected["source_type"] == "confirmed"
     assert corrected["confidence"] == 1.0
@@ -421,7 +421,7 @@ def test_creator_correction_preserves_old_object_property_evidence(db):
         (corrected["history_id"],),
     ).fetchone()
     assert dict(history) == {
-        "previous_value": "verte",
+        "previous_value": "rouge",
         "corrected_value": "jaune",
         "previous_source_type": "taught",
         "previous_confidence": 0.8,

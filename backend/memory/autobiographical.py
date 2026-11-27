@@ -187,12 +187,26 @@ def sync_autobiographical_events(
         )
         inserted += max(0, cursor.rowcount)
 
+    # Un enregistrement ciblé ne doit examiner que les réponses nouvellement
+    # indexées : reparcourir tout l'historique à chaque tour rendrait le coût
+    # cumulé quadratique. Le rattrapage sans filtre conserve le balayage complet.
+    link_filter = ""
+    link_params: list[Any] = [user_id]
+    if conversation_ids is not None:
+        target_ids = list(dict.fromkeys(validated_ids))
+        if not target_ids:
+            link_filter = " AND 0"
+        else:
+            placeholders = ",".join("?" for _ in target_ids)
+            link_filter = f" AND assistant_message.id IN ({placeholders})"
+            link_params.extend(target_ids)
+
     # Relie uniquement deux messages adjacents dans l'historique de CE
     # user. Les IDs de conversations sont globaux : un message d'un autre
     # utilisateur peut légitimement se glisser entre les deux IDs.
     # L'horodatage doit aussi correspondre pour éviter de relier deux tours.
     db.execute(
-        """
+        f"""
         INSERT OR IGNORE INTO autobiographical_links
             (user_id, source_event_id, target_event_id, relation_type, created_at)
         SELECT u.user_id, u.id, a.id, 'same_dialogue_turn', u.created_at
@@ -212,6 +226,7 @@ def sync_autobiographical_events(
          AND a.actor='assistant'
         WHERE user_message.user_id=?
           AND user_message.role='user'
+          {link_filter}
           AND COALESCE((
               SELECT previous_same_user.role
               FROM conversations previous_same_user
@@ -228,7 +243,7 @@ def sync_autobiographical_events(
                 AND between_turn.id < assistant_message.id
           )
         """,
-        (user_id,),
+        link_params,
     )
     if commit:
         db.commit()

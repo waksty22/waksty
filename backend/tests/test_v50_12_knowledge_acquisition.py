@@ -449,3 +449,40 @@ def test_knowledge_retrieval_orders_mixed_offsets_by_absolute_time():
     memories = [item for item in result["items"] if item["kind"] == "memory"]
     assert [item["source_id"] for item in memories[:2]] == [6, 5]
     db.close()
+
+def test_query_relevance_keeps_matches_found_in_searchable_metadata():
+    db = make_db()
+    db.execute(
+        """INSERT INTO memories_v19 VALUES
+           (30, 'creator', 'objets', 'Le bleu est une couleur appréciée',
+            'confirmed', 0.9, 5, '2026-11-10', '2026-11-10')"""
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events VALUES
+           (30, 'creator', 'enseignante', 'explication',
+            'Une discussion a eu lieu en classe', '2026-11-11', NULL)"""
+    )
+    details = {
+        "source": "supervised_assessment",
+        "supervisor_approved": True,
+        "evidence": "A identifié correctement plusieurs fossiles.",
+    }
+    db.execute(
+        """INSERT INTO competency_tests VALUES
+           (30, 'creator', 'test_general', 1, 88, ?, '2026-11-12')""",
+        (json.dumps(details),),
+    )
+    db.commit()
+
+    category_match = retrieve_acquired_knowledge(db, "creator", "objets")
+    assert any(item["kind"] == "memory" and item["source_id"] == 30
+               for item in category_match["items"])
+
+    actor_match = retrieve_acquired_knowledge(db, "creator", "enseignante")
+    assert any(item["kind"] == "experience" and item["source_id"] == 30
+               for item in actor_match["items"])
+
+    evidence_match = retrieve_acquired_knowledge(db, "creator", "fossiles")
+    assert any(item["kind"] == "skill_assessment" and item["source_id"] == 30
+               for item in evidence_match["items"])
+    db.close()

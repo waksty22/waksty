@@ -282,6 +282,24 @@ def sync_autobiographical_events(
         WHERE user_message.user_id=?
           AND user_message.role='user'
           {link_filter}
+          AND EXISTS (
+              SELECT 1 FROM conversations user_source
+              WHERE user_source.id=u.source_conversation_id
+                AND user_source.user_id=u.user_id
+                AND user_source.role=u.actor
+                AND typeof(user_source.content)='text'
+                AND substr(trim(user_source.content), 1, 8000)=u.content
+                AND user_source.created_at=u.happened_at
+          )
+          AND EXISTS (
+              SELECT 1 FROM conversations assistant_source
+              WHERE assistant_source.id=a.source_conversation_id
+                AND assistant_source.user_id=a.user_id
+                AND assistant_source.role=a.actor
+                AND typeof(assistant_source.content)='text'
+                AND substr(trim(assistant_source.content), 1, 8000)=a.content
+                AND assistant_source.created_at=a.happened_at
+          )
           AND COALESCE((
               SELECT previous_same_user.role
               FROM conversations previous_same_user

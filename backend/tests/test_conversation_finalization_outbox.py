@@ -259,3 +259,46 @@ def test_outbox_pagination_cursor_is_validated(tmp_path):
                 list_pending_conversation_finalizations(db, after_id=invalid)
     finally:
         db.close()
+
+
+def test_new_turn_is_indexed_immediately_while_old_autobiographical_backlog_remains(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "outbox-fresh-autobiography.sqlite3"
+    _isolate_database(monkeypatch, database)
+    with server.db_connection() as db:
+        db.executemany(
+            """
+            INSERT INTO conversations(user_id, role, content, created_at)
+            VALUES ('creator', 'user', ?, '2026-01-01T10:00:00Z')
+            """,
+            [(f"Ancien échange en attente numéro {index}",) for index in range(500)],
+        )
+        db.commit()
+
+    # Keep this test focused on source indexing, not summary consolidation.
+    monkeypatch.setattr(
+        server, "finalize_conversation_turn",
+        lambda _user_id: {"pending": 0, "completed": 0},
+    )
+    server.save_conversation_turn(
+        "creator",
+        "Je viens de montrer une nouvelle boussole.",
+        "Je retiens cette nouvelle boussole.",
+    )
+
+    with server.db_connection() as db:
+        indexed = db.execute(
+            """
+            SELECT source_conversation_id, actor, content
+            FROM autobiographical_events
+            WHERE user_id='creator'
+            ORDER BY source_conversation_id
+            """
+        ).fetchall()
+
+    assert [(row["actor"], row["content"]) for row in indexed] == [
+        ("user", "Je viens de montrer une nouvelle boussole."),
+        ("assistant", "Je retiens cette nouvelle boussole."),
+    ]
+    assert [row["source_conversation_id"] for row in indexed] == [501, 502]

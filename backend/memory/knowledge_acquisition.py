@@ -94,10 +94,23 @@ def _query_rows(
     score_parameters: list[str] = []
     folded_columns = [_folded_sql(column) for column in searchable_columns]
     for term in sorted(query_terms):
+        # Match complete ASCII tokens after the same accent folding used by
+        # _terms(). GLOB boundaries avoid filling the candidate limit with
+        # substring noise such as "art" inside "partage".
+        patterns = [
+            pattern
+            for _column in folded_columns
+            for pattern in (
+                f"*[^a-z0-9]{term}[^a-z0-9]*",
+                f"{term}[^a-z0-9]*",
+                f"*[^a-z0-9]{term}",
+                term,
+            )
+        ]
         expression = "(" + " OR ".join(
-            f"{column} LIKE ?" for column in folded_columns
+            f"{column} GLOB ?" for column in folded_columns
+            for _ in range(4)
         ) + ")"
-        patterns = [f"%{term}%" for _ in folded_columns]
         term_clauses.append(expression)
         where_parameters.extend(patterns)
         score_terms.append(f"CASE WHEN {expression} THEN 1 ELSE 0 END")
@@ -108,32 +121,17 @@ def _query_rows(
         f"ORDER BY ({' + '.join(score_terms)}) DESC, "
         f"COALESCE(julianday({timestamp_column}), -1.0) DESC, id DESC LIMIT ?"
     )
-    # SQL LIKE is intentionally a broad candidate filter, but it can match
-    # substrings (for example, "art" inside "partage"). Do not let those
-    # false positives consume the bounded result window before exact-token
-    # validation. Page through candidates in SQL order and retain only rows
-    # whose normalized searchable fields contain a complete query token.
-    page_size = min(250, max(1, limit))
-    offset = 0
-    exact_rows: list[dict[str, Any]] = []
-    while len(exact_rows) < limit:
-        page = _safe_rows(
-            db,
-            sql.replace(" LIMIT ?", " LIMIT ? OFFSET ?"),
-            (user_id, *where_parameters, *score_parameters, page_size, offset),
+    # Keep the candidate scan bounded as before; exact-token SQL matching
+    # ensures substring false positives cannot consume this result window.
+    rows = _safe_rows(
+        db, sql, (user_id, *where_parameters, *score_parameters, limit)
+    )
+    return [
+        row for row in rows
+        if query_terms.intersection(
+            _terms(" ".join(str(row.get(column) or "") for column in searchable_columns))
         )
-        if not page:
-            break
-        for row in page:
-            searchable_text = " ".join(
-                str(row.get(column) or "") for column in searchable_columns
-            )
-            if query_terms.intersection(_terms(searchable_text)):
-                exact_rows.append(row)
-                if len(exact_rows) >= limit:
-                    break
-        offset += len(page)
-    return exact_rows
+    ]
 
 
 def _merge_query_rows(

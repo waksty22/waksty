@@ -53,6 +53,7 @@ def enqueue_conversation_finalization(
 
 def list_pending_conversation_finalizations(
     db: Any, limit: int = 100, user_id: str | None = None,
+    after_id: int | None = None,
 ) -> list[dict[str, Any]]:
     init_conversation_finalization_outbox(db)
     where = "status='pending'"
@@ -62,6 +63,11 @@ def list_pending_conversation_finalizations(
             raise ValueError("A valid user filter is required")
         where += " AND user_id=?"
         params.append(user_id.strip())
+    if after_id is not None:
+        if isinstance(after_id, bool) or not isinstance(after_id, int) or after_id < 0:
+            raise ValueError("A valid outbox cursor is required")
+        where += " AND id>?"
+        params.append(after_id)
     params.append(max(1, min(int(limit), 500)))
     rows = db.execute(f"""
         SELECT id, user_id, through_conversation_id, attempts

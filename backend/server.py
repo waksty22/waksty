@@ -2613,28 +2613,37 @@ def finalize_conversation_turn(user_id: str) -> dict[str, int]:
 
 
 def recover_pending_conversation_finalizations() -> dict[str, int]:
-    """Recover pending finalization jobs on process startup."""
-    with db_connection() as db:
-        jobs = list_pending_conversation_finalizations(db, limit=500)
-    users = sorted({str(job["user_id"]) for job in jobs})
+    """Recover every pending finalization job in bounded keyset pages."""
     completed = 0
     pending = 0
-    for user_id in users:
-        try:
-            valid_user(user_id)
-        except HTTPException:
-            skipped = sum(1 for job in jobs if job["user_id"] == user_id)
-            pending += skipped
-            log.warning(
-                "[MEMORY OUTBOX] Reprise ignorée pour un utilisateur non autorisé ; "
-                "les travaux restent en attente."
+    checked_users: set[str] = set()
+    last_seen_id = 0
+    while True:
+        with db_connection() as db:
+            jobs = list_pending_conversation_finalizations(
+                db, limit=500, after_id=last_seen_id
             )
-            continue
-        report = finalize_conversation_turn(user_id)
-        completed += report["completed"]
-        pending += report["pending"]
+        if not jobs:
+            break
+        last_seen_id = int(jobs[-1]["id"])
+        users = sorted({str(job["user_id"]) for job in jobs})
+        for user_id in users:
+            checked_users.add(user_id)
+            try:
+                valid_user(user_id)
+            except HTTPException:
+                skipped = sum(1 for job in jobs if job["user_id"] == user_id)
+                pending += skipped
+                log.warning(
+                    "[MEMORY OUTBOX] Reprise ignorée pour un utilisateur non autorisé ; "
+                    "les travaux restent en attente."
+                )
+                continue
+            report = finalize_conversation_turn(user_id)
+            completed += report["completed"]
+            pending += report["pending"]
     return {
-        "users_checked": len(users),
+        "users_checked": len(checked_users),
         "jobs_completed": completed,
         "jobs_still_pending": pending,
     }

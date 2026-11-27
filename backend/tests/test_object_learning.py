@@ -625,7 +625,9 @@ def test_known_objects_are_ordered_by_absolute_observation_time(db):
     db.execute("UPDATE world_entities SET last_observed_at=? WHERE id=?",
                ("2026-11-26T08:30:00Z", "object:banane"))
     assert [item["word"] for item in list_known_objects(db, "creator")] == [
-        "banane", "pomme"]\n\ndef test_multiple_values_for_one_object_property_are_flagged_as_conflicting(db):
+        "banane", "pomme"]
+
+def test_multiple_values_for_one_object_property_are_flagged_as_conflicting(db):
     add_recognized_object(db, "pomme")
     first = teach_object_property(
         db, "creator", "pomme", "couleur", "rouge",
@@ -649,7 +651,9 @@ def test_known_objects_are_ordered_by_absolute_observation_time(db):
         "SELECT COUNT(*) FROM object_properties WHERE user_id='creator' "
         "AND object_id='object:pomme' AND property_key='couleur'"
     ).fetchone()[0] == 2
-\n\ndef test_object_comparison_surfaces_unresolved_property_conflicts(db):
+
+
+def test_object_comparison_surfaces_unresolved_property_conflicts(db):
     add_recognized_object(db, "pomme")
     add_recognized_object(db, "banane")
     teach_object_property(db, "creator", "pomme", "couleur", "rouge")

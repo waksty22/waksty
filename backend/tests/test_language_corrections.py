@@ -1,6 +1,12 @@
 import sqlite3
+import sys
+from pathlib import Path
 
 import pytest
+
+BACKEND = Path(__file__).resolve().parents[1]
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
 
 from learning.language import (
     advance_word,
@@ -51,7 +57,7 @@ def test_explicit_correction_updates_current_definition_and_keeps_history(db):
     assert len(history) == 1
     assert history[0]["previous_meaning"] == "un oiseau domestique"
     assert history[0]["corrected_meaning"] == current["meaning"]
-    assert history[0]["previous_evidence"] == "Enseignement explicite via le tour confirmé"
+    assert history[0]["previous_evidence"] == "Enseignement explicite de l'utilisateur"
     assert corrected["history_preserved"] is True
     assert corrected["previous_meaning"] == "un oiseau domestique"
 

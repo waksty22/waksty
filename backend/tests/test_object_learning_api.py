@@ -172,3 +172,42 @@ def test_chat_object_correction_rejects_non_owner_or_ambiguous_messages(
     assert object_api_db.execute(
         "SELECT COUNT(*) FROM object_property_history"
     ).fetchone()[0] == 0
+
+
+def test_non_creator_cannot_use_object_correction_endpoint_even_with_approval(object_api_db):
+    payload = {
+        "word": "pomme",
+        "property": "couleur",
+        "previous_value": "rouge",
+        "value": "jaune",
+        "evidence": "Correction explicite.",
+        "supervisor_approved": True,
+    }
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(server.api_correct_object_property(
+            JsonRequest(payload), auth="other"
+        ))
+    assert error.value.status_code == 403
+    assert object_api_db.execute(
+        "SELECT property_value FROM object_properties"
+    ).fetchone()[0] == "rouge"
+    assert object_api_db.execute(
+        "SELECT COUNT(*) FROM object_property_history"
+    ).fetchone()[0] == 0
+
+
+def test_non_creator_cannot_confirm_object_property(object_api_db):
+    payload = {
+        "word": "pomme",
+        "property": "couleur",
+        "value": "rouge",
+        "evidence": "Confirmation explicite.",
+    }
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(server.api_confirm_object_property(
+            JsonRequest(payload), auth="other"
+        ))
+    assert error.value.status_code == 403
+    assert object_api_db.execute(
+        "SELECT source_type FROM object_properties"
+    ).fetchone()[0] == "taught"

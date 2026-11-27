@@ -108,9 +108,32 @@ def _query_rows(
         f"ORDER BY ({' + '.join(score_terms)}) DESC, "
         f"COALESCE(julianday({timestamp_column}), -1.0) DESC, id DESC LIMIT ?"
     )
-    return _safe_rows(
-        db, sql, (user_id, *where_parameters, *score_parameters, limit)
-    )
+    # SQL LIKE is intentionally a broad candidate filter, but it can match
+    # substrings (for example, "art" inside "partage"). Do not let those
+    # false positives consume the bounded result window before exact-token
+    # validation. Page through candidates in SQL order and retain only rows
+    # whose normalized searchable fields contain a complete query token.
+    page_size = min(250, max(1, limit))
+    offset = 0
+    exact_rows: list[dict[str, Any]] = []
+    while len(exact_rows) < limit:
+        page = _safe_rows(
+            db,
+            sql.replace(" LIMIT ?", " LIMIT ? OFFSET ?"),
+            (user_id, *where_parameters, *score_parameters, page_size, offset),
+        )
+        if not page:
+            break
+        for row in page:
+            searchable_text = " ".join(
+                str(row.get(column) or "") for column in searchable_columns
+            )
+            if query_terms.intersection(_terms(searchable_text)):
+                exact_rows.append(row)
+                if len(exact_rows) >= limit:
+                    break
+        offset += len(page)
+    return exact_rows
 
 
 def _merge_query_rows(

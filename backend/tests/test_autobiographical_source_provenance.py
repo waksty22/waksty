@@ -155,3 +155,54 @@ def test_search_batches_source_provenance_checks_per_history_page():
     assert len(results) == 8
     assert len(source_selects) == 1
     db.close()
+
+
+def test_related_event_search_batches_source_provenance_checks_per_page():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    timestamp = "2026-11-27T10:00:00Z"
+    for source_id in range(1, 9):
+        content = (
+            "Souvenir horloge rouge maison"
+            if source_id == 1
+            else f"Souvenir horloge rouge numéro {source_id}"
+        )
+        db.execute(
+            "INSERT INTO conversations VALUES (?, 'creator', 'user', ?, ?)",
+            (source_id, content, timestamp),
+        )
+        db.execute(
+            """
+            INSERT INTO autobiographical_events
+                (user_id, source_conversation_id, actor, event_type, content,
+                 happened_at, importance, created_at)
+            VALUES ('creator', ?, 'user', 'user_statement', ?, ?, 3, ?)
+            """,
+            (source_id, content, timestamp, timestamp),
+        )
+    db.commit()
+
+    grouped_source_selects = []
+    db.set_trace_callback(
+        lambda statement: grouped_source_selects.append(statement)
+        if "FROM conversations" in statement and "id IN (" in statement
+        else None
+    )
+    results = find_related_autobiographical_events(
+        db, "creator", event_id=1, limit=10
+    )
+
+    assert len(results) == 7
+    assert len(grouped_source_selects) == 1
+    assert all(item["relation_status"] == "candidate_only" for item in results)
+    db.close()

@@ -262,7 +262,14 @@ def list_autobiographical_events(
                happened_at, importance
         FROM autobiographical_events
         WHERE {where}
-        ORDER BY COALESCE(julianday(happened_at), -1.0) DESC, id DESC
+          AND typeof(id)='integer' AND id > 0
+          AND typeof(source_conversation_id)='integer' AND source_conversation_id > 0
+          AND actor IN ('user', 'assistant')
+          AND typeof(event_type)='text' AND length(trim(event_type)) > 0
+          AND typeof(content)='text' AND length(trim(content)) > 0
+          AND typeof(happened_at)='text' AND julianday(happened_at) IS NOT NULL
+          AND typeof(importance)='integer' AND importance BETWEEN 1 AND 5
+        ORDER BY julianday(happened_at) DESC, id DESC
         LIMIT ?
         """,
         params,

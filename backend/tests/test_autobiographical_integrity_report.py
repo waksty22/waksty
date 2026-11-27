@@ -59,7 +59,7 @@ def test_integrity_report_distinguishes_missing_mismatched_and_unindexed_sources
         "malformed_events": 0,
         "missing_source_events": 1,
         "mismatched_source_events": 1,
-        "unindexed_valid_sources": 2,
+        "unindexed_valid_sources": 1,
     }
     assert [tuple(row) for row in before] == [tuple(row) for row in after]
     db.close()

@@ -486,3 +486,27 @@ def test_query_relevance_keeps_matches_found_in_searchable_metadata():
     assert any(item["kind"] == "skill_assessment" and item["source_id"] == 30
                for item in evidence_match["items"])
     db.close()
+
+def test_query_retrieval_matches_uppercase_accented_words_in_older_memory():
+    db = make_db()
+    db.execute(
+        """INSERT INTO memories_v19 VALUES
+           (1, 'creator', 'général', 'Une ÉCOLE a été visitée',
+            'confirmed', 0.9, 5, '2020-01-01', '2020-01-01')"""
+    )
+    for index in range(305):
+        stamp = f"2026-11-25T{index:06d}"
+        db.execute(
+            """INSERT INTO memories_v19 VALUES
+               (?, 'creator', 'general', 'Note récente sans rapport',
+                'observed', 0.5, 6, ?, ?)""",
+            (1000 + index, stamp, stamp),
+        )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "ecole")
+    assert any(
+        item["source_id"] == 1 and "ÉCOLE" in item["content"]
+        for item in result["items"]
+    )
+    db.close()

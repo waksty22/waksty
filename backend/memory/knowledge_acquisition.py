@@ -61,15 +61,28 @@ def _safe_rows(
 
 def _folded_sql(column: str) -> str:
     """SQLite expression matching the accent-insensitive Python tokenizer."""
-    expression = f"LOWER(COALESCE({column}, ''))"
+    # SQLite LOWER() is ASCII-only. Fold precomposed uppercase Latin
+    # characters before LOWER(), then fold their lowercase equivalents so
+    # SQL token matching follows Python's casefold/NFKD behavior for French.
+    expression = f"COALESCE({column}, '')"
+    for source, target in (
+        ("À", "a"), ("Á", "a"), ("Â", "a"), ("Ä", "a"), ("Ã", "a"),
+        ("Ç", "c"), ("È", "e"), ("É", "e"), ("Ê", "e"), ("Ë", "e"),
+        ("Ì", "i"), ("Í", "i"), ("Î", "i"), ("Ï", "i"),
+        ("Ò", "o"), ("Ó", "o"), ("Ô", "o"), ("Ö", "o"), ("Õ", "o"),
+        ("Ù", "u"), ("Ú", "u"), ("Û", "u"), ("Ü", "u"),
+        ("Ý", "y"), ("Ÿ", "y"), ("Œ", "oe"), ("Æ", "ae"),
+        ("Ñ", "n"), ("ẞ", "ss"), ("ß", "ss"),
+    ):
+        expression = f"REPLACE({expression}, '{source}', '{target}')"
+    expression = f"LOWER({expression})"
     for source, target in (
         ("à", "a"), ("á", "a"), ("â", "a"), ("ä", "a"), ("ã", "a"),
-        ("ç", "c"),
-        ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
+        ("ç", "c"), ("è", "e"), ("é", "e"), ("ê", "e"), ("ë", "e"),
         ("ì", "i"), ("í", "i"), ("î", "i"), ("ï", "i"),
         ("ò", "o"), ("ó", "o"), ("ô", "o"), ("ö", "o"), ("õ", "o"),
         ("ù", "u"), ("ú", "u"), ("û", "u"), ("ü", "u"),
-        ("ý", "y"), ("ÿ", "y"), ("œ", "oe"), ("æ", "ae"),
+        ("ý", "y"), ("ÿ", "y"), ("œ", "oe"), ("æ", "ae"), ("ñ", "n"),
     ):
         expression = f"REPLACE({expression}, '{source}', '{target}')"
     return expression

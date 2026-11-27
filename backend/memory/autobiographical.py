@@ -117,12 +117,15 @@ def sync_autobiographical_events(
     limit: int = 500,
     commit: bool = True,
     conversation_ids: list[int] | tuple[int, ...] | None = None,
+    include_counts: bool = True,
 ) -> dict[str, int]:
     """Indexe les conversations manquantes, ou les sources ciblées d'un tour."""
     user_id = _validated_user_id(user_id)
     limit = _bounded_limit(limit, 2000)
     if not isinstance(commit, bool):
         raise ValueError("commit doit être un booléen.")
+    if not isinstance(include_counts, bool):
+        raise ValueError("include_counts doit être un booléen.")
     source_filter = ""
     params: list[Any] = [user_id]
     if conversation_ids is not None:
@@ -247,6 +250,8 @@ def sync_autobiographical_events(
     )
     if commit:
         db.commit()
+    if not include_counts:
+        return {"inserted": inserted}
     total = db.execute(
         "SELECT COUNT(*) FROM autobiographical_events WHERE user_id=?",
         (user_id,),

@@ -41,7 +41,7 @@ def test_world_context_marks_conflicting_object_properties_for_chat_and_live(db,
     monkeypatch.setattr(server, "db_connection", lambda: db)
 
     context = server.build_world_model_context("creator")
-    payload = json.loads(context.split("\\n", 1)[1])
+    payload = json.loads(context.splitlines()[1])
     colors = [
         item for item in payload["object_properties"]
         if item["object"] == "object:pomme" and item["property"] == "couleur"

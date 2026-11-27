@@ -116,14 +116,31 @@ def sync_autobiographical_events(
     user_id: str,
     limit: int = 500,
     commit: bool = True,
+    conversation_ids: list[int] | tuple[int, ...] | None = None,
 ) -> dict[str, int]:
-    """Indexe idempotemment les conversations absentes du journal autobiographique."""
+    """Indexe les conversations manquantes, ou les sources ciblées d'un tour."""
     user_id = _validated_user_id(user_id)
     limit = _bounded_limit(limit, 2000)
     if not isinstance(commit, bool):
         raise ValueError("commit doit être un booléen.")
+    source_filter = ""
+    params: list[Any] = [user_id]
+    if conversation_ids is not None:
+        if not isinstance(conversation_ids, (list, tuple)) or len(conversation_ids) > 2000:
+            raise ValueError("La liste des conversations à indexer est invalide.")
+        validated_ids: list[int] = []
+        for conversation_id in conversation_ids:
+            validated_ids.append(
+                _validated_integer(conversation_id, "Identifiant de conversation")
+            )
+        if validated_ids:
+            source_filter = " AND c.id IN (" + ",".join("?" for _ in validated_ids) + ")"
+            params.extend(dict.fromkeys(validated_ids))
+        else:
+            source_filter = " AND 0"
+    params.append(limit)
     rows = db.execute(
-        """
+        f"""
         SELECT c.id, c.role, c.content, c.created_at
         FROM conversations c
         LEFT JOIN autobiographical_events e
@@ -134,10 +151,11 @@ def sync_autobiographical_events(
           AND typeof(c.content)='text' AND length(trim(c.content)) > 0
           AND typeof(c.created_at)='text' AND length(trim(c.created_at)) > 0
           AND julianday(c.created_at) IS NOT NULL
+          {source_filter}
         ORDER BY c.id ASC
         LIMIT ?
         """,
-        (user_id, limit),
+        params,
     ).fetchall()
 
     inserted = 0

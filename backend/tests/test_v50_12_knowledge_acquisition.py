@@ -157,6 +157,40 @@ def test_query_retrieval_does_not_let_substring_false_positives_hide_exact_old_m
     db.close()
 
 
+def test_invalid_recent_experiences_cannot_hide_older_valid_query_match():
+    db = make_db()
+    db.execute("""CREATE TABLE conversations (
+        id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, role TEXT,
+        content TEXT, created_at TEXT
+    )""")
+    db.execute(
+        "INSERT INTO conversations VALUES (1, 'creator', 'user', ?, ?)",
+        ("Le Créateur a montré une montre ancienne", "2020-01-01"),
+    )
+    db.execute(
+        """INSERT INTO autobiographical_events VALUES
+           (1, 'creator', 'user', 'user_statement',
+            'Le Créateur a montré une montre ancienne', '2020-01-01', 1)"""
+    )
+    for index in range(1005):
+        stamp = f"2026-11-{index % 28 + 1:02d}T{index:06d}"
+        db.execute(
+            """INSERT INTO autobiographical_events VALUES
+               (?, 'creator', 'user', 'user_statement', ?, ?, ?)""",
+            (1000 + index, f"Expérience montre sans source valide {index}", stamp, 5000 + index),
+        )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "montre", limit=12)
+    assert any(
+        item["kind"] == "experience"
+        and item["source_conversation_id"] == 1
+        and item["content"] == "Le Créateur a montré une montre ancienne"
+        for item in result["items"]
+    )
+    db.close()
+
+
 def test_query_retrieval_finds_old_memories_experiences_and_assessments():
     db = make_db()
     seed(db)

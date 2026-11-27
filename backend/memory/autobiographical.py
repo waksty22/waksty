@@ -100,6 +100,44 @@ def _source_matches_event(
     )
 
 
+def _matching_autobiographical_source_event_ids(
+    db: sqlite3.Connection,
+    user_id: str,
+    items: list[dict[str, Any]],
+) -> set[int]:
+    """Validate a page of matching episodes with one source-table query."""
+    if not items:
+        return set()
+    table = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'"
+    ).fetchone()
+    # Preserve compatibility with isolated callers that have no source table.
+    if table is None:
+        return {int(item["id"]) for item in items}
+    source_ids = list(dict.fromkeys(int(item["source_conversation_id"]) for item in items))
+    placeholders = ",".join("?" for _ in source_ids)
+    sources = db.execute(
+        f"""SELECT id, role, content, created_at
+            FROM conversations
+            WHERE user_id=? AND id IN ({placeholders})""",
+        (user_id, *source_ids),
+    ).fetchall()
+    source_by_id = {row["id"]: row for row in sources}
+    valid_event_ids: set[int] = set()
+    for item in items:
+        source = source_by_id.get(item["source_conversation_id"])
+        content = source["content"] if source is not None else None
+        if (
+            source is not None
+            and source["role"] == item.get("actor")
+            and isinstance(content, str)
+            and content.strip()[:8000] == item.get("content")
+            and source["created_at"] == item.get("happened_at")
+        ):
+            valid_event_ids.add(int(item["id"]))
+    return valid_event_ids
+
+
 def _source_provenance_filter(db: sqlite3.Connection) -> str:
     """Filter ungrounded episodes before applying a chronological page limit."""
     table = db.execute(
@@ -469,6 +507,7 @@ def search_autobiographical_events(
             ).fetchall()
         if not rows:
             break
+        page_candidates: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
             if not _is_valid_autobiographical_event(item):
@@ -483,8 +522,6 @@ def search_autobiographical_events(
             present = len(matched_tokens)
             if not present:
                 continue
-            if not _source_matches_event(db, user_id, item):
-                continue
             coverage = present / max(1, len(set(tokens)))
             phrase_bonus = 0.35 if normalized_query and normalized_query in normalized_content else 0.0
             importance = max(1, min(5, int(item.get("importance") or 1)))
@@ -495,13 +532,24 @@ def search_autobiographical_events(
                 token for token in dict.fromkeys(tokens) if token in content_tokens
             ]
             item["dialogue_context"] = False
-            rank = (
+            item["_rank"] = (
                 score,
                 importance,
                 _timestamp_sort_key(item.get("happened_at")),
                 int(item.get("id") or 0),
-                item,
             )
+            page_candidates.append(item)
+
+        # Validate all lexical matches in this page together instead of issuing
+        # one provenance SELECT per matching event.
+        valid_source_event_ids = _matching_autobiographical_source_event_ids(
+            db, user_id, page_candidates
+        )
+        for item in page_candidates:
+            if int(item["id"]) not in valid_source_event_ids:
+                continue
+            rank_key = item.pop("_rank")
+            rank = (*rank_key, item)
             if len(ranked) < limit:
                 heapq.heappush(ranked, rank)
             elif rank[:4] > ranked[0][:4]:

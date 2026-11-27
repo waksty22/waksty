@@ -3350,35 +3350,6 @@ def build_world_model_context(
                     "updated_at", 750,
                 )
                 property_rows = _merge_query_matches(property_rows, property_matches, "id")
-            if "object_properties" in available_tables:
-                # The context's recent/matching row window is intentionally
-                # bounded. Compute conflict cardinality from the full
-                # user-scoped property set so older values cannot disappear
-                # silently when the row window is full.
-                property_keys = {
-                    (str(row["object_id"]), str(row["property_key"]))
-                    for row in property_rows
-                }
-                for object_id, property_key in property_keys:
-                    count = db.execute(
-                        """SELECT COUNT(DISTINCT property_value)
-                           FROM object_properties
-                           WHERE user_id=? AND object_id=? AND property_key=?""",
-                        (user_id, object_id, property_key),
-                    ).fetchone()[0]
-                    if count > 1:
-                        values = db.execute(
-                            """SELECT DISTINCT property_value
-                               FROM object_properties
-                               WHERE user_id=? AND object_id=? AND property_key=?
-                               ORDER BY property_value LIMIT 20""",
-                            (user_id, object_id, property_key),
-                        ).fetchall()
-                        property_conflict_metadata[(object_id, property_key)] = {
-                            "count": int(count),
-                            "values": [str(value[0])[:500] for value in values],
-                            "truncated": int(count) > len(values),
-                        }
             if "object_experiences" in available_tables:
                 experience_matches = _query_matches(
                     db, "object_experiences",
@@ -3397,6 +3368,34 @@ def build_world_model_context(
                 "created_at", 250,
             )
             fusion_rows = _merge_query_matches(fusion_rows, fusion_matches, "id")
+
+        if "object_properties" in available_tables:
+            # Conflict counts cover the complete user-scoped property set,
+            # even when the prompt includes only a bounded recent/matching row window.
+            property_keys = {
+                (str(row["object_id"]), str(row["property_key"]))
+                for row in property_rows
+            }
+            for object_id, property_key in property_keys:
+                count = db.execute(
+                    """SELECT COUNT(DISTINCT property_value)
+                       FROM object_properties
+                       WHERE user_id=? AND object_id=? AND property_key=?""",
+                    (user_id, object_id, property_key),
+                ).fetchone()[0]
+                if count > 1:
+                    values = db.execute(
+                        """SELECT DISTINCT property_value
+                           FROM object_properties
+                           WHERE user_id=? AND object_id=? AND property_key=?
+                           ORDER BY property_value LIMIT 20""",
+                        (user_id, object_id, property_key),
+                    ).fetchall()
+                    property_conflict_metadata[(object_id, property_key)] = {
+                        "count": int(count),
+                        "values": [str(value[0])[:500] for value in values],
+                        "truncated": int(count) > len(values),
+                    }
 
     for row in entity_rows:
         item = dict(row)

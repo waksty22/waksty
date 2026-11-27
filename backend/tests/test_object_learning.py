@@ -13,6 +13,7 @@ from learning.object_learning import (
     init_object_learning_tables,
     teach_object_property,
     confirm_object_property,
+    correct_object_property,
     list_known_objects,
     compare_known_objects,
     record_object_experience,
@@ -386,6 +387,80 @@ def test_owner_can_confirm_only_an_existing_object_property(db):
     )
     assert later_teaching["source_type"] == "confirmed"
     assert later_teaching["evidence"] == "Vérification explicite du Créateur."
+
+
+def test_creator_correction_preserves_old_object_property_evidence(db):
+    add_recognized_object(db, "pomme")
+    original = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Première leçon du Créateur.", confidence=0.8,
+    )
+
+    corrected = correct_object_property(
+        db, "creator", "pomme", "couleur", "verte",
+        "jaune", "Correction explicite du Créateur après vérification.",
+    )
+
+    assert corrected["previous_value"] == "verte"
+    assert corrected["property_value"] == "jaune"
+    assert corrected["source_type"] == "confirmed"
+    assert corrected["confidence"] == 1.0
+    assert corrected["history_preserved"] is True
+
+    current = db.execute(
+        """SELECT property_value, source_type, confidence, evidence
+           FROM object_properties WHERE id=?""",
+        (db.execute("SELECT id FROM object_properties WHERE user_id='creator'").fetchone()[0],),
+    ).fetchone()
+    assert current["property_value"] == "jaune"
+    assert current["source_type"] == "confirmed"
+    history = db.execute(
+        """SELECT previous_value, corrected_value, previous_source_type,
+                  previous_confidence, previous_evidence, correction_evidence
+           FROM object_property_history WHERE id=?""",
+        (corrected["history_id"],),
+    ).fetchone()
+    assert dict(history) == {
+        "previous_value": "verte",
+        "corrected_value": "jaune",
+        "previous_source_type": "taught",
+        "previous_confidence": 0.8,
+        "previous_evidence": "Première leçon du Créateur.",
+        "correction_evidence": "Correction explicite du Créateur après vérification.",
+    }
+
+
+def test_object_property_correction_is_user_scoped_and_requires_existing_value(db):
+    add_recognized_object(db, "pomme")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    with pytest.raises(ValueError, match="introuvable"):
+        correct_object_property(
+            db, "other", "pomme", "couleur", "rouge", "jaune", "preuve",
+        )
+    with pytest.raises(ValueError, match="introuvable"):
+        correct_object_property(
+            db, "creator", "pomme", "couleur", "bleue", "jaune", "preuve",
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_property_history").fetchone()[0] == 0
+
+
+def test_object_property_correction_rejects_empty_or_duplicate_values(db):
+    add_recognized_object(db, "pomme")
+    teach_object_property(db, "creator", "pomme", "couleur", "rouge")
+    teach_object_property(db, "creator", "pomme", "couleur", "jaune")
+    with pytest.raises(ValueError):
+        correct_object_property(
+            db, "creator", "pomme", "couleur", "rouge", "rouge", "preuve",
+        )
+    with pytest.raises(ValueError, match="existe déjà"):
+        correct_object_property(
+            db, "creator", "pomme", "couleur", "rouge", "jaune", "preuve",
+        )
+    with pytest.raises(ValueError, match="preuve explicite"):
+        correct_object_property(
+            db, "creator", "pomme", "couleur", "rouge", "verte", "",
+        )
+    assert db.execute("SELECT COUNT(*) FROM object_property_history").fetchone()[0] == 0
 
 
 def test_owner_cannot_confirm_missing_property_or_without_evidence(db):

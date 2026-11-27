@@ -94,7 +94,8 @@ def test_concurrent_summary_insert_does_not_duplicate_journal(monkeypatch):
     monkeypatch.setattr(server, "db_connection", fake_db_connection)
     result = server.consolidate_conversation("creator")
 
-    assert result["created"] is True
+    assert result["created"] is False
+    assert result["summary"] == "Résumé déjà consolidé"
     assert result["through_id"] == 10
     assert db.execute(
         "SELECT COUNT(*) FROM conversation_summaries WHERE user_id='creator'"

@@ -50,6 +50,39 @@ def test_world_context_counts_conflicts_beyond_bounded_recent_rows(db, monkeypat
     assert all(item["conflicting_values_truncated"] is True for item in colors)
 
 
+def test_world_context_batches_conflicts_without_cross_user_mixing(db, monkeypatch):
+    import server
+
+    add_recognized_object(db, "balle")
+    add_recognized_object(db, "pomme")
+    add_recognized_object(db, "balle", user_id="other")
+    teach_object_property(db, "creator", "balle", "couleur", "rouge")
+    teach_object_property(db, "creator", "balle", "couleur", "bleue")
+    teach_object_property(db, "creator", "pomme", "forme", "ronde")
+    teach_object_property(db, "creator", "pomme", "forme", "ovale")
+    teach_object_property(db, "other", "balle", "couleur", "jaune")
+    teach_object_property(db, "other", "balle", "couleur", "verte")
+    monkeypatch.setattr(server, "db_connection", lambda: db)
+
+    context = server.build_world_model_context("creator")
+    payload = json.loads(context.splitlines()[1])
+    colors = [
+        item for item in payload["object_properties"]
+        if item["object"] == "object:balle" and item["property"] == "couleur"
+    ]
+    shapes = [
+        item for item in payload["object_properties"]
+        if item["object"] == "object:pomme" and item["property"] == "forme"
+    ]
+
+    assert {item["value"] for item in colors} == {"rouge", "bleue"}
+    assert all(item["conflicting_values"] == ["bleue", "rouge"] for item in colors)
+    assert all(item["conflicting_value_count"] == 2 for item in colors)
+    assert {item["value"] for item in shapes} == {"ronde", "ovale"}
+    assert all(item["conflicting_values"] == ["ovale", "ronde"] for item in shapes)
+    assert all(item["conflicting_value_count"] == 2 for item in shapes)
+
+
 def test_world_context_marks_conflicting_object_properties_for_chat_and_live(db, monkeypatch):
     import json
     import server

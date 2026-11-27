@@ -305,14 +305,23 @@ def test_new_turn_is_indexed_immediately_while_old_autobiographical_backlog_rema
 
 
 
-@pytest.mark.parametrize("bad_user", [None, 123, True, "", " " , "x" * 129])
-@pytest.mark.parametrize("bad_cursor", [True, False, 1.5, "7", 0, -1])
-def test_outbox_enqueue_rejects_coerced_user_and_cursor_without_writing(
-    bad_user, bad_cursor
-):
+@pytest.mark.parametrize("bad_user", [None, 123, True, "", " ", "x" * 129])
+def test_outbox_enqueue_rejects_invalid_users_without_writing(bad_user):
     db = sqlite3.connect(":memory:")
     with pytest.raises(ValueError):
-        enqueue_conversation_finalization(db, bad_user, bad_cursor)
+        enqueue_conversation_finalization(db, bad_user, 7)
+    assert db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name='conversation_finalization_outbox'"
+    ).fetchone() is None
+    db.close()
+
+
+@pytest.mark.parametrize("bad_cursor", [True, False, 1.5, "7", 0, -1])
+def test_outbox_enqueue_rejects_invalid_cursors_without_writing(bad_cursor):
+    db = sqlite3.connect(":memory:")
+    with pytest.raises(ValueError):
+        enqueue_conversation_finalization(db, "creator", bad_cursor)
     assert db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name='conversation_finalization_outbox'"

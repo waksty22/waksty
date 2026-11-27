@@ -52,16 +52,24 @@ def enqueue_conversation_finalization(
 
 
 def list_pending_conversation_finalizations(
-    db: Any, limit: int = 100,
+    db: Any, limit: int = 100, user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     init_conversation_finalization_outbox(db)
-    rows = db.execute("""
+    where = "status='pending'"
+    params: list[Any] = []
+    if user_id is not None:
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("A valid user filter is required")
+        where += " AND user_id=?"
+        params.append(user_id.strip())
+    params.append(max(1, min(int(limit), 500)))
+    rows = db.execute(f"""
         SELECT id, user_id, through_conversation_id, attempts
         FROM conversation_finalization_outbox
-        WHERE status='pending'
+        WHERE {where}
         ORDER BY id ASC
         LIMIT ?
-    """, (max(1, min(int(limit), 500)),)).fetchall()
+    """, params).fetchall()
     return [
         {
             "id": int(row["id"]),

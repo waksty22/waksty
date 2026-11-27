@@ -195,3 +195,26 @@ def test_recovery_drains_more_than_one_consolidation_page(tmp_path, monkeypatch)
         pending_after = list_pending_conversation_finalizations(db)
     assert summary["through_conversation_id"] == 90
     assert pending_after == []
+
+
+def test_user_finalization_is_not_starved_by_other_users_pending_jobs(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "outbox-user-scope.sqlite3"
+    _isolate_database(monkeypatch, database)
+    with server.db_connection() as db:
+        for index in range(500):
+            enqueue_conversation_finalization(db, f"other-user-{index}", index + 1)
+        enqueue_conversation_finalization(db, "creator", 1)
+        db.commit()
+
+    report = server.finalize_conversation_turn("creator")
+    assert report == {"pending": 0, "completed": 1}
+
+    with server.db_connection() as db:
+        creator_jobs = list_pending_conversation_finalizations(
+            db, user_id="creator"
+        )
+        other_jobs = list_pending_conversation_finalizations(db, limit=500)
+    assert creator_jobs == []
+    assert len(other_jobs) == 500

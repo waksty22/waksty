@@ -109,7 +109,7 @@ from learning.live_visual_observation import (
     live_visual_observation_due,
 )
 from learning.object_learning import (
-    init_object_learning_tables, teach_object_property, confirm_object_property,
+    init_object_learning_tables, teach_object_property, confirm_object_property, correct_object_property,
     list_known_objects, compare_known_objects, record_object_experience,
 )
 from learning.causal_learning import (
@@ -6033,6 +6033,46 @@ async def api_teach_object_property(
             )
             db.commit()
         return {"ok": True, "property": result}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/learning/object-property/correct")
+async def api_correct_object_property(
+    request: Request,
+    auth=Depends(require_auth),
+):
+    """Correct a learned object property only after explicit Creator approval."""
+    user_id = _authenticated_user(auth)
+    data = await _json_object(request)
+    if data.get("supervisor_approved") is not True:
+        raise HTTPException(status_code=403, detail="Une approbation explicite du Créateur est obligatoire.")
+    try:
+        with db_connection() as db:
+            result = correct_object_property(
+                db, user_id,
+                data.get("word", ""),
+                data.get("property", ""),
+                data.get("previous_value", ""),
+                data.get("value", ""),
+                data.get("evidence", ""),
+            )
+            object_id = "object:" + result["word"]
+            entity = get_world_entity(db, user_id, object_id) or {}
+            properties = dict(entity.get("properties") or {})
+            learned = dict(properties.get("learned_properties") or {})
+            values = list(learned.get(result["property_key"]) or [])
+            values = [value for value in values if value != result["previous_value"]]
+            if result["property_value"] not in values:
+                values.append(result["property_value"])
+            learned[result["property_key"]] = values
+            properties["learned_properties"] = learned
+            upsert_world_entity(
+                db, user_id, object_id, "object", properties,
+                source_type="confirmed", confidence=1.0,
+            )
+            db.commit()
+        return {"ok": True, "property": result, "history_preserved": True}
     except (ValueError, PermissionError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

@@ -45,13 +45,20 @@ def autobiographical_integrity_report(
         """,
         (user_id,),
     ).fetchall()
+    # Only materialize source rows referenced by autobiographical events.
+    # The full conversation table may be much larger than the memory index.
     sources = db.execute(
         """
         SELECT id, user_id, role, content, created_at
         FROM conversations
         WHERE user_id=?
+          AND id IN (
+              SELECT source_conversation_id
+              FROM autobiographical_events
+              WHERE user_id=?
+          )
         """,
-        (user_id,),
+        (user_id, user_id),
     ).fetchall()
     source_by_id = {row["id"]: row for row in sources}
 
@@ -82,26 +89,45 @@ def autobiographical_integrity_report(
         valid += 1
         indexed_source_ids.add(item["source_conversation_id"])
 
-    valid_source_ids = {
-        row["id"]
-        for row in db.execute(
-            """
-            SELECT id
+    valid_source_count = int(db.execute(
+        """
+        SELECT COUNT(*)
+        FROM conversations
+        WHERE user_id=?
+          AND typeof(id)='integer' AND id > 0
+          AND role IN ('user', 'assistant')
+          AND typeof(content)='text' AND length(trim(content)) > 0
+          AND typeof(created_at)='text'
+          AND julianday(created_at) IS NOT NULL
+        """,
+        (user_id,),
+    ).fetchone()[0])
+
+    # Count indexed sources in bounded batches rather than retaining every
+    # valid conversation ID in Python. The batches stay below SQLite's
+    # traditional 999-variable limit.
+    indexed_valid_source_count = 0
+    indexed_ids = sorted(indexed_source_ids)
+    for offset in range(0, len(indexed_ids), 500):
+        batch = indexed_ids[offset:offset + 500]
+        placeholders = ",".join("?" for _ in batch)
+        indexed_valid_source_count += int(db.execute(
+            f"""
+            SELECT COUNT(*)
             FROM conversations
             WHERE user_id=?
+              AND id IN ({placeholders})
               AND typeof(id)='integer' AND id > 0
               AND role IN ('user', 'assistant')
               AND typeof(content)='text' AND length(trim(content)) > 0
               AND typeof(created_at)='text'
               AND julianday(created_at) IS NOT NULL
             """,
-            (user_id,),
-        ).fetchall()
-    }
+            (user_id, *batch),
+        ).fetchone()[0])
 
-    # A source is indexed only when a provenance-valid event was found above.
     # A malformed or mismatched event must not hide an otherwise valid source.
-    unindexed = len(valid_source_ids - indexed_source_ids)
+    unindexed = valid_source_count - indexed_valid_source_count
     return {
         "source_table_available": True,
         "total_events": len(events),

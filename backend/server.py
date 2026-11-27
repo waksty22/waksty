@@ -3685,6 +3685,18 @@ def _memory_fact_is_grounded_in_user_text(content: str, user_text: str) -> bool:
     )
 
 
+def _contains_literal_phrase(text: str, phrase: str) -> bool:
+    """Match a literal word/phrase without accepting it inside a larger token."""
+    if not isinstance(text, str) or not isinstance(phrase, str) or not phrase.strip():
+        return False
+    normalized_text = text.casefold()
+    normalized_phrase = phrase.strip().casefold()
+    return re.search(
+        rf"(?<!\\w){re.escape(normalized_phrase)}(?!\\w)",
+        normalized_text,
+    ) is not None
+
+
 def execute_tool(
     name: str,
     args: dict[str, Any],
@@ -3762,8 +3774,8 @@ def execute_tool(
             grounded_clause = "?" not in source and any(
                 correction_intent.search(clause)
                 and not negative_intent.search(clause)
-                and word.casefold() in clause.casefold()
-                and corrected_value.casefold() in clause.casefold()
+                and _contains_literal_phrase(clause, word)
+                and _contains_literal_phrase(clause, corrected_value)
                 for clause in clauses
             )
             if not grounded_clause:
@@ -3827,8 +3839,8 @@ def execute_tool(
             grounded_clause = "?" not in source and any(
                 correction_intent.search(clause)
                 and not uncertainty_or_negation.search(clause)
-                and word.casefold() in clause.casefold()
-                and meaning.casefold() in clause.casefold()
+                and _contains_literal_phrase(clause, word)
+                and _contains_literal_phrase(clause, meaning)
                 for clause in clauses
             )
             if not grounded_clause:

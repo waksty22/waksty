@@ -1671,3 +1671,53 @@ def test_non_creator_cannot_read_storage_runtime_diagnostics():
         asyncio.run(server.api_storage_status(auth="other"))
 
     assert error.value.status_code == 403
+
+
+def test_storage_runtime_snapshot_is_safe_and_reports_sqlite_mount(monkeypatch, tmp_path):
+    import server
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "chappie.sqlite3")
+
+    result = server._storage_runtime_snapshot()
+
+    assert result == {
+        "diagnostic_available": True,
+        "active_backend": "sqlite",
+        "configuration_valid": True,
+        "turso_credentials_configured": False,
+        "sqlite_path_under_render_data_mount": False,
+        "turso_backup_endpoint_matches_active_backend": False,
+    }
+    assert str(tmp_path) not in repr(result)
+    assert "token" not in repr(result).casefold()
+
+
+def test_storage_runtime_snapshot_reports_turso_without_exposing_credentials(monkeypatch):
+    import server
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "turso")
+    monkeypatch.setenv("TURSO_DATABASE_URL", "libsql://isolated.invalid")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "secret-test-value")
+
+    result = server._storage_runtime_snapshot()
+
+    assert result["active_backend"] == "turso"
+    assert result["configuration_valid"] is True
+    assert result["turso_credentials_configured"] is True
+    assert result["turso_backup_endpoint_matches_active_backend"] is True
+    assert "secret-test-value" not in repr(result)
+
+
+def test_storage_runtime_snapshot_never_raises_for_invalid_configuration(monkeypatch):
+    import server
+
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "unknown")
+
+    result = server._storage_runtime_snapshot()
+
+    assert result["diagnostic_available"] is False
+    assert result["error_type"]
+    assert "secret" not in repr(result).casefold()

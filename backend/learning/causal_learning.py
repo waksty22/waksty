@@ -250,6 +250,19 @@ def evaluate_experiment(
     )
     if finalized.rowcount != 1:
         raise ValueError("Cette expérience a déjà été clôturée.")
+    # A hypothesis with both supporting and contradicting completed tests
+    # must not inherit the label of whichever experiment happened last.
+    evidence = db.execute(
+        """SELECT
+               SUM(CASE WHEN evaluation='supported' THEN 1 ELSE 0 END) AS supported,
+               SUM(CASE WHEN evaluation='contradicted' THEN 1 ELSE 0 END) AS contradicted
+           FROM causal_experiments
+           WHERE user_id=? AND hypothesis_id=? AND status='completed'""",
+        (user_id, row["hid"]),
+    ).fetchone()
+    if int(evidence["supported"] or 0) > 0 and int(evidence["contradicted"] or 0) > 0:
+        hypothesis_status = "uncertain"
+
     db.execute(
         """UPDATE causal_hypotheses SET confidence=?, status=?, evidence_count=evidence_count+1,
            updated_at=? WHERE id=? AND user_id=?""",

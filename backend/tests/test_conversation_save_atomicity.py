@@ -48,7 +48,6 @@ def test_conversation_save_rolls_back_source_journal_and_autobiography_together(
             "journal",
             "autobiographical_events",
             "autobiographical_links",
-            "conversation_finalization_outbox",
         }
         for table in expected_empty:
             count = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

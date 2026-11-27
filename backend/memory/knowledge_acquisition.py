@@ -34,7 +34,8 @@ def _timestamp_sort_key(value: Any) -> float:
         return float("-inf")
 
 def _terms(value: str) -> list[str]:
-    normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+    folded = str(value or "").casefold().replace("œ", "oe").replace("æ", "ae")
+    normalized = unicodedata.normalize("NFKD", folded)
     normalized = "".join(c for c in normalized if not unicodedata.combining(c))
     return list(dict.fromkeys(
         token for token in re.findall(r"[a-z0-9]+", normalized)

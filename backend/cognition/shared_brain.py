@@ -125,6 +125,10 @@ def _rows(
             "AND typeof(source_conversation_id)='integer' AND source_conversation_id > 0 "
             if "source_conversation_id" in autobiographical_columns else ""
         )
+        actor_filter = (
+            "AND actor IN ('user', 'assistant') "
+            if "actor" in autobiographical_columns else ""
+        )
         # Query-aware retrieval keeps old words AND their linked visual
         # evidence in the same bounded snapshot consumed by Chat and Live.
         query_terms = _query_terms(query) if table in {
@@ -258,7 +262,7 @@ def _rows(
                     f"SELECT * FROM {table} WHERE user_id=? "
                     "AND typeof(id)='integer' AND id > 0 "
                     f"{source_conversation_filter}"
-                    "AND actor IN ('user', 'assistant') "
+                    f"{actor_filter}"
                     "AND typeof(event_type)='text' AND length(trim(event_type)) > 0 "
                     "AND typeof(content)='text' AND length(trim(content)) > 0 "
                     "AND typeof(happened_at)='text' AND julianday(happened_at) IS NOT NULL "
@@ -445,7 +449,7 @@ def _rows(
                    WHERE user_id=?
                      AND typeof(id)='integer' AND id > 0
                      {source_conversation_filter}
-                     AND actor IN ('user', 'assistant')
+                     {actor_filter}
                      AND typeof(event_type)='text' AND length(trim(event_type)) > 0
                      AND typeof(content)='text' AND length(trim(content)) > 0
                      AND typeof(happened_at)='text'

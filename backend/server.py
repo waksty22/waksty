@@ -3692,7 +3692,7 @@ def _contains_literal_phrase(text: str, phrase: str) -> bool:
     normalized_text = text.casefold()
     normalized_phrase = phrase.strip().casefold()
     return re.search(
-        rf"(?<!\\w){re.escape(normalized_phrase)}(?!\\w)",
+        rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)",
         normalized_text,
     ) is not None
 

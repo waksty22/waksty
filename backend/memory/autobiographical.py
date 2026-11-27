@@ -671,11 +671,12 @@ def autobiographical_statistics(
     # This keeps dashboards honest when legacy/corrupt records are rejected by
     # list and search. Links count only when both endpoints are valid episodes.
     row = db.execute(
-        """
+        f"""
         WITH valid_events AS (
             SELECT id, user_id, actor
             FROM autobiographical_events
             WHERE user_id=?
+              AND 1=1 {_source_provenance_filter(db)}
               AND typeof(id)='integer' AND id > 0
               AND typeof(source_conversation_id)='integer'
               AND source_conversation_id > 0

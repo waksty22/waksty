@@ -16,6 +16,7 @@ import server
 from learning.language import init_language_tables, record_heard_word, advance_word
 from learning.sensory import init_sensory_tables, record_observation, associate_word_with_observation
 from learning.object_learning import init_object_learning_tables, teach_object_property
+from memory.autobiographical import init_autobiographical_tables
 from world.world_model import init_world_tables, upsert_world_entity
 
 
@@ -37,6 +38,7 @@ def object_api_db(monkeypatch):
             content TEXT, created_at TEXT
         )"""
     )
+    init_autobiographical_tables(db)
     init_language_tables(db)
     init_world_tables(db)
     init_sensory_tables(db)
@@ -223,6 +225,59 @@ def test_chat_can_record_a_grounded_object_experience(object_api_db):
     assert object_api_db.execute(
         "SELECT COUNT(*) FROM object_properties"
     ).fetchone()[0] == 1
+
+
+def test_object_experience_links_only_to_exact_persisted_autobiographical_source(object_api_db):
+    source = "J'ai poussé la pomme et elle est tombée."
+    object_api_db.execute(
+        """INSERT INTO conversations (id, user_id, role, content, created_at)
+           VALUES (101, 'creator', 'user', ?, '2026-11-27T14:00:00Z')""",
+        (source,),
+    )
+    object_api_db.commit()
+
+    result = server.execute_tool(
+        "record_object_experience",
+        {"word": "pomme", "action": "poussé la pomme", "outcome": "elle est tombée"},
+        "creator",
+        user_source_text=source,
+    )
+
+    assert result["recorded"] is True
+    linked_id = result["experience"]["autobiographical_event_id"]
+    assert isinstance(linked_id, int) and linked_id > 0
+    event = object_api_db.execute(
+        "SELECT user_id, actor, content FROM autobiographical_events WHERE id=?",
+        (linked_id,),
+    ).fetchone()
+    assert tuple(event) == ("creator", "user", source)
+    experience = object_api_db.execute(
+        "SELECT autobiographical_event_id FROM object_experiences"
+    ).fetchone()
+    assert experience[0] == linked_id
+
+
+def test_object_experience_does_not_link_to_another_users_matching_text(object_api_db):
+    source = "J'ai poussé la pomme et elle est tombée."
+    object_api_db.execute(
+        """INSERT INTO conversations (id, user_id, role, content, created_at)
+           VALUES (102, 'other', 'user', ?, '2026-11-27T14:00:00Z')""",
+        (source,),
+    )
+    object_api_db.commit()
+
+    result = server.execute_tool(
+        "record_object_experience",
+        {"word": "pomme", "action": "poussé la pomme", "outcome": "elle est tombée"},
+        "creator",
+        user_source_text=source,
+    )
+
+    assert result["recorded"] is True
+    assert result["experience"]["autobiographical_event_id"] is None
+    assert object_api_db.execute(
+        "SELECT COUNT(*) FROM autobiographical_events WHERE user_id='creator'"
+    ).fetchone()[0] == 0
 
 
 @pytest.mark.parametrize(

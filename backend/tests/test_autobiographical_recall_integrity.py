@@ -48,7 +48,7 @@ def test_autobiographical_recall_skips_malformed_persisted_candidates():
             happened_at, importance, created_at)
            VALUES ('creator', 4, 'user', 'user_statement',
                    'Horloge mécanique avec date corrompue',
-                   '2026-11-28T10:00:00Z', 3, '2026-11-28T10:00:00Z')"""
+                   'not-a-date', 3, '2026-11-28T10:00:00Z')"""
     )
     db.execute(
         """INSERT INTO autobiographical_events

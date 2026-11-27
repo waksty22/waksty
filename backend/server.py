@@ -2329,7 +2329,7 @@ def get_latest_summary(user_id: str) -> str:
             SELECT summary
             FROM conversation_summaries
             WHERE user_id=?
-            ORDER BY id DESC
+            ORDER BY through_conversation_id DESC, id DESC
             LIMIT 1
             """,
             (user_id,),

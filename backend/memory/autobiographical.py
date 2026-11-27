@@ -100,6 +100,26 @@ def _source_matches_event(
     )
 
 
+def _source_provenance_filter(db: sqlite3.Connection) -> str:
+    """Filter ungrounded episodes before applying a chronological page limit."""
+    table = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'"
+    ).fetchone()
+    if table is None:
+        return ""
+    return """
+        AND EXISTS (
+            SELECT 1 FROM conversations source_message
+            WHERE source_message.id=autobiographical_events.source_conversation_id
+              AND source_message.user_id=autobiographical_events.user_id
+              AND source_message.role=autobiographical_events.actor
+              AND typeof(source_message.content)='text'
+              AND substr(trim(source_message.content), 1, 8000)=autobiographical_events.content
+              AND source_message.created_at=autobiographical_events.happened_at
+        )
+    """
+
+
 def init_autobiographical_tables(db: sqlite3.Connection) -> None:
     db.executescript("""
         CREATE TABLE IF NOT EXISTS autobiographical_events (
@@ -304,7 +324,7 @@ def list_autobiographical_events(
     user_id = _validated_user_id(user_id)
     limit = _bounded_limit(limit, 100)
     params: list[Any] = [user_id]
-    where = "user_id=?"
+    where = "user_id=?" + _source_provenance_filter(db)
     if before_id is not None:
         before_id = _validated_integer(before_id, "Identifiant de pagination")
         cursor = db.execute(

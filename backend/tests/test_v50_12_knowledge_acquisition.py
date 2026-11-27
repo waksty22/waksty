@@ -513,7 +513,7 @@ def test_query_retrieval_matches_uppercase_accented_words_in_older_memory():
 
 def test_query_retrieval_matches_decomposed_unicode_accents():
     db = make_db()
-    decomposed_school = "E\\u0301COLE"
+    decomposed_school = "E\u0301COLE"
     db.execute(
         """INSERT INTO memories_v19 VALUES
            (1, 'creator', 'général', ?, 'confirmed', 0.9, 5,

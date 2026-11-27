@@ -286,3 +286,46 @@ def test_sync_does_not_link_events_with_mismatched_source_content():
     assert links == 0
     db.close()
 
+
+
+
+def test_non_positive_conversation_ids_cannot_starve_valid_autobiographical_sync():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    # Corrupt legacy IDs sort before the valid conversation and previously
+    # consumed the bounded SQL page before Python rejected them.
+    db.executemany(
+        "INSERT INTO conversations VALUES (?, 'creator', 'user', ?, ?)",
+        [
+            (
+                -(index + 1),
+                f"Expérience avec source négative {index}",
+                f"2026-11-27T10:{index // 60:02d}:{index % 60:02d}Z",
+            )
+            for index in range(1005)
+        ],
+    )
+    db.execute(
+        "INSERT INTO conversations VALUES (1, 'creator', 'user', ?, ?)",
+        ("Souvenir ancien valide", "2020-01-01T10:00:00Z"),
+    )
+    db.commit()
+
+    result = sync_autobiographical_events(db, "creator", limit=1)
+
+    assert result["inserted"] == 1
+    event = db.execute(
+        "SELECT source_conversation_id, content FROM autobiographical_events"
+    ).fetchone()
+    assert tuple(event) == (1, "Souvenir ancien valide")
+    db.close()

@@ -108,3 +108,50 @@ def test_linked_reply_is_not_returned_when_its_source_no_longer_matches():
     assert results[0]["source_conversation_id"] == 1
     assert results[0]["dialogue_context"] is False
     db.close()
+
+
+def test_search_batches_source_provenance_checks_per_history_page():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    timestamp = "2026-11-27T10:00:00Z"
+    for source_id in range(1, 9):
+        content = f"Souvenir horloge numéro {source_id}"
+        db.execute(
+            "INSERT INTO conversations VALUES (?, 'creator', 'user', ?, ?)",
+            (source_id, content, timestamp),
+        )
+        db.execute(
+            """
+            INSERT INTO autobiographical_events
+                (user_id, source_conversation_id, actor, event_type, content,
+                 happened_at, importance, created_at)
+            VALUES ('creator', ?, 'user', 'user_statement', ?, ?, 3, ?)
+            """,
+            (source_id, content, timestamp, timestamp),
+        )
+    db.commit()
+
+    source_selects = []
+    db.set_trace_callback(
+        lambda statement: source_selects.append(statement)
+        if "FROM conversations" in statement
+        and "id IN (" in statement
+        else None
+    )
+    results = search_autobiographical_events(
+        db, "creator", "souvenir horloge", limit=10
+    )
+
+    assert len(results) == 8
+    assert len(source_selects) == 1
+    db.close()

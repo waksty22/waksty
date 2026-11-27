@@ -528,3 +528,22 @@ def test_query_retrieval_matches_decomposed_unicode_accents():
         for item in result["items"]
     )
     db.close()
+
+def test_query_retrieval_expands_latin_ligatures_consistently():
+    db = make_db()
+    db.executemany(
+        """INSERT INTO memories_v19 VALUES
+           (?, 'creator', 'général', ?, 'confirmed', 0.9, 5,
+            '2026-11-27', '2026-11-27')""",
+        [
+            (1, "Le cœur de Chappie est sa mémoire."),
+            (2, "Un æther imaginaire est décrit dans le récit."),
+        ],
+    )
+    db.commit()
+
+    coeur = retrieve_acquired_knowledge(db, "creator", "coeur")
+    aether = retrieve_acquired_knowledge(db, "creator", "aether")
+    assert any(item["source_id"] == 1 for item in coeur["items"])
+    assert any(item["source_id"] == 2 for item in aether["items"])
+    db.close()

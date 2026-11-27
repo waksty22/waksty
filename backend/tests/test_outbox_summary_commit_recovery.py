@@ -188,3 +188,69 @@ def test_latest_autobiographical_summary_uses_highest_durable_cursor(
 
     assert server.get_latest_summary("creator") == "Résumé au curseur 20"
 
+
+
+
+def test_real_libsql_conversation_outbox_retry_and_completion_contract():
+    """Exercise durable outbox transitions on isolated in-memory libSQL."""
+    import pytest
+
+    libsql = pytest.importorskip("libsql")
+    from memory.conversation_outbox import (
+        enqueue_conversation_finalization,
+        init_conversation_finalization_outbox,
+        list_pending_conversation_finalizations,
+        mark_conversation_finalization,
+    )
+    from storage.libsql_adapter import adapt_libsql_connection
+
+    db = adapt_libsql_connection(libsql.connect(database=":memory:"))
+    try:
+        init_conversation_finalization_outbox(db)
+        assert enqueue_conversation_finalization(db, "creator", 41) is True
+        db.commit()
+
+        # The unique key makes duplicate enqueue idempotent.
+        assert enqueue_conversation_finalization(db, "creator", 41) is False
+        db.commit()
+
+        pending = list_pending_conversation_finalizations(
+            db, user_id="creator"
+        )
+        assert len(pending) == 1
+        job_id = pending[0]["id"]
+        assert pending[0]["through_conversation_id"] == 41
+        assert pending[0]["attempts"] == 0
+
+        # A failed attempt remains retryable and records its diagnostic.
+        mark_conversation_finalization(
+            db, job_id, error="temporary consolidation failure"
+        )
+        db.commit()
+        retry = list_pending_conversation_finalizations(
+            db, user_id="creator"
+        )
+        assert len(retry) == 1
+        assert retry[0]["attempts"] == 1
+
+        # Successful completion removes it from the pending view.
+        mark_conversation_finalization(db, job_id)
+        db.commit()
+        assert list_pending_conversation_finalizations(
+            db, user_id="creator"
+        ) == []
+
+        row = db.execute(
+            """
+            SELECT status, attempts, last_error, completed_at
+            FROM conversation_finalization_outbox
+            WHERE id=?
+            """,
+            (job_id,),
+        ).fetchone()
+        assert row["status"] == "completed"
+        assert row["attempts"] == 2
+        assert row["last_error"] == ""
+        assert row["completed_at"]
+    finally:
+        db.close()

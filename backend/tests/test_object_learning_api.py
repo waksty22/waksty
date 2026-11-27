@@ -197,6 +197,66 @@ def test_non_creator_cannot_use_object_correction_endpoint_even_with_approval(ob
     ).fetchone()[0] == 0
 
 
+def test_chat_can_record_a_grounded_object_experience(object_api_db):
+    result = server.execute_tool(
+        "record_object_experience",
+        {
+            "word": "pomme",
+            "action": "poussé la pomme",
+            "outcome": "elle est tombée",
+        },
+        "creator",
+        user_source_text="J'ai poussé la pomme et elle est tombée.",
+    )
+
+    assert result["recorded"] is True
+    assert result["promoted_to_property"] is False
+    assert result["causality_confirmed"] is False
+    row = object_api_db.execute(
+        """SELECT action, outcome, source_type, confidence, evidence
+           FROM object_experiences"""
+    ).fetchone()
+    assert tuple(row) == (
+        "poussé la pomme", "elle est tombée", "taught", 0.9,
+        "J'ai poussé la pomme et elle est tombée.",
+    )
+    assert object_api_db.execute(
+        "SELECT COUNT(*) FROM object_properties"
+    ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Est-ce que j'ai poussé la pomme et elle est tombée ?",
+        "Je pense avoir poussé la pomme et elle est peut-être tombée.",
+        "Je n'ai pas poussé la pomme et elle est tombée.",
+        "J'ai peut-être poussé la pomme et elle est tombée.",
+    ],
+)
+def test_chat_rejects_uncertain_or_negated_object_experiences(object_api_db, message):
+    result = server.execute_tool(
+        "record_object_experience",
+        {
+            "word": "pomme",
+            "action": "poussé la pomme",
+            "outcome": "elle est tombée",
+        },
+        "creator",
+        user_source_text=message,
+    )
+
+    assert result["recorded"] is False
+    assert object_api_db.execute(
+        "SELECT COUNT(*) FROM object_experiences"
+    ).fetchone()[0] == 0
+
+
+def test_object_experience_tool_is_declared_for_chat_and_live():
+    declarations = server.TOOLS[0]["functionDeclarations"]
+    assert any(item["name"] == "record_object_experience" for item in declarations)
+
+
 def test_non_creator_cannot_confirm_object_property(object_api_db):
     payload = {
         "word": "pomme",

@@ -3566,6 +3566,19 @@ TOOLS = [{
             },
         },
         {
+            "name": "record_object_experience",
+            "description": "Enregistrer une expérience personnelle réellement vécue avec un objet déjà connu. À utiliser uniquement si le message actuel décrit explicitement une action passée et son résultat ; le nom de l'objet, l'action et le résultat doivent être présents littéralement dans le message. Refuser les questions, négations, hypothèses et incertitudes. Cette opération conserve une expérience sourcée sans transformer automatiquement le résultat en propriété ou en loi causale.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "word": {"type": "STRING"},
+                    "action": {"type": "STRING"},
+                    "outcome": {"type": "STRING"},
+                },
+                "required": ["word", "action", "outcome"],
+            },
+        },
+        {
             "name": "correct_word_definition",
             "description": "Corriger une définition de vocabulaire UNIQUEMENT lorsque le Créateur authentifié formule explicitement une correction dans son message actuel. Le mot et la nouvelle définition doivent apparaître littéralement dans ce message ; refuser les questions, hypothèses, formulations incertaines ou négations. Préserver la définition précédente dans l'historique. Ne jamais appeler pour un utilisateur autre que le Créateur.",
             "parameters": {
@@ -3841,6 +3854,59 @@ def execute_tool(
                 "property": result,
                 "history_preserved": True,
                 "approval_basis": "explicit_authenticated_creator_message",
+            }
+
+        if name == "record_object_experience":
+            word = args.get("word", "")
+            action = args.get("action", "")
+            outcome = args.get("outcome", "")
+            if not all(isinstance(value, str) and value.strip() for value in (
+                word, action, outcome, user_source_text
+            )):
+                raise ValueError("L'objet, l'action, le résultat et le message source sont obligatoires.")
+            source = re.sub(r"\s+", " ", user_source_text).strip()
+            uncertain_or_negative = re.compile(
+                r"\b(?:ne\s+(?:l'ai|l'avons|l'a)\s+pas|"
+                r"je\s+(?:pense|crois)|peut[- ]être|probablement|"
+                r"il semble|elle semble|pas sûr|pas certain|"
+                r"pas certaine|j'imagine|j'imaginais)\b",
+                re.IGNORECASE,
+            )
+            past_action = re.compile(
+                r"\b(?:j'ai|nous avons|on a|je viens de|nous venons de)\b",
+                re.IGNORECASE,
+            )
+            if (
+                "?" in source
+                or uncertain_or_negative.search(source)
+                or not past_action.search(source)
+                or not all(_contains_literal_phrase(source, value) for value in (
+                    word, action, outcome
+                ))
+            ):
+                return {
+                    "recorded": False,
+                    "error": (
+                        "Expérience refusée : le message actuel doit décrire sans ambiguïté "
+                        "une action passée et son résultat, avec l'objet, l'action et le résultat "
+                        "présents littéralement."
+                    ),
+                }
+            evidence = source.strip()
+            if len(evidence) > 1000:
+                raise ValueError("La preuve de l'expérience dépasse 1000 caractères.")
+            with db_connection() as experience_db:
+                result = record_object_experience(
+                    experience_db, user_id, word, action, outcome,
+                    evidence=evidence, confidence=0.9, source_type="taught",
+                )
+                experience_db.commit()
+            return {
+                "recorded": True,
+                "experience": result,
+                "provenance": "explicit_user_statement",
+                "promoted_to_property": False,
+                "causality_confirmed": False,
             }
 
         if name == "correct_word_definition":

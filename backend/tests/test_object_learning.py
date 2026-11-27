@@ -678,3 +678,24 @@ def test_repeated_identical_object_property_is_not_a_conflict(db):
     listed = next(item for item in list_known_objects(db, "creator")
                   if item["word"] == "pomme")
     assert listed["property_conflicts"] == {}
+
+
+
+def test_known_object_list_hides_objects_before_vocabulary_recognition(db):
+    word = "toupie"
+    record_heard_word(db, "creator", word)
+    upsert_world_entity(
+        db, "creator", "object:" + word, "object",
+        {"label": word}, source_type="observed", confidence=0.6,
+    )
+
+    assert list_known_objects(db, "creator") == []
+
+    advance_word(db, "creator", word, "imitated")
+    assert list_known_objects(db, "creator") == []
+
+    advance_word(db, "creator", word, "recognized")
+    listed = list_known_objects(db, "creator")
+    assert len(listed) == 1
+    assert listed[0]["word"] == word
+    assert listed[0]["vocabulary_state"] == "recognized"

@@ -625,4 +625,27 @@ def test_known_objects_are_ordered_by_absolute_observation_time(db):
     db.execute("UPDATE world_entities SET last_observed_at=? WHERE id=?",
                ("2026-11-26T08:30:00Z", "object:banane"))
     assert [item["word"] for item in list_known_objects(db, "creator")] == [
-        "banane", "pomme"]
+        "banane", "pomme"]\n\ndef test_multiple_values_for_one_object_property_are_flagged_as_conflicting(db):
+    add_recognized_object(db, "pomme")
+    first = teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Première information enseignée.",
+    )
+    second = teach_object_property(
+        db, "creator", "pomme", "couleur", "verte",
+        evidence="Deuxième information enseignée.",
+    )
+
+    listed = next(item for item in list_known_objects(db, "creator")
+                  if item["word"] == "pomme")
+    colors = [item for item in listed["properties"]
+              if item["property_key"] == "couleur"]
+
+    assert {item["property_value"] for item in colors} == {"rouge", "verte"}
+    assert all(item["conflicted"] is True for item in colors)
+    assert listed["property_conflicts"] == {"couleur": ["rouge", "verte"]}
+    # The conflict is surfaced, not silently resolved or deleted.
+    assert db.execute(
+        "SELECT COUNT(*) FROM object_properties WHERE user_id='creator' "
+        "AND object_id='object:pomme' AND property_key='couleur'"
+    ).fetchone()[0] == 2

@@ -353,3 +353,36 @@ def test_outbox_mark_rejects_coerced_or_invalid_job_ids():
         "SELECT COUNT(*) FROM conversation_finalization_outbox"
     ).fetchone()[0] == 0
     db.close()
+
+
+def test_user_scoped_pending_outbox_uses_composite_index():
+    db = sqlite3.connect(":memory:")
+    try:
+        db.row_factory = sqlite3.Row
+        init_conversation_finalization_outbox(db)
+        for index in range(50):
+            enqueue_conversation_finalization(db, f"other-user-{index}", index + 1)
+        enqueue_conversation_finalization(db, "creator", 501)
+        db.commit()
+
+        plan = db.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT id, user_id, through_conversation_id, attempts
+            FROM conversation_finalization_outbox
+            WHERE status='pending' AND user_id=?
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            ("creator", 100),
+        ).fetchall()
+        details = " ".join(str(row["detail"]) for row in plan)
+        assert "idx_conversation_finalization_user_pending" in details
+
+        creator_jobs = list_pending_conversation_finalizations(
+            db, user_id="creator"
+        )
+        assert len(creator_jobs) == 1
+        assert creator_jobs[0]["user_id"] == "creator"
+    finally:
+        db.close()

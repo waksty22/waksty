@@ -6125,6 +6125,8 @@ async def api_correct_object_property(
 ):
     """Correct a learned object property only after explicit Creator approval."""
     user_id = _authenticated_user(auth)
+    if user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(status_code=403, detail="Seul le Créateur peut corriger les connaissances de Chappie.")
     data = await _json_object(request)
     if data.get("supervisor_approved") is not True:
         raise HTTPException(status_code=403, detail="Une approbation explicite du Créateur est obligatoire.")
@@ -6165,6 +6167,8 @@ async def api_confirm_object_property(
 ):
     """Confirm an existing object property through an explicit owner action."""
     user_id = _authenticated_user(auth)
+    if user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(status_code=403, detail="Seul le Créateur peut confirmer les connaissances de Chappie.")
     data = await _json_object(request)
     try:
         with db_connection() as db:

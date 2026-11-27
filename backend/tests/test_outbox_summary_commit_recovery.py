@@ -106,3 +106,52 @@ def test_outbox_retry_after_summary_commit_does_not_duplicate_summary(
     assert summary_rows == 1
     assert summary_journal_rows == 1
     assert pending_after_retry == []
+
+
+def test_outbox_uses_highest_summary_cursor_not_latest_insert_id(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "outbox-summary-cursor-order.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database)
+    server.init_db()
+
+    with server.db_connection() as db:
+        for index in range(25):
+            db.execute(
+                """
+                INSERT INTO conversations(user_id, role, content, created_at)
+                VALUES ('creator', 'user', ?, ?)
+                """,
+                (f"Message {index}", f"2026-11-27T16:00:{index:02d}Z"),
+            )
+        # Simulate legacy/out-of-order rows: the highest durable cursor was
+        # inserted first, while a lower cursor received the later row ID.
+        db.execute(
+            """
+            INSERT INTO conversation_summaries(
+                user_id, summary, through_conversation_id, created_at
+            ) VALUES ('creator', 'Résumé au curseur 20', 20, '2026-11-27T16:01:00Z')
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO conversation_summaries(
+                user_id, summary, through_conversation_id, created_at
+            ) VALUES ('creator', 'Ancien résumé au curseur 10', 10, '2026-11-27T16:02:00Z')
+            """
+        )
+        enqueue_conversation_finalization(db, "creator", 25)
+        db.commit()
+
+    def unexpected_consolidation(_user_id):
+        raise AssertionError("A valid cursor 20 must not trigger redundant consolidation")
+
+    monkeypatch.setattr(server, "consolidate_conversation", unexpected_consolidation)
+    result = server.finalize_conversation_turn("creator")
+
+    assert result == {"pending": 0, "completed": 1}

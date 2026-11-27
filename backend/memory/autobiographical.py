@@ -304,15 +304,12 @@ def sync_autobiographical_events(
         db.commit()
     if not include_counts:
         return {"inserted": inserted}
-    total = db.execute(
-        "SELECT COUNT(*) FROM autobiographical_events WHERE user_id=?",
-        (user_id,),
-    ).fetchone()[0]
-    links = db.execute(
-        "SELECT COUNT(*) FROM autobiographical_links WHERE user_id=?",
-        (user_id,),
-    ).fetchone()[0]
-    return {"inserted": inserted, "total_events": int(total), "dialogue_links": int(links)}
+    stats = autobiographical_statistics(db, user_id)
+    return {
+        "inserted": inserted,
+        "total_events": stats["total_events"],
+        "dialogue_links": stats["dialogue_links"],
+    }
 
 
 def list_autobiographical_events(

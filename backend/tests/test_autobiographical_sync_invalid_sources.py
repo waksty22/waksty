@@ -40,6 +40,41 @@ def test_invalid_early_conversations_do_not_starve_valid_autobiographical_sync()
     ).fetchone()
     assert tuple(row) == (5, "Mon souvenir valide")
     assert sync_autobiographical_events(db, "creator", limit=1)["inserted"] == 0
+
+    # Legacy rows with missing or mismatched sources must not inflate the
+    # synchronization counters shown to the API/dashboard.
+    db.execute(
+        """
+        INSERT INTO autobiographical_events
+            (user_id, source_conversation_id, actor, event_type, content,
+             happened_at, importance, created_at)
+        VALUES ('creator', 999, 'user', 'user_statement',
+                'Souvenir sans source', '2026-11-27T10:04:00Z', 3,
+                '2026-11-27T10:04:00Z')
+        """
+    )
+    invalid_event_id = db.execute(
+        "SELECT id FROM autobiographical_events WHERE source_conversation_id=999"
+    ).fetchone()[0]
+    valid_event_id = db.execute(
+        "SELECT id FROM autobiographical_events WHERE source_conversation_id=5"
+    ).fetchone()[0]
+    db.execute(
+        """
+        INSERT INTO autobiographical_links
+            (user_id, source_event_id, target_event_id, relation_type, created_at)
+        VALUES ('creator', ?, ?, 'same_dialogue_turn', '2026-11-27T10:04:00Z')
+        """,
+        (valid_event_id, invalid_event_id),
+    )
+    db.commit()
+
+    counted = sync_autobiographical_events(db, "creator", limit=1)
+    assert counted == {
+        "inserted": 0,
+        "total_events": 1,
+        "dialogue_links": 0,
+    }
     db.close()
 
 

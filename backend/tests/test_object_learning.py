@@ -439,8 +439,20 @@ def test_creator_correction_preserves_old_object_property_evidence(db):
 def test_object_property_correction_is_user_scoped_and_requires_existing_value(db):
     add_recognized_object(db, "poire")
     teach_object_property(db, "creator", "poire", "couleur", "rouge")
-    add_recognized_object(db, "poire", user_id="other")
-    with pytest.raises(ValueError, match="introuvable"):
+    # The global world-entity ID belongs to the Creator; another user must
+    # not gain access to that user's learned property through shared vocabulary
+    # or a visual association of their own.
+    record_heard_word(db, "other", "poire")
+    advance_word(db, "other", "poire", "imitated")
+    advance_word(db, "other", "poire", "recognized")
+    observation = record_observation(
+        db, "other", "vision", "image de poire", "camera_frame", 0.9
+    )
+    associate_word_with_observation(
+        db, "other", "poire", observation["observation_id"],
+        "Association visuelle validée",
+    )
+    with pytest.raises(ValueError, match="valide son association visuelle"):
         correct_object_property(
             db, "other", "poire", "couleur", "rouge", "jaune", "preuve",
         )

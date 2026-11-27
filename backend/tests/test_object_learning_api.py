@@ -257,6 +257,46 @@ def test_object_experience_links_only_to_exact_persisted_autobiographical_source
     assert experience[0] == linked_id
 
 
+def test_object_experience_ignores_matching_episode_with_invalid_source(object_api_db):
+    source = "J'ai poussé la pomme et elle est tombée."
+    timestamp = "2026-11-27T14:00:00Z"
+    object_api_db.executemany(
+        """INSERT INTO conversations (id, user_id, role, content, created_at)
+           VALUES (?, 'creator', 'user', ?, ?)""",
+        [
+            (101, source, timestamp),
+            # Existing source row, but its content no longer matches the
+            # copied autobiographical episode.
+            (999, "Contenu source différent.", timestamp),
+        ],
+    )
+    object_api_db.executemany(
+        """
+        INSERT INTO autobiographical_events
+            (id, user_id, source_conversation_id, actor, event_type, content,
+             happened_at, importance, created_at)
+        VALUES (?, 'creator', ?, 'user', 'user_statement', ?, ?, 3, ?)
+        """,
+        [
+            (10, 101, source, timestamp, timestamp),
+            # Same user and text, but this copied episode points to a missing
+            # source message. Its larger ID must not win the lookup.
+            (9999, 999, source, timestamp, timestamp),
+        ],
+    )
+    object_api_db.commit()
+
+    result = server.execute_tool(
+        "record_object_experience",
+        {"word": "pomme", "action": "poussé la pomme", "outcome": "elle est tombée"},
+        "creator",
+        user_source_text=source,
+    )
+
+    assert result["recorded"] is True
+    assert result["experience"]["autobiographical_event_id"] == 10
+
+
 def test_object_experience_does_not_link_to_another_users_matching_text(object_api_db):
     source = "J'ai poussé la pomme et elle est tombée."
     object_api_db.execute(

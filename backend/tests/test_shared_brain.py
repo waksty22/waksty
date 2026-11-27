@@ -827,3 +827,33 @@ def test_snapshot_orders_timezone_aware_sensory_observations_by_instant():
 
     assert [row["observation_id"] for row in snapshot["sensory_observations"]] == ["later", "earlier"]
     db.close()
+
+
+def test_autobiographical_recall_prefers_full_query_coverage_over_importance():
+    db = make_db()
+    db.execute("""
+        CREATE TABLE autobiographical_events (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            happened_at TEXT NOT NULL,
+            importance INTEGER NOT NULL
+        )
+    """)
+    db.executemany(
+        "INSERT INTO autobiographical_events VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (1, "creator", "conversation", "J'ai parlé d'une tasse", "2026-11-27", 5),
+            (2, "creator", "conversation", "La tasse rouge était sur la table", "2020-01-01", 2),
+            (3, "creator", "conversation", "Un vélo rouge", "2026-11-26", 4),
+        ],
+    )
+
+    snapshot = get_shared_brain_snapshot(
+        db, "creator", limit=3, query="Rappelle-moi la tasse rouge"
+    )
+
+    assert snapshot["autobiographical_events"][0]["id"] == 2
+    assert snapshot["autobiographical_events"][1]["id"] == 1
+    db.close()

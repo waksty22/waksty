@@ -21,7 +21,7 @@ def test_full_recall_page_preserves_reply_linked_to_strongest_user_memory():
          "Je note que ton horloge astronomique rouge est dans le salon",
          "2026-01-01T10:00:00Z", 1, "2026-01-01T10:00:00Z"),
         ("creator", 3, "user", "user_statement",
-         "J'ai aussi une horloge astronomique bleue dans l'atelier",
+         "J'ai aussi un objet astronomique bleu dans l'atelier",
          "2026-01-02T10:00:00Z", 3, "2026-01-02T10:00:00Z"),
     ]
     db.executemany(

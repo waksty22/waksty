@@ -109,11 +109,14 @@ db.executemany(
     [
         (1, "creator", "user", "J'ai acheté un vélo rouge pour aller au travail.", stamp),
         (2, "creator", "assistant", "Je note cette information pour plus tard.", stamp),
+        (3, "other-user", "user", "Mon vélo rouge secret est différent.", stamp),
     ],
 )
 result = sync_autobiographical_events(db, "creator")
 assert result["inserted"] == 2, result
 assert result["dialogue_links"] == 1, result
+other_result = sync_autobiographical_events(db, "other-user")
+assert other_result["inserted"] == 1, other_result
 db.close()
 '''
     first = _run_python(writer, database)
@@ -138,10 +141,23 @@ assert stats == {
 }, stats
 events = list_autobiographical_events(db, "creator", limit=10)
 assert {item["source_conversation_id"] for item in events} == {1, 2}
+by_source = {item["source_conversation_id"]: item for item in events}
+assert by_source[1]["actor"] == "user"
+assert by_source[1]["content"] == "J'ai acheté un vélo rouge pour aller au travail."
+assert by_source[2]["actor"] == "assistant"
+assert by_source[2]["content"] == "Je note cette information pour plus tard."
 results = search_autobiographical_events(db, "creator", "vélo rouge", limit=5)
 assert [item["id"] for item in results] == [1, 2], results
 assert results[0]["dialogue_context"] is False
 assert results[1]["dialogue_context"] is True
+assert search_autobiographical_events(
+    db, "creator", "secret différent", limit=5
+) == []
+other_results = search_autobiographical_events(
+    db, "other-user", "vélo rouge secret", limit=5
+)
+assert len(other_results) == 1, other_results
+assert other_results[0]["content"] == "Mon vélo rouge secret est différent."
 print(json.dumps({
     "events": stats["total_events"],
     "dialogue_links": stats["dialogue_links"],

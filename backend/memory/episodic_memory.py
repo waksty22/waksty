@@ -596,6 +596,23 @@ def search_episodic_memories(
                 category = item.get("category")
                 if not isinstance(content, str) or not isinstance(category, str):
                     continue
+                if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool):
+                    continue
+                if item.get("source_type") not in VALID_SOURCE_TYPES:
+                    continue
+                if not isinstance(item.get("importance"), int) or isinstance(item.get("importance"), bool):
+                    continue
+                raw_confidence = item.get("confidence")
+                if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+                    continue
+                try:
+                    confidence_value = float(raw_confidence)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+                    continue
+                if not isinstance(item.get("access_count"), int) or isinstance(item.get("access_count"), bool):
+                    continue
                 try:
                     parsed_tags = json.loads(item.get("tags") or "[]")
                     tags = (

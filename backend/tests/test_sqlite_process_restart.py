@@ -49,7 +49,7 @@ def test_chat_and_gemini_live_memory_survive_complete_process_restart(tmp_path):
         """
 import server
 server.init_db()
-server.sync_autobiographical_events = lambda db, user_id, commit=True: None
+server.sync_autobiographical_events = lambda db, user_id, commit=True, **kwargs: None
 server.save_conversation_turn(
     "creator", "Je t'apprends le mot pomme.",
     "J'ai entendu le mot pomme.", source="conversation",

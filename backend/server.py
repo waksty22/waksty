@@ -2495,22 +2495,25 @@ def save_conversation_turn(
     record_persistence_event("save_attempted", diagnostic_source)
     try:
         with db_connection() as db:
+            source_conversation_ids: list[int] = []
             if user_text:
-                db.execute(
+                cursor = db.execute(
                     """
                     INSERT INTO conversations(user_id, role, content, created_at)
                     VALUES(?,?,?,?)
                     """,
                     (user_id, "user", user_text, now),
                 )
+                source_conversation_ids.append(int(cursor.lastrowid))
             if assistant_text:
-                db.execute(
+                cursor = db.execute(
                     """
                     INSERT INTO conversations(user_id, role, content, created_at)
                     VALUES(?,?,?,?)
                     """,
                     (user_id, "assistant", assistant_text, now),
                 )
+                source_conversation_ids.append(int(cursor.lastrowid))
             db.execute(
                 """
                 INSERT INTO journal(user_id, entry, kind, created_at)
@@ -2523,8 +2526,12 @@ def save_conversation_turn(
                     now,
                 ),
             )
-            # Keep source indexing and the retry marker in the same transaction.
-            sync_autobiographical_events(db, user_id, commit=False)
+            # Index this turn immediately even when older history still needs
+            # bounded backfill; a large backlog must not hide fresh memories.
+            sync_autobiographical_events(
+                db, user_id, commit=False,
+                conversation_ids=source_conversation_ids,
+            )
             through_id = int(db.execute(
                 "SELECT COALESCE(MAX(id), 0) FROM conversations WHERE user_id=?",
                 (user_id,),

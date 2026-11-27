@@ -510,3 +510,21 @@ def test_query_retrieval_matches_uppercase_accented_words_in_older_memory():
         for item in result["items"]
     )
     db.close()
+
+def test_query_retrieval_matches_decomposed_unicode_accents():
+    db = make_db()
+    decomposed_school = "E\\u0301COLE"
+    db.execute(
+        """INSERT INTO memories_v19 VALUES
+           (1, 'creator', 'général', ?, 'confirmed', 0.9, 5,
+            '2020-01-01', '2020-01-01')""",
+        (f"Une {decomposed_school} a été visitée",),
+    )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "ecole")
+    assert any(
+        item["source_id"] == 1 and decomposed_school in item["content"]
+        for item in result["items"]
+    )
+    db.close()

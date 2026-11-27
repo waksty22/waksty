@@ -242,6 +242,9 @@ def test_comparison_returns_provenance_and_confidence_for_each_value(db):
     assert details["banane"][0]["value"] == "jaune"
     assert details["banane"][0]["source_type"] == "observed"
     assert details["banane"][0]["confidence"] == 0.6
+    listed = next(item for item in list_known_objects(db, "creator")
+                  if item["word"] == "pomme")
+    assert all(item["conflicted"] is False for item in listed["properties"])
 
 
 def test_confirmed_world_entity_cannot_be_overwritten_by_higher_confidence_observation(db):

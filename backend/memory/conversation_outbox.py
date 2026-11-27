@@ -38,10 +38,14 @@ def init_conversation_finalization_outbox(db: Any) -> None:
 def enqueue_conversation_finalization(
     db: Any, user_id: str, through_conversation_id: int,
 ) -> bool:
-    user = str(user_id or "").strip()[:128]
-    through_id = int(through_conversation_id)
-    if not user or through_id < 1:
+    if not isinstance(user_id, str):
         raise ValueError("A valid user and conversation cursor are required")
+    user = user_id.strip()
+    if not user or len(user) > 128:
+        raise ValueError("A valid user and conversation cursor are required")
+    if isinstance(through_conversation_id, bool) or not isinstance(through_conversation_id, int) or through_conversation_id < 1:
+        raise ValueError("A valid user and conversation cursor are required")
+    through_id = through_conversation_id
     init_conversation_finalization_outbox(db)
     cursor = db.execute("""
         INSERT OR IGNORE INTO conversation_finalization_outbox
@@ -55,20 +59,22 @@ def list_pending_conversation_finalizations(
     db: Any, limit: int = 100, user_id: str | None = None,
     after_id: int | None = None,
 ) -> list[dict[str, Any]]:
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("A valid outbox limit is required")
+    if user_id is not None and (not isinstance(user_id, str) or not user_id.strip()):
+        raise ValueError("A valid user filter is required")
+    if after_id is not None and (isinstance(after_id, bool) or not isinstance(after_id, int) or after_id < 0):
+        raise ValueError("A valid outbox cursor is required")
     init_conversation_finalization_outbox(db)
     where = "status='pending'"
     params: list[Any] = []
     if user_id is not None:
-        if not isinstance(user_id, str) or not user_id.strip():
-            raise ValueError("A valid user filter is required")
         where += " AND user_id=?"
         params.append(user_id.strip())
     if after_id is not None:
-        if isinstance(after_id, bool) or not isinstance(after_id, int) or after_id < 0:
-            raise ValueError("A valid outbox cursor is required")
         where += " AND id>?"
         params.append(after_id)
-    params.append(max(1, min(int(limit), 500)))
+    params.append(max(1, min(limit, 500)))
     rows = db.execute(f"""
         SELECT id, user_id, through_conversation_id, attempts
         FROM conversation_finalization_outbox
@@ -90,17 +96,19 @@ def list_pending_conversation_finalizations(
 def mark_conversation_finalization(
     db: Any, job_id: int, error: str | None = None,
 ) -> None:
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+        raise ValueError("A valid outbox job identifier is required")
     now = _now()
     if error is not None:
         db.execute("""
             UPDATE conversation_finalization_outbox
             SET attempts=attempts+1, last_error=?, last_attempt_at=?
             WHERE id=? AND status='pending'
-        """, (str(error)[:1000], now, int(job_id)))
+        """, (str(error)[:1000], now, job_id))
     else:
         db.execute("""
             UPDATE conversation_finalization_outbox
             SET attempts=attempts+1, last_error='', last_attempt_at=?,
                 status='completed', completed_at=?
             WHERE id=? AND status='pending'
-        """, (now, now, int(job_id)))
+        """, (now, now, job_id))

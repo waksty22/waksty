@@ -302,3 +302,54 @@ def test_new_turn_is_indexed_immediately_while_old_autobiographical_backlog_rema
         ("assistant", "Je retiens cette nouvelle boussole."),
     ]
     assert [row["source_conversation_id"] for row in indexed] == [501, 502]
+
+
+
+@pytest.mark.parametrize("bad_user", [None, 123, True, "", " ", "x" * 129])
+def test_outbox_enqueue_rejects_invalid_users_without_writing(bad_user):
+    db = sqlite3.connect(":memory:")
+    with pytest.raises(ValueError):
+        enqueue_conversation_finalization(db, bad_user, 7)
+    assert db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name='conversation_finalization_outbox'"
+    ).fetchone() is None
+    db.close()
+
+
+@pytest.mark.parametrize("bad_cursor", [True, False, 1.5, "7", 0, -1])
+def test_outbox_enqueue_rejects_invalid_cursors_without_writing(bad_cursor):
+    db = sqlite3.connect(":memory:")
+    with pytest.raises(ValueError):
+        enqueue_conversation_finalization(db, "creator", bad_cursor)
+    assert db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name='conversation_finalization_outbox'"
+    ).fetchone() is None
+    db.close()
+
+
+@pytest.mark.parametrize("bad_limit", [True, False, 1.5, "10", None])
+def test_outbox_list_rejects_coerced_limits(bad_limit):
+    db = sqlite3.connect(":memory:")
+    with pytest.raises(ValueError, match="limit"):
+        list_pending_conversation_finalizations(db, limit=bad_limit)
+    assert db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name='conversation_finalization_outbox'"
+    ).fetchone() is None
+    db.close()
+
+
+def test_outbox_mark_rejects_coerced_or_invalid_job_ids():
+    from memory.conversation_outbox import mark_conversation_finalization
+
+    db = sqlite3.connect(":memory:")
+    init_conversation_finalization_outbox(db)
+    for invalid in (True, False, 1.5, "1", 0, -1):
+        with pytest.raises(ValueError, match="identifier"):
+            mark_conversation_finalization(db, invalid)
+    assert db.execute(
+        "SELECT COUNT(*) FROM conversation_finalization_outbox"
+    ).fetchone()[0] == 0
+    db.close()

@@ -111,3 +111,62 @@ def test_object_correction_api_updates_current_value_and_preserves_history(objec
     assert object_api_db.execute(
         "SELECT previous_value, corrected_value FROM object_property_history"
     ).fetchone()["previous_value"] == "rouge"
+
+
+def test_chat_can_apply_only_an_explicit_owner_object_correction(object_api_db):
+    result = server.execute_tool(
+        "correct_object_property",
+        {
+            "word": "pomme",
+            "property": "couleur",
+            "previous_value": "rouge",
+            "value": "jaune",
+        },
+        "creator",
+        user_source_text="Non, la pomme est jaune.",
+    )
+
+    assert result["corrected"] is True
+    assert result["history_preserved"] is True
+    current = object_api_db.execute(
+        "SELECT property_value, source_type, confidence FROM object_properties"
+    ).fetchone()
+    assert tuple(current) == ("jaune", "confirmed", 1.0)
+    history = object_api_db.execute(
+        "SELECT previous_value, corrected_value, correction_evidence FROM object_property_history"
+    ).fetchone()
+    assert tuple(history) == ("rouge", "jaune", "Non, la pomme est jaune.")
+
+
+@pytest.mark.parametrize(
+    ("user_id", "message"),
+    [
+        ("other", "Non, la pomme est jaune."),
+        ("creator", "Est-ce que la pomme est jaune ?"),
+        ("creator", "Ne corrige pas la pomme en jaune."),
+        ("creator", "Je pense que la pomme pourrait être jaune."),
+        ("creator", "Non, la pomme est peut-être verte."),
+    ],
+)
+def test_chat_object_correction_rejects_non_owner_or_ambiguous_messages(
+    object_api_db, user_id, message
+):
+    result = server.execute_tool(
+        "correct_object_property",
+        {
+            "word": "pomme",
+            "property": "couleur",
+            "previous_value": "rouge",
+            "value": "jaune",
+        },
+        user_id,
+        user_source_text=message,
+    )
+
+    assert result["corrected"] is False
+    assert object_api_db.execute(
+        "SELECT property_value FROM object_properties"
+    ).fetchone()[0] == "rouge"
+    assert object_api_db.execute(
+        "SELECT COUNT(*) FROM object_property_history"
+    ).fetchone()[0] == 0

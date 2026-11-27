@@ -27,6 +27,7 @@ def test_integrity_report_distinguishes_missing_mismatched_and_unindexed_sources
             (1, "user", "Source cohérente", timestamp),
             (2, "user", "Source modifiée", timestamp),
             (3, "assistant", "Source valide non indexée", timestamp),
+            (4, "user", "Horodatage invalide", "pas-une-date"),
         ],
     )
     db.executemany(
@@ -42,6 +43,16 @@ def test_integrity_report_distinguishes_missing_mismatched_and_unindexed_sources
             (999, "Souvenir orphelin", timestamp, timestamp),
         ],
     )
+    db.execute(
+        """
+        INSERT INTO autobiographical_events
+            (user_id, source_conversation_id, actor, event_type, content,
+             happened_at, importance, created_at)
+        VALUES ('creator', 3, 'assistant', '', 'Source valide non indexée',
+                ?, 3, ?)
+        """,
+        (timestamp, timestamp),
+    )
     db.commit()
 
     before = db.execute(
@@ -54,9 +65,9 @@ def test_integrity_report_distinguishes_missing_mismatched_and_unindexed_sources
 
     assert report == {
         "source_table_available": True,
-        "total_events": 3,
+        "total_events": 4,
         "valid_events": 1,
-        "malformed_events": 0,
+        "malformed_events": 1,
         "missing_source_events": 1,
         "mismatched_source_events": 1,
         "unindexed_valid_sources": 2,

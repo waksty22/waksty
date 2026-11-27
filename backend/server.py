@@ -2443,7 +2443,7 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
         now = utc_now()  
         through_id = int(rows[-1]["id"])  
 
-        db.execute(  
+        summary_cursor = db.execute(  
             """  
             INSERT OR IGNORE INTO conversation_summaries(  
                 user_id, summary, through_conversation_id, created_at  
@@ -2453,18 +2453,22 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
             (user_id, summary, through_id, now),  
         )  
 
-        db.execute(  
-            """  
-            INSERT INTO journal(user_id, entry, kind, created_at)  
-            VALUES(?,?,?,?)  
-            """,  
-            (  
-                user_id,  
-                f"Résumé autobiographique consolidé jusqu'à l'échange {through_id}.",  
-                "summary",  
-                now,  
-            ),  
-        )  
+        # A concurrent consolidator may have committed this same cursor after  
+        # our initial read. The unique summary row is the idempotency boundary:  
+        # only the process that actually inserts it may append its journal entry.  
+        if summary_cursor.rowcount == 1:  
+            db.execute(  
+                """  
+                INSERT INTO journal(user_id, entry, kind, created_at)  
+                VALUES(?,?,?,?)  
+                """,  
+                (  
+                    user_id,  
+                    f"Résumé autobiographique consolidé jusqu'à l'échange {through_id}.",  
+                    "summary",  
+                    now,  
+                ),  
+            )  
 
         db.commit()  
 

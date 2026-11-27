@@ -57,7 +57,7 @@ def test_explicit_correction_updates_current_definition_and_keeps_history(db):
     assert len(history) == 1
     assert history[0]["previous_meaning"] == "un oiseau domestique"
     assert history[0]["corrected_meaning"] == current["meaning"]
-    assert history[0]["previous_evidence"] == "Enseignement explicite de l'utilisateur"
+    assert history[0]["previous_evidence"] == "Le créateur a validé la reconnaissance du mot."
     assert corrected["history_preserved"] is True
     assert corrected["previous_meaning"] == "un oiseau domestique"
 

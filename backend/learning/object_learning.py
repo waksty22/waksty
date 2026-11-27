@@ -364,16 +364,15 @@ def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, A
                ORDER BY COALESCE(julianday(created_at), -1.0) DESC, id DESC LIMIT 20""",
             (user_id, entity["id"]),
         ).fetchall()
-        property_counts: dict[str, int] = {}
+        property_values: dict[str, set[str]] = {}
         for row in properties:
-            property_counts[row["property_key"]] = property_counts.get(row["property_key"], 0) + 1
+            property_values.setdefault(row["property_key"], set()).add(
+                row["property_value"]
+            )
         property_conflicts = {
-            key: [
-                row["property_value"] for row in properties
-                if row["property_key"] == key
-            ]
-            for key, count in property_counts.items()
-            if count > 1
+            key: sorted(values)
+            for key, values in property_values.items()
+            if len(values) > 1
         }
         property_details = [dict(row) for row in properties]
         result.append({

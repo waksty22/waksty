@@ -296,3 +296,59 @@ def test_causal_agenda_sees_old_planned_experiment_outside_detail_window(db):
         for entry in agenda["agenda"]
         if entry["kind"] == "review_hypothesis"
     )
+
+
+def test_mixed_evidence_remains_uncertain_when_supported_result_is_latest(db):
+    _, hypothesis = seed_hypothesis(db)
+
+    contradicted = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "premier essai virtuel contradictoire", "la balle tombe", True,
+    )
+    evaluate_experiment(
+        db, "creator", contradicted["id"], "la balle reste immobile", "contradicted"
+    )
+
+    supported = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "second essai virtuel favorable", "la balle tombe", True,
+    )
+    result = evaluate_experiment(
+        db, "creator", supported["id"], "la balle touche le sol", "supported"
+    )
+
+    current = db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    assert result["status"] == "uncertain"
+    assert current["status"] == "uncertain"
+
+
+def test_mixed_evidence_remains_uncertain_after_inconclusive_followup(db):
+    _, hypothesis = seed_hypothesis(db)
+
+    for procedure, observed, evaluation in (
+        ("premier essai favorable", "la balle touche le sol", "supported"),
+        ("second essai contradictoire", "la balle reste immobile", "contradicted"),
+        ("troisième essai ambigu", "résultat non déterminé", "inconclusive"),
+    ):
+        experiment = plan_experiment(
+            db, "creator", hypothesis["id"], "simulation",
+            procedure, "la balle tombe", True,
+        )
+        result = evaluate_experiment(
+            db, "creator", experiment["id"], observed, evaluation
+        )
+
+    current = db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    review = review_causal_learning(db, "creator")
+    assert result["status"] == "uncertain"
+    assert current["status"] == "uncertain"
+    assert review["hypotheses"][0]["evidence_assessment"] == "mixed_evidence"
+    assert review["hypotheses"][0]["evidence_counts"] == {
+        "supported": 1, "contradicted": 1, "inconclusive": 1,
+    }

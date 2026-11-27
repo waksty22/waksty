@@ -65,6 +65,21 @@ def init_language_tables(db: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_personal_vocabulary_user_state
         ON personal_vocabulary(user_id, state, word);
+
+        -- Append-only audit trail: explicit corrections change the current
+        -- definition but never erase the previous teaching/evidence.
+        CREATE TABLE IF NOT EXISTS personal_vocabulary_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            word TEXT NOT NULL,
+            previous_meaning TEXT NOT NULL,
+            corrected_meaning TEXT NOT NULL,
+            previous_evidence TEXT NOT NULL DEFAULT '',
+            correction_evidence TEXT NOT NULL,
+            corrected_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_vocabulary_history_user_word
+        ON personal_vocabulary_history(user_id, word, id DESC);
     """)
 
 
@@ -248,6 +263,70 @@ def record_explicit_word_teaching(
         if row is not None:
             recorded.append(dict(row))
     return recorded
+
+
+def correct_word_definition(
+    db: sqlite3.Connection,
+    user_id: str,
+    word: str,
+    meaning: str,
+    evidence: str,
+) -> dict[str, Any]:
+    """Apply an explicit owner correction while preserving the previous lesson."""
+    user_id = _require_user_id(user_id)
+    clean = normalize_word(word)
+    if not isinstance(meaning, str):
+        raise ValueError("La nouvelle définition doit être du texte.")
+    corrected_meaning = meaning.strip()
+    if not corrected_meaning or len(corrected_meaning) > MAX_MEANING_LENGTH:
+        raise ValueError("La nouvelle définition est vide ou trop longue.")
+    if not isinstance(evidence, str):
+        raise ValueError("La preuve de correction doit être du texte.")
+    correction_evidence = evidence.strip()
+    if len(correction_evidence) < 20 or len(correction_evidence) > 500:
+        raise ValueError("Une preuve explicite de correction (20 à 500 caractères) est obligatoire.")
+
+    current = db.execute(
+        """SELECT meaning, state, evidence
+           FROM personal_vocabulary WHERE user_id=? AND word=?""",
+        (user_id, clean),
+    ).fetchone()
+    if current is None:
+        raise ValueError("Ce mot n'a pas encore été enseigné à Chappie.")
+    previous_meaning = current["meaning"]
+    if not isinstance(previous_meaning, str) or not previous_meaning.strip():
+        raise ValueError("Aucune définition existante à corriger.")
+    if previous_meaning.strip() == corrected_meaning:
+        raise ValueError("La nouvelle définition est identique à la définition actuelle.")
+
+    corrected_at = utc_now()
+    cursor = db.execute(
+        """INSERT INTO personal_vocabulary_history
+           (user_id, word, previous_meaning, corrected_meaning,
+            previous_evidence, correction_evidence, corrected_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, clean, previous_meaning, corrected_meaning,
+         current["evidence"] or "", correction_evidence, corrected_at),
+    )
+    db.execute(
+        """UPDATE personal_vocabulary
+           SET meaning=?, evidence=?, updated_at=?
+           WHERE user_id=? AND word=?""",
+        (corrected_meaning, correction_evidence, corrected_at, user_id, clean),
+    )
+    updated = db.execute(
+        """SELECT word, meaning, state, exposure_count, evidence, created_at, updated_at
+           FROM personal_vocabulary WHERE user_id=? AND word=?""",
+        (user_id, clean),
+    ).fetchone()
+    if updated is None:
+        raise RuntimeError("La définition corrigée n'a pas pu être vérifiée.")
+    return {
+        **dict(updated),
+        "correction_id": int(cursor.lastrowid),
+        "previous_meaning": previous_meaning,
+        "history_preserved": True,
+    }
 
 
 def record_confirmed_turn_learning(

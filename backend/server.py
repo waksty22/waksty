@@ -94,7 +94,7 @@ from learning.language import (
     init_language_tables, advance_word, list_vocabulary,
     get_usable_words, get_repeatable_words, gate_spoken_text,
     record_heard_word, record_confirmed_turn_learning,
-    text_uses_only_allowed_words,
+    correct_word_definition, text_uses_only_allowed_words,
 )
 from learning.sensory import (
     init_sensory_tables, record_observation, list_observations,
@@ -1484,6 +1484,14 @@ class VocabularyTeachRequest(BaseModel):
     state: Literal["heard", "imitated", "recognized", "understood", "usable"]
     meaning: str = Field(default="", max_length=1000)
     evidence: str = Field(default="Enseignement explicite par le créateur", max_length=500)
+    supervisor_approved: StrictBool = False
+
+class VocabularyCorrectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_id: str = "creator"
+    word: str = Field(min_length=1, max_length=80)
+    meaning: str = Field(min_length=1, max_length=1000)
+    evidence: str = Field(min_length=20, max_length=500)
     supervisor_approved: StrictBool = False
 
 def _skill_table_columns(db: Any) -> set[str]:
@@ -6424,6 +6432,28 @@ async def api_teach_vocabulary(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+
+
+@app.post("/api/language/correct")
+async def api_correct_vocabulary(
+    payload: VocabularyCorrectionRequest,
+    auth=Depends(require_auth),
+):
+    user_id = _authenticated_user(auth)
+    if payload.supervisor_approved is not True:
+        raise HTTPException(
+            status_code=403,
+            detail="Une correction de définition exige une validation explicite du créateur.",
+        )
+    try:
+        with db_connection() as db:
+            response = correct_word_definition(
+                db, user_id, payload.word, payload.meaning, payload.evidence
+            )
+            db.commit()
+        return {"ok": True, "word": response}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.get("/api/learning/causal")

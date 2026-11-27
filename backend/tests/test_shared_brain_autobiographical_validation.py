@@ -26,7 +26,7 @@ def _database() -> sqlite3.Connection:
             (2, "creator", 2, "user", "user_statement", sqlite3.Binary(b"broken content"), "2026-11-27T11:00:00Z", 3),
             (3, "creator", 3, "system", "user_statement", "Horloge système", "2026-11-27T12:00:00Z", 3),
             (4, "creator", 4, "user", "user_statement", "Horloge date invalide", "not-a-date", 3),
-            (5, "creator", 5, "user", "Horloge importance invalide", "2026-11-27T13:00:00Z", sqlite3.Binary(b"bad")),
+            (5, "creator", 5, "user", "user_statement", "Horloge importance invalide", "2026-11-27T13:00:00Z", sqlite3.Binary(b"bad")),
             (6, "other-user", 6, "user", "user_statement", "Horloge privée", "2026-11-27T14:00:00Z", 3),
         ],
     )

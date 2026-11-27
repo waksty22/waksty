@@ -3210,6 +3210,7 @@ def build_world_model_context(
     object_properties: list[dict[str, Any]] = []
     object_experiences: list[dict[str, Any]] = []
     cross_modal_fusions: list[dict[str, Any]] = []
+    property_conflict_metadata: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _query_matches(
         db: Any,
@@ -3349,6 +3350,35 @@ def build_world_model_context(
                     "updated_at", 750,
                 )
                 property_rows = _merge_query_matches(property_rows, property_matches, "id")
+            if "object_properties" in available_tables:
+                # The context's recent/matching row window is intentionally
+                # bounded. Compute conflict cardinality from the full
+                # user-scoped property set so older values cannot disappear
+                # silently when the row window is full.
+                property_keys = {
+                    (str(row["object_id"]), str(row["property_key"]))
+                    for row in property_rows
+                }
+                for object_id, property_key in property_keys:
+                    count = db.execute(
+                        """SELECT COUNT(DISTINCT property_value)
+                           FROM object_properties
+                           WHERE user_id=? AND object_id=? AND property_key=?""",
+                        (user_id, object_id, property_key),
+                    ).fetchone()[0]
+                    if count > 1:
+                        values = db.execute(
+                            """SELECT DISTINCT property_value
+                               FROM object_properties
+                               WHERE user_id=? AND object_id=? AND property_key=?
+                               ORDER BY property_value LIMIT 20""",
+                            (user_id, object_id, property_key),
+                        ).fetchall()
+                        property_conflict_metadata[(object_id, property_key)] = {
+                            "count": int(count),
+                            "values": [str(value[0])[:500] for value in values],
+                            "truncated": int(count) > len(values),
+                        }
             if "object_experiences" in available_tables:
                 experience_matches = _query_matches(
                     db, "object_experiences",
@@ -3406,24 +3436,17 @@ def build_world_model_context(
             "updated_at": str(item.get("updated_at", ""))[:80],
         })
 
-    # Keep contradictory values explicit in the model context. The object
-    # inventory already flags these conflicts; Chat and Live must receive the
-    # same warning rather than seeing competing values as independent facts.
-    property_values_by_key: dict[tuple[str, str], set[str]] = {}
-    for row in property_rows:
-        item = dict(row)
-        key = (str(item.get("object_id", "")), str(item.get("property_key", "")))
-        value = str(item.get("property_value", ""))[:500]
-        property_values_by_key.setdefault(key, set()).add(value)
-
+    # Keep contradictory values explicit in the model context. Counts and
+    # value samples come from the complete user-scoped property set, not just
+    # the bounded rows included in this prompt.
     for row in property_rows:
         item = dict(row)
         confidence = item.get("confidence")
         if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(float(confidence)):
             confidence = None
-        conflict_values = sorted(property_values_by_key.get(
-            (str(item.get("object_id", "")), str(item.get("property_key", ""))), set()
-        ))
+        conflict = property_conflict_metadata.get(
+            (str(item.get("object_id", "")), str(item.get("property_key", "")))
+        )
         object_properties.append({
             "object": str(item.get("object_id", ""))[:200],
             "property": str(item.get("property_key", ""))[:80],
@@ -3432,8 +3455,10 @@ def build_world_model_context(
             "confidence": confidence,
             "evidence": str(item.get("evidence", ""))[:300],
             "updated_at": str(item.get("updated_at", ""))[:80],
-            "conflict": len(conflict_values) > 1,
-            "conflicting_values": conflict_values if len(conflict_values) > 1 else [],
+            "conflict": conflict is not None,
+            "conflicting_value_count": conflict["count"] if conflict else 1,
+            "conflicting_values": conflict["values"] if conflict else [],
+            "conflicting_values_truncated": conflict["truncated"] if conflict else False,
         })
 
     for row in experience_rows:

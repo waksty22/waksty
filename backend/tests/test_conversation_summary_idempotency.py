@@ -104,3 +104,96 @@ def test_concurrent_summary_insert_does_not_duplicate_journal(monkeypatch):
         "SELECT COUNT(*) FROM journal WHERE user_id='creator' AND kind='summary'"
     ).fetchone()[0] == 0
     db.close()
+
+
+class _StaleConsolidationSnapshotConnection(_StaleSummaryReadConnection):
+    """Simulate a worker holding an older conversation and summary snapshot."""
+
+    def execute(self, sql, params=()):
+        if "SELECT COALESCE(MAX(id),0) AS max_id" in sql:
+            return _StaleSummaryCursorWithValue(10)
+        return super().execute(sql, params)
+
+
+class _StaleSummaryCursorWithValue:
+    def __init__(self, value):
+        self.value = value
+
+    def fetchone(self):
+        return {"max_id": self.value}
+
+
+def test_stale_worker_cannot_insert_summary_behind_newer_cursor(monkeypatch):
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript(
+        """
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE conversation_summaries (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            through_conversation_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, through_conversation_id)
+        );
+        CREATE TABLE journal (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            entry TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """
+    )
+    for index in range(12):
+        db.execute(
+            """
+            INSERT INTO conversations(user_id, role, content, created_at)
+            VALUES ('creator', ?, ?, ?)
+            """,
+            (
+                "user" if index % 2 == 0 else "assistant",
+                f"Message {index}",
+                f"2026-11-27T16:00:{index:02d}+00:00",
+            ),
+        )
+    db.execute(
+        """
+        INSERT INTO conversation_summaries(
+            user_id, summary, through_conversation_id, created_at
+        ) VALUES (
+            'creator', 'Résumé plus récent', 12, '2026-11-27T16:02:00+00:00'
+        )
+        """
+    )
+    db.commit()
+    wrapped = _StaleConsolidationSnapshotConnection(db)
+
+    @contextmanager
+    def fake_db_connection():
+        yield wrapped
+
+    monkeypatch.setattr(server, "db_connection", fake_db_connection)
+    result = server.consolidate_conversation("creator")
+
+    assert result == {
+        "created": False,
+        "summary": "Résumé plus récent",
+        "through_id": 12,
+    }
+    rows = db.execute(
+        "SELECT through_conversation_id FROM conversation_summaries "
+        "WHERE user_id='creator' ORDER BY through_conversation_id DESC"
+    ).fetchall()
+    assert [row["through_conversation_id"] for row in rows] == [12]
+    assert db.execute(
+        "SELECT COUNT(*) FROM journal WHERE user_id='creator' AND kind='summary'"
+    ).fetchone()[0] == 0
+    db.close()

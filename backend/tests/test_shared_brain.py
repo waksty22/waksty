@@ -857,3 +857,68 @@ def test_autobiographical_recall_prefers_full_query_coverage_over_importance():
     assert snapshot["autobiographical_events"][0]["id"] == 2
     assert snapshot["autobiographical_events"][1]["id"] == 1
     db.close()
+
+
+def test_linked_object_experience_reaches_query_context_without_cross_user_leakage():
+    db = make_db()
+    db.executescript("""
+        CREATE TABLE autobiographical_events (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            source_conversation_id INTEGER,
+            actor TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            happened_at TEXT NOT NULL,
+            importance INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE object_experiences (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            object_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            evidence TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            autobiographical_event_id INTEGER
+        );
+    """)
+    db.executemany(
+        "INSERT INTO autobiographical_events VALUES (?,?,?,?,?,?,?,?,?)",
+        [
+            (11, "creator", 101, "user", "user_statement",
+             "J'ai poussé la pomme rouge et elle a roulé sous la table.",
+             "2026-11-27T14:00:00Z", 4, "2026-11-27T14:00:00Z"),
+            (22, "other-user", 202, "user", "user_statement",
+             "J'ai poussé la pomme rouge et elle a roulé sous la table.",
+             "2026-11-27T14:01:00Z", 4, "2026-11-27T14:01:00Z"),
+        ],
+    )
+    db.executemany(
+        "INSERT INTO object_experiences VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [
+            (1, "creator", "pomme", "j'ai déplacé l'objet",
+             "il a bougé", "expérience enregistrée", "taught", 0.9,
+             "2026-11-27T14:00:01Z", 11),
+            (2, "other-user", "pomme", "j'ai déplacé l'objet",
+             "il a bougé", "expérience enregistrée", "taught", 0.9,
+             "2026-11-27T14:01:01Z", 22),
+        ],
+    )
+
+    snapshot = get_shared_brain_snapshot(
+        db, "creator", limit=8, query="Rappelle-moi la pomme rouge"
+    )
+
+    assert [row["id"] for row in snapshot["object_experiences"]] == [1]
+    assert snapshot["object_experiences"][0]["autobiographical_event_id"] == 11
+    assert [row["id"] for row in snapshot["autobiographical_events"]] == [11]
+    context = format_shared_brain_context(snapshot)
+    assert "EXPÉRIENCES D'OBJETS" in context
+    assert '"autobiographical_event_id": 11' in context
+    assert "J'ai poussé la pomme rouge" in context
+    assert "other-user" not in context
+    db.close()

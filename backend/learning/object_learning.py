@@ -349,7 +349,9 @@ def list_known_objects(db: sqlite3.Connection, user_id: str) -> list[dict[str, A
             "SELECT state FROM personal_vocabulary WHERE user_id=? AND word=?",
             (user_id, word),
         ).fetchone()
-        if vocab is None:
+        if vocab is None or vocab["state"] not in (
+            "recognized", "understood", "usable"
+        ):
             continue
         properties = db.execute(
             """SELECT property_key, property_value, source_type, confidence, evidence

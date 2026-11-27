@@ -218,6 +218,35 @@ def _safe_confidence(value: Any) -> float | None:
     return number
 
 
+
+def _experience_source_is_valid(
+    db: sqlite3.Connection, user_id: str, row: dict[str, Any]
+) -> bool:
+    """Reject indexed experiences whose original conversation no longer matches."""
+    table = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'"
+    ).fetchone()
+    if table is None:
+        # Older isolated/test schemas may not contain the conversation store.
+        return True
+    source_id = row.get("source_conversation_id")
+    actor = row.get("actor")
+    content = row.get("content")
+    happened_at = row.get("happened_at")
+    if (isinstance(source_id, bool) or not isinstance(source_id, int)
+            or source_id < 1 or not isinstance(actor, str)
+            or actor not in {"user", "assistant"}
+            or not isinstance(content, str) or not isinstance(happened_at, str)):
+        return False
+    return db.execute(
+        """SELECT 1 FROM conversations
+           WHERE id=? AND user_id=? AND role=?
+             AND typeof(content)='text'
+             AND substr(trim(content), 1, 8000)=?
+             AND created_at=? LIMIT 1""",
+        (source_id, user_id, actor, content, happened_at),
+    ).fetchone() is not None
+
 def retrieve_acquired_knowledge(
     db: sqlite3.Connection,
     user_id: str,
@@ -359,6 +388,8 @@ def retrieve_acquired_knowledge(
         )
 
     for row in experiences:
+        if not _experience_source_is_valid(db, user_id, row):
+            continue
         actor = row.get("actor")
         event_type = row.get("event_type")
         conversation_id = row.get("source_conversation_id")

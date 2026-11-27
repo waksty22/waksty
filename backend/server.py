@@ -2456,7 +2456,8 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
         # A concurrent consolidator may have committed this same cursor after  
         # our initial read. The unique summary row is the idempotency boundary:  
         # only the process that actually inserts it may append its journal entry.  
-        if summary_cursor.rowcount == 1:  
+        created = summary_cursor.rowcount == 1  
+        if created:  
             db.execute(  
                 """  
                 INSERT INTO journal(user_id, entry, kind, created_at)  
@@ -2469,11 +2470,26 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
                     now,  
                 ),  
             )  
+        else:  
+            # Return the winner's durable summary rather than this worker's  
+            # stale reconstruction from an outdated cursor read.  
+            persisted = db.execute(  
+                """  
+                SELECT summary  
+                FROM conversation_summaries  
+                WHERE user_id=? AND through_conversation_id=?  
+                ORDER BY id DESC  
+                LIMIT 1  
+                """,  
+                (user_id, through_id),  
+            ).fetchone()  
+            if persisted is not None:  
+                summary = str(persisted["summary"])  
 
         db.commit()  
 
         return {  
-            "created": True,  
+            "created": created,  
             "summary": summary,  
             "through_id": through_id,  
         }

@@ -93,3 +93,56 @@ def test_integrity_report_handles_missing_source_table_without_writes():
         "unindexed_valid_sources": 0,
     }
     db.close()
+
+
+def test_integrity_report_loads_only_referenced_sources_from_large_history():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    timestamp = "2026-11-27T10:00:00Z"
+    db.executemany(
+        "INSERT INTO conversations VALUES (?, 'creator', 'user', ?, ?)",
+        [(index, f"Message {index}", timestamp) for index in range(1, 1201)],
+    )
+    db.execute(
+        """
+        INSERT INTO autobiographical_events
+            (user_id, source_conversation_id, actor, event_type, content,
+             happened_at, importance, created_at)
+        VALUES ('creator', 1, 'user', 'user_statement', 'Message 1', ?, 3, ?)
+        """,
+        (timestamp, timestamp),
+    )
+    db.commit()
+
+    statements = []
+    db.set_trace_callback(statements.append)
+    changes_before = db.total_changes
+    report = autobiographical_integrity_report(db, "creator")
+
+    assert report == {
+        "source_table_available": True,
+        "total_events": 1,
+        "valid_events": 1,
+        "malformed_events": 0,
+        "missing_source_events": 0,
+        "mismatched_source_events": 0,
+        "unindexed_valid_sources": 1199,
+    }
+    assert db.total_changes == changes_before
+    assert any(
+        "FROM conversations" in statement
+        and "id IN (" in statement
+        and "SELECT source_conversation_id" in statement
+        for statement in statements
+    )
+    db.close()

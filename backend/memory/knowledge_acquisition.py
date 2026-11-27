@@ -284,6 +284,7 @@ def retrieve_acquired_knowledge(
     experience_source_filter = (
         "EXISTS (SELECT 1 FROM conversations c "
         "WHERE c.id=autobiographical_events.source_conversation_id "
+        "AND c.id > 0 "
         "AND c.user_id=autobiographical_events.user_id "
         "AND c.role=autobiographical_events.actor "
         "AND c.role IN ('user', 'assistant') "

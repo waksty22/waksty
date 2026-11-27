@@ -2608,14 +2608,16 @@ def finalize_conversation_turn(user_id: str) -> dict[str, int]:
                 result = consolidate_conversation(user_id)
                 next_through = result.get("through_id", through)
                 if (
-                    not result.get("created")
-                    or isinstance(next_through, bool)
+                    isinstance(next_through, bool)
                     or not isinstance(next_through, int)
                     or next_through <= through
                 ):
                     raise RuntimeError(
                         "La consolidation mémoire n'a pas avancé le curseur."
                     )
+                # A concurrent worker may have inserted this exact summary
+                # cursor first. Its durable cursor is still forward progress;
+                # only a non-advancing result is a failed consolidation.
                 through = next_through
                 with db_connection() as db:
                     latest = int(db.execute(

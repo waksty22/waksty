@@ -41,3 +41,38 @@ def test_invalid_early_conversations_do_not_starve_valid_autobiographical_sync()
     assert tuple(row) == (5, "Mon souvenir valide")
     assert sync_autobiographical_events(db, "creator", limit=1)["inserted"] == 0
     db.close()
+
+
+def test_dialogue_link_detection_uses_previous_same_user_message_across_interleaving():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    db.executemany(
+        "INSERT INTO conversations VALUES (?, ?, ?, ?, ?)",
+        [
+            (1, "creator", "user", "Premier message sans réponse", "2026-11-27T10:00:00Z"),
+            (2, "other-user", "user", "Message d'un autre utilisateur", "2026-11-27T10:00:01Z"),
+            (3, "creator", "user", "Deuxième message utilisateur", "2026-11-27T10:00:02Z"),
+            (4, "creator", "assistant", "Réponse au deuxième message", "2026-11-27T10:00:02Z"),
+        ],
+    )
+    db.commit()
+
+    result = sync_autobiographical_events(db, "creator")
+
+    assert result["inserted"] == 3
+    links = db.execute(
+        "SELECT source_event_id, target_event_id "
+        "FROM autobiographical_links WHERE user_id='creator'"
+    ).fetchall()
+    assert links == []
+    db.close()

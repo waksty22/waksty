@@ -255,6 +255,7 @@ def test_chat_can_correct_vocabulary_from_explicit_creator_statement(language_ap
         ("creator", "Est-ce que le coq signifie un oiseau mâle ?"),
         ("creator", "Non, le coq signifie peut-être un oiseau mâle."),
         ("creator", "Ne corrige pas le coq en oiseau mâle."),
+        ("creator", "Non, la coque signifie un oiseau mâle."),
     ],
 )
 def test_chat_rejects_ambiguous_or_non_creator_vocabulary_corrections(

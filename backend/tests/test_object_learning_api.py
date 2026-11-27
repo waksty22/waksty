@@ -148,6 +148,7 @@ def test_chat_can_apply_only_an_explicit_owner_object_correction(object_api_db):
         ("creator", "Non, la pomme est peut-être jaune."),
         ("creator", "Non, la pomme est jaune ?"),
         ("creator", "Non, la pomme est probablement jaune."),
+        ("creator", "Non, le pommier est jaune."),
     ],
 )
 def test_chat_object_correction_rejects_non_owner_or_ambiguous_messages(

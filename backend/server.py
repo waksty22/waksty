@@ -3742,10 +3742,12 @@ def execute_tool(
             )
             negative_intent = re.compile(
                 r"\b(?:ne\s+(?:corrige|change|modifie)\s+pas|"
-                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction)\b",
+                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction|"
+                r"peut[- ]être|probablement|je pense|je crois|il semble|elle semble|"
+                r"pas sûr|pas certaine|pas certain)\b",
                 re.IGNORECASE,
             )
-            grounded_clause = any(
+            grounded_clause = "?" not in source and any(
                 correction_intent.search(clause)
                 and not negative_intent.search(clause)
                 and word.casefold() in clause.casefold()

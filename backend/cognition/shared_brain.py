@@ -248,6 +248,13 @@ def _rows(
                 )
                 rows = db.execute(
                     f"SELECT * FROM {table} WHERE user_id=? "
+                    "AND typeof(id)='integer' AND id > 0 "
+                    "AND typeof(source_conversation_id)='integer' AND source_conversation_id > 0 "
+                    "AND actor IN ('user', 'assistant') "
+                    "AND typeof(event_type)='text' AND length(trim(event_type)) > 0 "
+                    "AND typeof(content)='text' AND length(trim(content)) > 0 "
+                    "AND typeof(happened_at)='text' AND julianday(happened_at) IS NOT NULL "
+                    "AND typeof(importance)='integer' AND importance BETWEEN 1 AND 5 "
                     f"ORDER BY ({relevance}) DESC, importance DESC, "
                     "COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT ?",
                     (user_id, *parameters, limit),
@@ -419,6 +426,26 @@ def _rows(
                 "AND consent_session.user_id=spatial_visits.user_id "
                 "AND consent_session.consented=1) "
                 f"ORDER BY {order_by} LIMIT ?",
+                (user_id, limit),
+            ).fetchall()
+        elif table == "autobiographical_events":
+            # Keep the shared Chat/Live snapshot aligned with the dedicated
+            # autobiographical reader: corrupt journal rows must not re-enter
+            # model context through this alternate retrieval path.
+            rows = db.execute(
+                """SELECT * FROM autobiographical_events
+                   WHERE user_id=?
+                     AND typeof(id)='integer' AND id > 0
+                     AND typeof(source_conversation_id)='integer'
+                         AND source_conversation_id > 0
+                     AND actor IN ('user', 'assistant')
+                     AND typeof(event_type)='text' AND length(trim(event_type)) > 0
+                     AND typeof(content)='text' AND length(trim(content)) > 0
+                     AND typeof(happened_at)='text'
+                         AND julianday(happened_at) IS NOT NULL
+                     AND typeof(importance)='integer'
+                         AND importance BETWEEN 1 AND 5
+                   ORDER BY id DESC LIMIT ?""",
                 (user_id, limit),
             ).fetchall()
         else:

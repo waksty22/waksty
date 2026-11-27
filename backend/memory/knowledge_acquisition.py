@@ -108,6 +108,7 @@ def _query_rows(
     user_id: str,
     query_terms: set[str],
     limit: int = 1000,
+    extra_where: str = "",
 ) -> list[dict[str, Any]]:
     """Find matching older records without scanning them into Python first."""
     if not query_terms:
@@ -141,7 +142,9 @@ def _query_rows(
         score_parameters.extend(patterns)
     sql = (
         f"SELECT {selected_columns} FROM {table} "
-        f"WHERE user_id=? AND ({' OR '.join(term_clauses)}) "
+        f"WHERE user_id=? "
+        f"{'AND (' + extra_where + ') ' if extra_where else ''}"
+        f"AND ({' OR '.join(term_clauses)}) "
         f"ORDER BY ({' + '.join(score_terms)}) DESC, "
         f"COALESCE(julianday({timestamp_column}), -1.0) DESC, id DESC LIMIT ?"
     )
@@ -275,12 +278,29 @@ def retrieve_acquired_knowledge(
            ORDER BY importance DESC, COALESCE(julianday(updated_at), -1.0) DESC, id DESC LIMIT 300""",
         (user_id,),
     )
+    has_conversations = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'"
+    ).fetchone() is not None
+    experience_source_filter = (
+        "EXISTS (SELECT 1 FROM conversations c "
+        "WHERE c.id=autobiographical_events.source_conversation_id "
+        "AND c.user_id=autobiographical_events.user_id "
+        "AND c.role=autobiographical_events.actor "
+        "AND c.role IN ('user', 'assistant') "
+        "AND typeof(c.content)='text' "
+        "AND substr(trim(c.content), 1, 8000)=autobiographical_events.content "
+        "AND c.created_at=autobiographical_events.happened_at)"
+        if has_conversations else ""
+    )
+    experience_where = (
+        f" AND {experience_source_filter}" if experience_source_filter else ""
+    )
     experiences = _safe_rows(
         db,
         """SELECT id, actor, event_type, content, happened_at,
                   source_conversation_id
-           FROM autobiographical_events WHERE user_id=?
-           ORDER BY COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT 300""",
+           FROM autobiographical_events WHERE user_id=?""" + experience_where +
+        " ORDER BY COALESCE(julianday(happened_at), -1.0) DESC, id DESC LIMIT 300",
         (user_id,),
     )
     assessments = _safe_rows(
@@ -306,7 +326,7 @@ def retrieve_acquired_knowledge(
                 db, "autobiographical_events",
                 "id, actor, event_type, content, happened_at, source_conversation_id",
                 ("actor", "event_type", "content"), "happened_at",
-                user_id, query_terms,
+                user_id, query_terms, extra_where=experience_source_filter,
             ),
         )
         assessments = _merge_query_rows(

@@ -155,3 +155,36 @@ def test_outbox_uses_highest_summary_cursor_not_latest_insert_id(
     result = server.finalize_conversation_turn("creator")
 
     assert result == {"pending": 0, "completed": 1}
+
+def test_latest_autobiographical_summary_uses_highest_durable_cursor(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "latest-summary-cursor.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database)
+    server.init_db()
+
+    with server.db_connection() as db:
+        # The newer durable cursor is deliberately inserted first.
+        db.execute(
+            """
+            INSERT INTO conversation_summaries(
+                user_id, summary, through_conversation_id, created_at
+            ) VALUES ('creator', 'Résumé au curseur 20', 20, '2026-11-27T16:01:00Z')
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO conversation_summaries(
+                user_id, summary, through_conversation_id, created_at
+            ) VALUES ('creator', 'Ancien résumé au curseur 10', 10, '2026-11-27T16:02:00Z')
+            """
+        )
+        db.commit()
+
+    assert server.get_latest_summary("creator") == "Résumé au curseur 20"
+

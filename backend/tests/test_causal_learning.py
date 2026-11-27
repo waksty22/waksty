@@ -112,6 +112,40 @@ def test_contradicted_result_reduces_confidence(db):
     assert result["status"] == "contradicted"
 
 
+def test_mixed_supported_and_contradicted_results_remain_uncertain(db):
+    _, hypothesis = seed_hypothesis(db)
+
+    supported = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "premier essai virtuel", "la balle tombe", True,
+    )
+    evaluate_experiment(
+        db, "creator", supported["id"], "la balle touche le sol", "supported"
+    )
+
+    contradicted = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "second essai virtuel avec conditions différentes", "la balle tombe", True,
+    )
+    result = evaluate_experiment(
+        db, "creator", contradicted["id"], "la balle reste immobile", "contradicted"
+    )
+
+    current = db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    review = review_causal_learning(db, "creator")
+
+    assert result["status"] == "uncertain"
+    assert current["status"] == "uncertain"
+    assert review["hypotheses"][0]["evidence_assessment"] == "mixed_evidence"
+    assert review["hypotheses"][0]["evidence_counts"] == {
+        "supported": 1, "contradicted": 1, "inconclusive": 0,
+    }
+    assert review["history_is_preserved"] is True
+
+
 def test_inconclusive_result_does_not_change_confidence(db):
     _, hypothesis = seed_hypothesis(db)
     experiment = plan_experiment(

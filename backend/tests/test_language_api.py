@@ -199,3 +199,82 @@ def test_explicit_correction_api_requires_creator_approval_and_preserves_history
     assert current["state"] == "heard"
     assert history["previous_meaning"] == "un oiseau domestique"
     assert history["corrected_meaning"] == current["meaning"]
+
+
+def test_non_creator_cannot_correct_vocabulary_api_even_with_approval(language_api_db):
+    from learning.language import record_explicit_word_teaching
+
+    record_explicit_word_teaching(
+        language_api_db, "creator", "Le mot coq signifie un oiseau domestique."
+    )
+    payload = server.VocabularyCorrectionRequest(
+        word="coq",
+        meaning="Un oiseau mâle.",
+        evidence="Correction explicite et vérifiée par le Créateur.",
+        supervisor_approved=True,
+    )
+    async def run():
+        with pytest.raises(HTTPException) as denied:
+            await server.api_correct_vocabulary(payload, auth="other")
+        assert denied.value.status_code == 403
+    asyncio.run(run())
+    assert language_api_db.execute(
+        "SELECT meaning FROM personal_vocabulary WHERE user_id='creator' AND word='coq'"
+    ).fetchone()[0] == "un oiseau domestique"
+    assert language_api_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary_history"
+    ).fetchone()[0] == 0
+
+
+def test_chat_can_correct_vocabulary_from_explicit_creator_statement(language_api_db):
+    from learning.language import record_explicit_word_teaching
+
+    record_explicit_word_teaching(
+        language_api_db, "creator", "Le mot coq signifie un oiseau domestique."
+    )
+    result = server.execute_tool(
+        "correct_word_definition",
+        {"word": "coq", "meaning": "un oiseau mâle"},
+        "creator",
+        user_source_text="Non, le coq signifie un oiseau mâle.",
+    )
+    assert result["corrected"] is True
+    assert result["history_preserved"] is True
+    assert language_api_db.execute(
+        "SELECT meaning FROM personal_vocabulary WHERE user_id='creator' AND word='coq'"
+    ).fetchone()[0] == "un oiseau mâle"
+    assert language_api_db.execute(
+        "SELECT previous_meaning, corrected_meaning FROM personal_vocabulary_history"
+    ).fetchone()[:] == ("un oiseau domestique", "un oiseau mâle")
+
+
+@pytest.mark.parametrize(
+    ("user_id", "message"),
+    [
+        ("other", "Non, le coq signifie un oiseau mâle."),
+        ("creator", "Est-ce que le coq signifie un oiseau mâle ?"),
+        ("creator", "Non, le coq signifie peut-être un oiseau mâle."),
+        ("creator", "Ne corrige pas le coq en oiseau mâle."),
+    ],
+)
+def test_chat_rejects_ambiguous_or_non_creator_vocabulary_corrections(
+    language_api_db, user_id, message
+):
+    from learning.language import record_explicit_word_teaching
+
+    record_explicit_word_teaching(
+        language_api_db, "creator", "Le mot coq signifie un oiseau domestique."
+    )
+    result = server.execute_tool(
+        "correct_word_definition",
+        {"word": "coq", "meaning": "un oiseau mâle"},
+        user_id,
+        user_source_text=message,
+    )
+    assert result["corrected"] is False
+    assert language_api_db.execute(
+        "SELECT meaning FROM personal_vocabulary WHERE user_id='creator' AND word='coq'"
+    ).fetchone()[0] == "un oiseau domestique"
+    assert language_api_db.execute(
+        "SELECT COUNT(*) FROM personal_vocabulary_history"
+    ).fetchone()[0] == 0

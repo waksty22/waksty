@@ -3522,6 +3522,32 @@ TOOLS = [{
             },
         },
         {
+            "name": "correct_object_property",
+            "description": "Corriger une propriété déjà apprise d'un objet UNIQUEMENT lorsque le Créateur authentifié formule explicitement une correction dans son message actuel (ex. « Non, la poire est verte » ou « je me suis trompé, elle est jaune »). La nouvelle valeur et le mot de l'objet doivent apparaître littéralement dans ce message. Ne jamais appeler pour une hypothèse, une question, une observation incertaine ou un utilisateur autre que le Créateur. Fournir l'ancienne valeur réellement retrouvée dans le modèle du monde ; l'outil conserve son historique et marque la correction comme confirmée.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "word": {"type": "STRING"},
+                    "property": {"type": "STRING"},
+                    "previous_value": {"type": "STRING"},
+                    "value": {"type": "STRING"},
+                },
+                "required": ["word", "property", "previous_value", "value"],
+            },
+        },
+        {
+            "name": "correct_word_definition",
+            "description": "Corriger une définition de vocabulaire UNIQUEMENT lorsque le Créateur authentifié formule explicitement une correction dans son message actuel. Le mot et la nouvelle définition doivent apparaître littéralement dans ce message ; refuser les questions, hypothèses, formulations incertaines ou négations. Préserver la définition précédente dans l'historique. Ne jamais appeler pour un utilisateur autre que le Créateur.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "word": {"type": "STRING"},
+                    "meaning": {"type": "STRING"},
+                },
+                "required": ["word", "meaning"],
+            },
+        },
+        {
             "name": "search_memories",
             "description": "Rechercher des souvenirs épisodiques de cet utilisateur. OBLIGATOIRE avant de répondre à une question vocale ou écrite sur une conversation passée, un fait personnel ou un événement qui n'est pas clairement présent dans le contexte courant. Les résultats sont des souvenirs sourcés, pas une preuve indépendante.",
             "parameters": {
@@ -3659,6 +3685,18 @@ def _memory_fact_is_grounded_in_user_text(content: str, user_text: str) -> bool:
     )
 
 
+def _contains_literal_phrase(text: str, phrase: str) -> bool:
+    """Match a literal word/phrase without accepting it inside a larger token."""
+    if not isinstance(text, str) or not isinstance(phrase, str) or not phrase.strip():
+        return False
+    normalized_text = text.casefold()
+    normalized_phrase = phrase.strip().casefold()
+    return re.search(
+        rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)",
+        normalized_text,
+    ) is not None
+
+
 def execute_tool(
     name: str,
     args: dict[str, Any],
@@ -3707,6 +3745,123 @@ def execute_tool(
                 user_id, content, category, importance,
                 source_type, confidence, tags,
             )
+
+        if name == "correct_object_property":
+            word = args.get("word", "")
+            property_key = args.get("property", "")
+            previous_value = args.get("previous_value", "")
+            corrected_value = args.get("value", "")
+            if user_id != CHAPPIE_OWNER_ID:
+                return {"corrected": False, "error": "Seul le Créateur authentifié peut corriger les connaissances de Chappie."}
+            if not all(isinstance(value, str) and value.strip() for value in (
+                word, property_key, previous_value, corrected_value, user_source_text
+            )):
+                raise ValueError("Les informations de correction sont incomplètes.")
+            source = re.sub(r"\s+", " ", user_source_text).strip()
+            clauses = re.split(r"[.!?;\n]+", source)
+            correction_intent = re.compile(
+                r"\b(?:non|corrige(?:r)?|correction|je me suis tromp[ée]|"
+                r"en réalité|en fait|je rectifie|c'est plutôt|ce n'est pas)\b",
+                re.IGNORECASE,
+            )
+            negative_intent = re.compile(
+                r"\b(?:ne\s+(?:corrige|change|modifie)\s+pas|"
+                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction|"
+                r"peut[- ]être|probablement|je pense|je crois|il semble|elle semble|"
+                r"pas sûr|pas certaine|pas certain)\b",
+                re.IGNORECASE,
+            )
+            grounded_clause = "?" not in source and any(
+                correction_intent.search(clause)
+                and not negative_intent.search(clause)
+                and _contains_literal_phrase(clause, word)
+                and _contains_literal_phrase(clause, corrected_value)
+                for clause in clauses
+            )
+            if not grounded_clause:
+                return {
+                    "corrected": False,
+                    "error": "Correction refusée : le message actuel du Créateur doit contenir explicitement le mot de l'objet, la nouvelle valeur et une formulation de correction non ambiguë.",
+                }
+            evidence = source.strip()
+            if len(evidence) > 1000:
+                raise ValueError("Le message de correction est trop long pour être conservé comme preuve.")
+            with db_connection() as correction_db:
+                result = correct_object_property(
+                    correction_db, user_id, word, property_key,
+                    previous_value, corrected_value, evidence,
+                )
+                object_id = "object:" + result["word"]
+                entity = get_world_entity(correction_db, user_id, object_id) or {}
+                properties = dict(entity.get("properties") or {})
+                learned = dict(properties.get("learned_properties") or {})
+                values = list(learned.get(result["property_key"]) or [])
+                values = [value for value in values if value != result["previous_value"]]
+                if result["property_value"] not in values:
+                    values.append(result["property_value"])
+                learned[result["property_key"]] = values
+                properties["learned_properties"] = learned
+                upsert_world_entity(
+                    correction_db, user_id, object_id, "object", properties,
+                    source_type="confirmed", confidence=1.0,
+                )
+                correction_db.commit()
+            return {
+                "corrected": True,
+                "property": result,
+                "history_preserved": True,
+                "approval_basis": "explicit_authenticated_creator_message",
+            }
+
+        if name == "correct_word_definition":
+            word = args.get("word", "")
+            meaning = args.get("meaning", "")
+            if user_id != CHAPPIE_OWNER_ID:
+                return {"corrected": False, "error": "Seul le Créateur authentifié peut corriger le vocabulaire de Chappie."}
+            if not all(isinstance(value, str) and value.strip() for value in (
+                word, meaning, user_source_text
+            )):
+                raise ValueError("Les informations de correction du mot sont incomplètes.")
+            source = re.sub(r"\s+", " ", user_source_text).strip()
+            clauses = re.split(r"[.!?;\n]+", source)
+            correction_intent = re.compile(
+                r"\b(?:non|corrige(?:r)?|correction|je me suis tromp[ée]|"
+                r"en réalité|en fait|je rectifie|c'est plutôt|ce n'est pas)\b",
+                re.IGNORECASE,
+            )
+            uncertainty_or_negation = re.compile(
+                r"\b(?:ne\s+(?:corrige|change|modifie)\s+pas|"
+                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction|"
+                r"peut[- ]être|probablement|je pense|je crois|il semble|elle semble|"
+                r"pas sûr|pas certaine|pas certain)\b",
+                re.IGNORECASE,
+            )
+            grounded_clause = "?" not in source and any(
+                correction_intent.search(clause)
+                and not uncertainty_or_negation.search(clause)
+                and _contains_literal_phrase(clause, word)
+                and _contains_literal_phrase(clause, meaning)
+                for clause in clauses
+            )
+            if not grounded_clause:
+                return {
+                    "corrected": False,
+                    "error": "Correction refusée : le message actuel doit contenir le mot, sa nouvelle définition et une formulation de correction explicite.",
+                }
+            evidence = source.strip()
+            if not 20 <= len(evidence) <= 500:
+                raise ValueError("La correction doit fournir une preuve explicite de 20 à 500 caractères.")
+            with db_connection() as vocabulary_db:
+                result = correct_word_definition(
+                    vocabulary_db, user_id, word, meaning, evidence
+                )
+                vocabulary_db.commit()
+            return {
+                "corrected": True,
+                "word": result,
+                "history_preserved": True,
+                "approval_basis": "explicit_authenticated_creator_message",
+            }
 
         if name == "search_memories":
             query = args.get("query", "")
@@ -6044,6 +6199,8 @@ async def api_correct_object_property(
 ):
     """Correct a learned object property only after explicit Creator approval."""
     user_id = _authenticated_user(auth)
+    if user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(status_code=403, detail="Seul le Créateur peut corriger les connaissances de Chappie.")
     data = await _json_object(request)
     if data.get("supervisor_approved") is not True:
         raise HTTPException(status_code=403, detail="Une approbation explicite du Créateur est obligatoire.")
@@ -6084,6 +6241,8 @@ async def api_confirm_object_property(
 ):
     """Confirm an existing object property through an explicit owner action."""
     user_id = _authenticated_user(auth)
+    if user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(status_code=403, detail="Seul le Créateur peut confirmer les connaissances de Chappie.")
     data = await _json_object(request)
     try:
         with db_connection() as db:
@@ -6480,6 +6639,11 @@ async def api_correct_vocabulary(
     auth=Depends(require_auth),
 ):
     user_id = _authenticated_user(auth)
+    if user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(
+            status_code=403,
+            detail="Seul le Créateur peut corriger le vocabulaire de Chappie.",
+        )
     if payload.supervisor_approved is not True:
         raise HTTPException(
             status_code=403,

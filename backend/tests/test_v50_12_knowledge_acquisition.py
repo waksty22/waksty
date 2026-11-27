@@ -127,6 +127,36 @@ def test_user_isolation_and_query_relevance():
     db.close()
 
 
+def test_query_retrieval_does_not_let_substring_false_positives_hide_exact_old_match():
+    db = make_db()
+    db.execute(
+        """INSERT INTO memories_v19 VALUES
+           (1, 'creator', 'general', 'Le mot art a été enseigné',
+            'confirmed', 0.9, 5, '2020-01-01', '2020-01-01')"""
+    )
+    for index in range(1005):
+        stamp = f"2026-11-{index % 28 + 1:02d}"
+        db.execute(
+            """INSERT INTO memories_v19 VALUES
+               (?, 'creator', 'general', ?, 'confirmed', 0.9, 5, ?, ?)""",
+            (1000 + index, f"Un partage important numéro {index}", stamp, stamp),
+        )
+    db.commit()
+
+    result = retrieve_acquired_knowledge(db, "creator", "art", limit=12)
+    assert any(
+        item["source_id"] == 1
+        and item["content"] == "Le mot art a été enseigné"
+        for item in result["items"]
+    )
+    assert all(
+        "partage" not in item["content"]
+        for item in result["items"]
+        if item["kind"] == "memory"
+    )
+    db.close()
+
+
 def test_query_retrieval_finds_old_memories_experiences_and_assessments():
     db = make_db()
     seed(db)

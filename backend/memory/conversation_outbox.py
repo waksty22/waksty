@@ -33,6 +33,10 @@ def init_conversation_finalization_outbox(db: Any) -> None:
         CREATE INDEX IF NOT EXISTS idx_conversation_finalization_pending
         ON conversation_finalization_outbox(status, id)
     """)
+    db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_conversation_finalization_user_pending
+        ON conversation_finalization_outbox(user_id, status, id)
+    """)
 
 
 def enqueue_conversation_finalization(

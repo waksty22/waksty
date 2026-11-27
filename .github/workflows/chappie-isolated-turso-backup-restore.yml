@@ -2,6 +2,12 @@ name: Chappie isolated Turso backup and restore E2E
 
 on:
   workflow_dispatch:
+  # Run an additional recovery drill whenever the encrypted daily backup succeeds.
+  workflow_run:
+    workflows:
+      - Chappie Turso encrypted backup
+    types:
+      - completed
   # Weekly isolated restore drill; never targets the production database.
   schedule:
     - cron: "23 4 * * 0"
@@ -12,10 +18,44 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  daily-artifact-recovery:
+    name: restore-real-daily-artifact-into-local-sqlite
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out guarded recovery implementation
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Download the exact encrypted artifact from the completed backup run
+        uses: actions/download-artifact@v8
+        with:
+          name: chappie-turso-backup-${{ github.event.workflow_run.id }}
+          path: daily-backup-artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Install recovery dependencies
+        run: python -m pip install --disable-pip-version-check cryptography
+
+      - name: Authenticate, restore, and verify in disposable in-memory SQLite
+        run: python backend/scripts/test_daily_encrypted_backup_recovery.py --artifact-dir daily-backup-artifact
+        env:
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+
   isolated-turso-backup-restore:
     name: encrypted-backup-restore-on-isolated-db
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

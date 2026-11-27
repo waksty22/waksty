@@ -108,7 +108,7 @@ db.executemany(
     "INSERT INTO conversations(id,user_id,role,content,created_at) VALUES (?,?,?,?,?)",
     [
         (1, "creator", "user", "J'ai acheté un vélo rouge pour aller au travail.", stamp),
-        (2, "creator", "assistant", "Je retiens que tu as acheté un vélo rouge.", stamp),
+        (2, "creator", "assistant", "Je note cette information pour plus tard.", stamp),
     ],
 )
 result = sync_autobiographical_events(db, "creator")

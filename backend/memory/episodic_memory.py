@@ -227,6 +227,40 @@ def _row_to_dict(row: Any, cursor: sqlite3.Cursor) -> dict[str, Any]:
     return dict(zip(columns, row))
 
 
+def _is_valid_search_candidate(item: dict[str, Any]) -> bool:
+    """Reject malformed persisted rows before either search ranking path."""
+    if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool):
+        return False
+    if item["id"] < 1:
+        return False
+    if not isinstance(item.get("content"), str) or not item["content"].strip():
+        return False
+    if not isinstance(item.get("category"), str) or not item["category"].strip():
+        return False
+    if item.get("source_type") not in VALID_SOURCE_TYPES:
+        return False
+    importance = item.get("importance")
+    if isinstance(importance, bool) or not isinstance(importance, int):
+        return False
+    if not 1 <= importance <= 5:
+        return False
+    confidence = item.get("confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        return False
+    try:
+        confidence_value = float(confidence)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+        return False
+    access_count = item.get("access_count")
+    return (
+        isinstance(access_count, int)
+        and not isinstance(access_count, bool)
+        and access_count >= 0
+    )
+
+
 def init_memory_tables(db: sqlite3.Connection) -> None:
     """
     Initialise les tables de mémoire épisodique.
@@ -542,8 +576,12 @@ def search_episodic_memories(
             (user_id,),
         )
         recent_rows = [
-            _row_to_dict(row, recent_cursor)
-            for row in recent_cursor.fetchall()
+            item
+            for item in (
+                _row_to_dict(row, recent_cursor)
+                for row in recent_cursor.fetchall()
+            )
+            if _is_valid_search_candidate(item)
         ]
 
         # Only the best `limit` matching memories can appear in the
@@ -592,27 +630,10 @@ def search_episodic_memories(
                 break
             for raw_row in page:
                 item = _row_to_dict(raw_row, page_cursor)
-                content = item.get("content")
-                category = item.get("category")
-                if not isinstance(content, str) or not isinstance(category, str):
+                if not _is_valid_search_candidate(item):
                     continue
-                if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool):
-                    continue
-                if item.get("source_type") not in VALID_SOURCE_TYPES:
-                    continue
-                if not isinstance(item.get("importance"), int) or isinstance(item.get("importance"), bool):
-                    continue
-                raw_confidence = item.get("confidence")
-                if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
-                    continue
-                try:
-                    confidence_value = float(raw_confidence)
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
-                    continue
-                if not isinstance(item.get("access_count"), int) or isinstance(item.get("access_count"), bool):
-                    continue
+                content = item["content"]
+                category = item["category"]
                 try:
                     parsed_tags = json.loads(item.get("tags") or "[]")
                     tags = (

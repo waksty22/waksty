@@ -2355,7 +2355,7 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
             SELECT through_conversation_id  
             FROM conversation_summaries  
             WHERE user_id=?  
-            ORDER BY id DESC  
+            ORDER BY through_conversation_id DESC, id DESC  
             LIMIT 1  
             """,  
             (user_id,),  
@@ -2372,7 +2372,7 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
                 SELECT summary  
                 FROM conversation_summaries  
                 WHERE user_id=?  
-                ORDER BY id DESC  
+                ORDER BY through_conversation_id DESC, id DESC  
                 LIMIT 1  
                 """,  
                 (user_id,),  
@@ -2427,7 +2427,7 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
             SELECT summary  
             FROM conversation_summaries  
             WHERE user_id=?  
-            ORDER BY id DESC  
+            ORDER BY through_conversation_id DESC, id DESC  
             LIMIT 1  
             """,  
             (user_id,),  
@@ -2448,9 +2448,13 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
             INSERT OR IGNORE INTO conversation_summaries(  
                 user_id, summary, through_conversation_id, created_at  
             )  
-            VALUES(?,?,?,?)  
+            SELECT ?, ?, ?, ?  
+            WHERE NOT EXISTS (  
+                SELECT 1 FROM conversation_summaries  
+                WHERE user_id=? AND through_conversation_id>?  
+            )  
             """,  
-            (user_id, summary, through_id, now),  
+            (user_id, summary, through_id, now, user_id, through_id),  
         )  
 
         # A concurrent consolidator may have committed this same cursor after  
@@ -2475,16 +2479,17 @@ def consolidate_conversation(user_id: str) -> dict[str, Any]:
             # stale reconstruction from an outdated cursor read.  
             persisted = db.execute(  
                 """  
-                SELECT summary  
+                SELECT summary, through_conversation_id  
                 FROM conversation_summaries  
-                WHERE user_id=? AND through_conversation_id=?  
-                ORDER BY id DESC  
+                WHERE user_id=?  
+                ORDER BY through_conversation_id DESC, id DESC  
                 LIMIT 1  
                 """,  
-                (user_id, through_id),  
+                (user_id,),  
             ).fetchone()  
             if persisted is not None:  
                 summary = str(persisted["summary"])  
+                through_id = int(persisted["through_conversation_id"])  
 
         db.commit()  
 

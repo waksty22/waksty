@@ -684,9 +684,6 @@ def test_repeated_identical_object_property_is_not_a_conflict(db):
 def test_known_object_list_hides_objects_before_vocabulary_recognition(db):
     word = "toupie"
     record_heard_word(db, "creator", word)
-    observation = record_observation(
-        db, "creator", "vision", f"image de {word}", "camera_frame", 0.9
-    )
     upsert_world_entity(
         db, "creator", "object:" + word, "object",
         {"label": word}, source_type="observed", confidence=0.6,
@@ -695,10 +692,6 @@ def test_known_object_list_hides_objects_before_vocabulary_recognition(db):
     assert list_known_objects(db, "creator") == []
 
     advance_word(db, "creator", word, "imitated")
-    associate_word_with_observation(
-        db, "creator", word, observation["observation_id"],
-        "Association visuelle explicitement validée",
-    )
     assert list_known_objects(db, "creator") == []
 
     advance_word(db, "creator", word, "recognized")

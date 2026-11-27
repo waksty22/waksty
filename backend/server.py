@@ -3536,6 +3536,18 @@ TOOLS = [{
             },
         },
         {
+            "name": "correct_word_definition",
+            "description": "Corriger une définition de vocabulaire UNIQUEMENT lorsque le Créateur authentifié formule explicitement une correction dans son message actuel. Le mot et la nouvelle définition doivent apparaître littéralement dans ce message ; refuser les questions, hypothèses, formulations incertaines ou négations. Préserver la définition précédente dans l'historique. Ne jamais appeler pour un utilisateur autre que le Créateur.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "word": {"type": "STRING"},
+                    "meaning": {"type": "STRING"},
+                },
+                "required": ["word", "meaning"],
+            },
+        },
+        {
             "name": "search_memories",
             "description": "Rechercher des souvenirs épisodiques de cet utilisateur. OBLIGATOIRE avant de répondre à une question vocale ou écrite sur une conversation passée, un fait personnel ou un événement qui n'est pas clairement présent dans le contexte courant. Les résultats sont des souvenirs sourcés, pas une preuve indépendante.",
             "parameters": {
@@ -3785,6 +3797,56 @@ def execute_tool(
             return {
                 "corrected": True,
                 "property": result,
+                "history_preserved": True,
+                "approval_basis": "explicit_authenticated_creator_message",
+            }
+
+        if name == "correct_word_definition":
+            word = args.get("word", "")
+            meaning = args.get("meaning", "")
+            if user_id != CHAPPIE_OWNER_ID:
+                return {"corrected": False, "error": "Seul le Créateur authentifié peut corriger le vocabulaire de Chappie."}
+            if not all(isinstance(value, str) and value.strip() for value in (
+                word, meaning, user_source_text
+            )):
+                raise ValueError("Les informations de correction du mot sont incomplètes.")
+            source = re.sub(r"\\s+", " ", user_source_text).strip()
+            clauses = re.split(r"[.!?;\\n]+", source)
+            correction_intent = re.compile(
+                r"\\b(?:non|corrige(?:r)?|correction|je me suis tromp[ée]|"
+                r"en réalité|en fait|je rectifie|c'est plutôt|ce n'est pas)\\b",
+                re.IGNORECASE,
+            )
+            uncertainty_or_negation = re.compile(
+                r"\\b(?:ne\\s+(?:corrige|change|modifie)\\s+pas|"
+                r"pas besoin de (?:corriger|changer)|n'effectue pas la correction|"
+                r"peut[- ]être|probablement|je pense|je crois|il semble|elle semble|"
+                r"pas sûr|pas certaine|pas certain)\\b",
+                re.IGNORECASE,
+            )
+            grounded_clause = "?" not in source and any(
+                correction_intent.search(clause)
+                and not uncertainty_or_negation.search(clause)
+                and word.casefold() in clause.casefold()
+                and meaning.casefold() in clause.casefold()
+                for clause in clauses
+            )
+            if not grounded_clause:
+                return {
+                    "corrected": False,
+                    "error": "Correction refusée : le message actuel doit contenir le mot, sa nouvelle définition et une formulation de correction explicite.",
+                }
+            evidence = source.strip()
+            if not 20 <= len(evidence) <= 500:
+                raise ValueError("La correction doit fournir une preuve explicite de 20 à 500 caractères.")
+            with db_connection() as vocabulary_db:
+                result = correct_word_definition(
+                    vocabulary_db, user_id, word, meaning, evidence
+                )
+                vocabulary_db.commit()
+            return {
+                "corrected": True,
+                "word": result,
                 "history_preserved": True,
                 "approval_basis": "explicit_authenticated_creator_message",
             }
@@ -6565,6 +6627,11 @@ async def api_correct_vocabulary(
     auth=Depends(require_auth),
 ):
     user_id = _authenticated_user(auth)
+    if user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(
+            status_code=403,
+            detail="Seul le Créateur peut corriger le vocabulaire de Chappie.",
+        )
     if payload.supervisor_approved is not True:
         raise HTTPException(
             status_code=403,

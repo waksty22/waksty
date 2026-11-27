@@ -302,3 +302,35 @@ def test_matching_memory_search_tolerates_malformed_ranking_metadata():
         assert all(item["content"] != "Cadran ancien corrompu" for item in results)
     finally:
         db.close()
+
+
+def test_malformed_nonmatching_recent_fallback_is_excluded_before_ranking():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(
+            db, "owner", "Souvenir valide du cadran", importance=3,
+            source_type="taught", confidence=0.8,
+        )
+        db.execute("PRAGMA ignore_check_constraints = ON")
+        db.execute(
+            """INSERT INTO memories_v19
+               (user_id, category, content, importance, source_type, confidence,
+                tags, access_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("owner", "general", "Ligne récente non pertinente",
+             sqlite3.Binary(b"broken"), "taught", "not-a-number", "[]", 0,
+             "2026-11-27T00:00:00+00:00", "2026-11-27T00:00:00+00:00"),
+        )
+        db.commit()
+
+        results = search_episodic_memories(
+            db, "owner", "souvenir cadran", limit=5
+        )
+
+        assert [item["content"] for item in results] == [
+            "Souvenir valide du cadran"
+        ]
+    finally:
+        db.close()

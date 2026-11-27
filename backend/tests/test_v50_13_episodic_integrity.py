@@ -229,3 +229,76 @@ def test_episodic_search_orders_mixed_offsets_by_absolute_time():
             "Une montre est rangée là", "Une montre est posée ici"]
     finally:
         db.close()
+
+def test_matching_memory_recall_keeps_oldest_best_match_with_bounded_top_k():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(
+            db, "owner", "Le cadran ancien du Créateur est en laiton",
+            importance=1, source_type="taught", confidence=0.95,
+        )
+        db.execute(
+            "UPDATE memories_v19 SET updated_at=?, created_at=? WHERE content=?",
+            ("2025-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00",
+             "Le cadran ancien du Créateur est en laiton"),
+        )
+        db.executemany(
+            """INSERT INTO memories_v19
+               (user_id, category, content, importance, source_type, confidence,
+                tags, access_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                ("owner", "general", f"Un cadran a été observé récemment {index}",
+                 5, "observed", 0.8, "[]", 0,
+                 f"2026-11-26T00:{index:06d}+00:00",
+                 f"2026-11-26T00:{index:06d}+00:00")
+                for index in range(2500)
+            ],
+        )
+        db.commit()
+
+        results = search_episodic_memories(
+            db, "owner", "cadran ancien", limit=5
+        )
+
+        assert results
+        assert results[0]["content"] == (
+            "Le cadran ancien du Créateur est en laiton"
+        )
+        assert results[0]["relevance_score"] > results[1]["relevance_score"]
+        assert len(results) <= 5
+    finally:
+        db.close()
+
+
+def test_matching_memory_search_tolerates_malformed_ranking_metadata():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(
+            db, "owner", "Souvenir valide du cadran", importance=3,
+            source_type="taught", confidence=0.8,
+        )
+        db.execute("PRAGMA ignore_check_constraints = ON")
+        db.execute(
+            """INSERT INTO memories_v19
+               (user_id, category, content, importance, source_type, confidence,
+                tags, access_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("owner", "general", "Cadran ancien corrompu",
+             sqlite3.Binary(b"bad"), "taught", 0.7, "[]", 0,
+             "2025-01-01T00:00:00+00:00", "2025-01-01T00:00:00+00:00"),
+        )
+        db.commit()
+
+        results = search_episodic_memories(
+            db, "owner", "cadran", limit=5
+        )
+
+        assert any(item["content"] == "Souvenir valide du cadran" for item in results)
+        assert all(item["content"] != "Cadran ancien corrompu" for item in results)
+    finally:
+        db.close()

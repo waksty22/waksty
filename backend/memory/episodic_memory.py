@@ -546,7 +546,34 @@ def search_episodic_memories(
             for row in recent_cursor.fetchall()
         ]
 
+        # Only the best `limit` matching memories can appear in the
+        # final answer. Keep that top-k while paging instead of accumulating
+        # every historical match in RAM.
         matching_rows: list[dict[str, Any]] = []
+
+        def matching_rank(item: dict[str, Any]) -> tuple[float, int, float, int, float]:
+            try:
+                importance = int(item.get("importance") or 0)
+            except (TypeError, ValueError, OverflowError):
+                importance = 0
+            try:
+                confidence = float(item.get("confidence") or 0.0)
+            except (TypeError, ValueError, OverflowError):
+                confidence = 0.0
+            try:
+                access_count = int(item.get("access_count") or 0)
+            except (TypeError, ValueError, OverflowError):
+                access_count = 0
+            if not math.isfinite(confidence):
+                confidence = 0.0
+            return (
+                float(item.get("relevance_score") or 0.0),
+                importance,
+                confidence,
+                access_count,
+                _timestamp_sort_key(item.get("updated_at")),
+            )
+
         last_seen_id: int | None = None
         page_size = 500
         while True:
@@ -569,6 +596,23 @@ def search_episodic_memories(
                 category = item.get("category")
                 if not isinstance(content, str) or not isinstance(category, str):
                     continue
+                if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool):
+                    continue
+                if item.get("source_type") not in VALID_SOURCE_TYPES:
+                    continue
+                if not isinstance(item.get("importance"), int) or isinstance(item.get("importance"), bool):
+                    continue
+                raw_confidence = item.get("confidence")
+                if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
+                    continue
+                try:
+                    confidence_value = float(raw_confidence)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+                    continue
+                if not isinstance(item.get("access_count"), int) or isinstance(item.get("access_count"), bool):
+                    continue
                 try:
                     parsed_tags = json.loads(item.get("tags") or "[]")
                     tags = (
@@ -585,8 +629,37 @@ def search_episodic_memories(
                     char for char in folded if not unicodedata.combining(char)
                 )
                 tokens = set(re.findall(r"[a-z0-9]{2,}", folded))
-                if set(terms) & tokens:
+                matched_terms = set(terms) & tokens
+                if matched_terms:
+                    item["relevance_score"] = round(
+                        len(matched_terms) / max(1, len(terms)) * 10,
+                        3,
+                    )
+                    # A full phrase match receives the same bonus used by
+                    # the final ranking pass.
+                    normalized_phrase = unicodedata.normalize(
+                        "NFKD", query.casefold()
+                    )
+                    normalized_phrase = "".join(
+                        char for char in normalized_phrase
+                        if not unicodedata.combining(char)
+                    )
+                    phrase_tokens = re.findall(r"[a-z0-9]{2,}", normalized_phrase)
+                    token_list = re.findall(r"[a-z0-9]{2,}", folded)
+                    phrase_match = bool(
+                        phrase_tokens
+                        and any(
+                            token_list[index:index + len(phrase_tokens)] == phrase_tokens
+                            for index in range(len(token_list) - len(phrase_tokens) + 1)
+                        )
+                    )
+                    if phrase_match:
+                        item["relevance_score"] = round(
+                            item["relevance_score"] + 3, 3
+                        )
                     matching_rows.append(item)
+                    matching_rows.sort(key=matching_rank, reverse=True)
+                    del matching_rows[limit:]
                     continue
                 # Preserve the existing exact-phrase fallback for queries
                 # whose terms were filtered as stop words.

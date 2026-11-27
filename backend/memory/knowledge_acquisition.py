@@ -454,7 +454,12 @@ def retrieve_acquired_knowledge(
         validated = _validated_assessment(
             details, row.get("passed"), row.get("score")
         )
-        passed = row.get("passed") == 1 and not isinstance(row.get("passed"), bool)
+        passed_value = row.get("passed")
+        passed = (
+            isinstance(passed_value, int)
+            and not isinstance(passed_value, bool)
+            and passed_value == 1
+        )
         score = _safe_score(row.get("score"))
         status = "supervised_skill_validated" if validated else (
             "supervised_assessment_not_validated" if approved else "assessment_provenance_unconfirmed"

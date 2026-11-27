@@ -9,7 +9,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 import server
-from memory.conversation_outbox import list_pending_conversation_finalizations
+from memory.conversation_outbox import (\n    enqueue_conversation_finalization,\n    list_pending_conversation_finalizations,\n)
 
 
 def test_outbox_retry_after_summary_commit_does_not_duplicate_summary(
@@ -24,18 +24,30 @@ def test_outbox_retry_after_summary_commit_does_not_duplicate_summary(
     monkeypatch.setattr(server, "DB_PATH", database)
     server.init_db()
 
-    # Build ten source messages and durable outbox markers without running
-    # finalization, simulating a process that has not yet handled the jobs.
-    monkeypatch.setattr(
-        server, "finalize_conversation_turn",
-        lambda _user_id: {"pending": 0, "completed": 0},
-    )
-    for index in range(5):
-        server.save_conversation_turn(
-            "creator",
-            f"Message de reprise numéro {index}.",
-            f"Réponse de reprise numéro {index}.",
+    # Seed ten source messages and their durable outbox markers directly in
+    # one isolated transaction. This keeps the test focused on the recovery
+    # boundary rather than the separate conversation-save path.
+    with server.db_connection() as db:
+        for index in range(5):
+            for role, text in (
+                ("user", f"Message de reprise numéro {index}."),
+                ("assistant", f"Réponse de reprise numéro {index}."),
+            ):
+                cursor = db.execute(
+                    """
+                    INSERT INTO conversations(user_id, role, content, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    ("creator", role, text, f"2026-11-27T16:00:{index:02d}Z"),
+                )
+            enqueue_conversation_finalization(db, "creator", int(cursor.lastrowid))
+        db.commit()
+
+    with server.db_connection() as db:
+        seeded_pending = list_pending_conversation_finalizations(
+            db, user_id="creator"
         )
+    assert len(seeded_pending) == 5
 
     original_mark = server.mark_conversation_finalization
     fail_once = {"remaining": 1}

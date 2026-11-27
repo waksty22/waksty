@@ -45,6 +45,28 @@ def _timestamp_sort_key(value: Any) -> float:
         return float("-inf")
 
 
+def _is_valid_autobiographical_event(item: dict[str, Any]) -> bool:
+    """Reject malformed persisted episodes before lexical ranking."""
+    for field in ("id", "source_conversation_id"):
+        value = item.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return False
+    if item.get("actor") not in {"user", "assistant"}:
+        return False
+    if not isinstance(item.get("event_type"), str) or not item["event_type"].strip():
+        return False
+    if not isinstance(item.get("content"), str) or not item["content"].strip():
+        return False
+    if not isinstance(item.get("happened_at"), str) or not item["happened_at"].strip():
+        return False
+    importance = item.get("importance")
+    return (
+        isinstance(importance, int)
+        and not isinstance(importance, bool)
+        and 1 <= importance <= 5
+    )
+
+
 def init_autobiographical_tables(db: sqlite3.Connection) -> None:
     db.executescript("""
         CREATE TABLE IF NOT EXISTS autobiographical_events (
@@ -325,7 +347,9 @@ def search_autobiographical_events(
             break
         for row in rows:
             item = dict(row)
-            normalized_content = _normalize_search_text(item.get("content", ""))
+            if not _is_valid_autobiographical_event(item):
+                continue
+            normalized_content = _normalize_search_text(item["content"])
             content_tokens = set(normalized_content.split())
             if not content_tokens:
                 continue
@@ -383,6 +407,8 @@ def search_autobiographical_events(
         ).fetchall()
         for row in linked:
             item = dict(row)
+            if not _is_valid_autobiographical_event(item):
+                continue
             if int(item["id"]) in selected_ids:
                 continue
             item["relevance_score"] = 0.0
@@ -412,13 +438,14 @@ def find_related_autobiographical_events(
     limit = _bounded_limit(limit, 10)
     source = db.execute(
         """
-        SELECT id, content, happened_at
+        SELECT id, source_conversation_id, actor, event_type, content,
+               happened_at, importance
         FROM autobiographical_events
         WHERE user_id=? AND id=?
         """,
         (user_id, event_id),
     ).fetchone()
-    if source is None:
+    if source is None or not _is_valid_autobiographical_event(dict(source)):
         return []
 
     def terms(value: str) -> set[str]:
@@ -463,7 +490,9 @@ def find_related_autobiographical_events(
             break
         for row in rows:
             item = dict(row)
-            candidate_terms = terms(item.get("content", ""))
+            if not _is_valid_autobiographical_event(item):
+                continue
+            candidate_terms = terms(item["content"])
             common = sorted(source_terms & candidate_terms)
             # Require at least two meaningful shared terms to reduce weak matches.
             if len(common) < 2:

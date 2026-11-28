@@ -152,7 +152,7 @@ def _source_provenance_filter(db: sqlite3.Connection) -> str:
               AND source_message.user_id=autobiographical_events.user_id
               AND source_message.role=autobiographical_events.actor
               AND typeof(source_message.content)='text'
-              AND substr(trim(source_message.content), 1, 8000)=autobiographical_events.content
+              AND substr(trim(source_message.content, char(9)||char(10)||char(11)||char(12)||char(13)||' '), 1, 8000)=autobiographical_events.content
               AND source_message.created_at=autobiographical_events.happened_at
         )
     """
@@ -327,7 +327,7 @@ def sync_autobiographical_events(
                 AND user_source.user_id=u.user_id
                 AND user_source.role=u.actor
                 AND typeof(user_source.content)='text'
-                AND substr(trim(user_source.content), 1, 8000)=u.content
+                AND substr(trim(user_source.content, char(9)||char(10)||char(11)||char(12)||char(13)||' '), 1, 8000)=u.content
                 AND user_source.created_at=u.happened_at
           )
           AND EXISTS (
@@ -336,7 +336,7 @@ def sync_autobiographical_events(
                 AND assistant_source.user_id=a.user_id
                 AND assistant_source.role=a.actor
                 AND typeof(assistant_source.content)='text'
-                AND substr(trim(assistant_source.content), 1, 8000)=a.content
+                AND substr(trim(assistant_source.content, char(9)||char(10)||char(11)||char(12)||char(13)||' '), 1, 8000)=a.content
                 AND assistant_source.created_at=a.happened_at
           )
           AND COALESCE((

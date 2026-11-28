@@ -617,11 +617,14 @@ def run_metacognitive_audit(
     if not isinstance(audit_type, str) or not audit_type.strip() or len(audit_type) > 64:
         raise ValueError("audit_type doit être un libellé valide.")
 
+    requested_thought_types = (
+        list(thought_types) if thought_types is not None else None
+    )
     traces = get_cognitive_traces(
         db,
         user_id,
         limit,
-        thought_types=thought_types,
+        thought_types=requested_thought_types,
     )
 
     if not traces:
@@ -754,7 +757,7 @@ def run_metacognitive_audit(
         "trend_measure": "confidence_only",
 
         "reasoning_quality_verified": False,
-        "thought_types_filter": list(thought_types) if thought_types is not None else None,
+        "thought_types_filter": requested_thought_types,
     }
 
     # --------------------------------------------------------

@@ -226,7 +226,7 @@ def test_integrity_report_does_not_count_control_whitespace_as_valid_source():
     db.executemany(
         "INSERT INTO conversations VALUES (?, 'creator', 'user', ?, ?)",
         [
-            (1, "\\t\\r\\n", timestamp),
+            (1, "\t\r\n", timestamp),
             (2, "Source valide", timestamp),
         ],
     )

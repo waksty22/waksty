@@ -96,7 +96,7 @@ def autobiographical_integrity_report(
         WHERE user_id=?
           AND typeof(id)='integer' AND id > 0
           AND role IN ('user', 'assistant')
-          AND typeof(content)='text' AND length(trim(content)) > 0
+          AND typeof(content)='text' AND length(trim(content, char(9)||char(10)||char(11)||char(12)||char(13)||' ')) > 0
           AND typeof(created_at)='text'
           AND julianday(created_at) IS NOT NULL
         """,
@@ -119,7 +119,7 @@ def autobiographical_integrity_report(
               AND id IN ({placeholders})
               AND typeof(id)='integer' AND id > 0
               AND role IN ('user', 'assistant')
-              AND typeof(content)='text' AND length(trim(content)) > 0
+              AND typeof(content)='text' AND length(trim(content, char(9)||char(10)||char(11)||char(12)||char(13)||' ')) > 0
               AND typeof(created_at)='text'
               AND julianday(created_at) IS NOT NULL
             """,

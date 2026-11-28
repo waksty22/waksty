@@ -82,6 +82,67 @@ export async function initLiveAudioStream(socket) {
     let source = null;
     let processor = null;
     let silentGain = null;
+    let recognition = null;
+    let recognitionStarted = false;
+    let preflightEnabled = false;
+    let awaitingContext = false;
+    let stopped = false;
+    let pendingChunks = [];
+    let pendingChars = 0;
+    const MAX_PREFLIGHT_CHUNKS = 256;
+    const MAX_PREFLIGHT_CHARS = 8_000_000;
+
+    const sendChunk = (pcmData) => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+        try {
+            socket.send({ action: 'audio_chunk', pcm_data: pcmData });
+            return true;
+        } catch (error) {
+            console.warn("Envoi audio Live impossible :", error);
+            return false;
+        }
+    };
+
+    const flushPending = () => {
+        const chunks = pendingChunks;
+        pendingChunks = [];
+        pendingChars = 0;
+        for (const chunk of chunks) {
+            if (!sendChunk(chunk)) return false;
+        }
+        return true;
+    };
+
+    const disablePreflight = () => {
+        preflightEnabled = false;
+        awaitingContext = false;
+        if (recognition && recognitionStarted) {
+            try { recognition.stop(); } catch (_) { /* already stopped */ }
+        }
+        recognitionStarted = false;
+        flushPending();
+    };
+
+    const startRecognition = () => {
+        if (
+            !preflightEnabled || stopped || awaitingContext ||
+            recognitionStarted || !recognition ||
+            socket.readyState !== WebSocket.OPEN
+        ) return;
+        try {
+            recognition.start();
+            recognitionStarted = true;
+        } catch (error) {
+            // InvalidStateError means the browser is already starting/stopping
+            // this recognizer; other failures disable preflight and preserve
+            // the original continuous-audio fallback.
+            if (error?.name !== 'InvalidStateError') {
+                console.warn("Prétranscription Live indisponible :", error);
+                disablePreflight();
+            }
+        }
+    };
+
     try {
         stream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -101,25 +162,99 @@ export async function initLiveAudioStream(socket) {
         silentGain = audioCtx.createGain();
         silentGain.gain.value = 0;
 
+        const SpeechRecognitionClass =
+            window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognitionClass) {
+            try {
+                recognition = new SpeechRecognitionClass();
+                recognition.lang = 'fr-FR';
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                preflightEnabled = true;
+                recognition.onresult = (event) => {
+                    const result = event.results?.[event.resultIndex ?? 0];
+                    const transcript = result?.[0]?.transcript?.trim();
+                    if (!transcript) {
+                        disablePreflight();
+                        return;
+                    }
+                    awaitingContext = true;
+                    socket.send({
+                        action: 'audio_transcript_ready',
+                        text: transcript
+                    });
+                };
+                recognition.onerror = (event) => {
+                    console.warn("Prétranscription Live interrompue :", event?.error || "erreur");
+                    disablePreflight();
+                };
+                recognition.onend = () => {
+                    recognitionStarted = false;
+                    if (!preflightEnabled || stopped || awaitingContext) return;
+                    // No finalized transcript: send the captured audio through
+                    // the legacy VAD path rather than silently losing speech.
+                    flushPending();
+                    startRecognition();
+                };
+            } catch (error) {
+                console.warn("Reconnaissance vocale indisponible :", error);
+                recognition = null;
+                preflightEnabled = false;
+            }
+        }
+
         processor.onaudioprocess = (event) => {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN || stopped) return;
+            startRecognition();
             const input = event.inputBuffer.getChannelData(0);
             const pcm16k = resampleFloat32(input, audioCtx.sampleRate, 16000);
             if (!pcm16k.length) return;
+            const encoded = floatToPcm16Base64(pcm16k);
 
-            socket.send({
-                action: 'audio_chunk',
-                pcm_data: floatToPcm16Base64(pcm16k)
-            });
+            if (!preflightEnabled) {
+                sendChunk(encoded);
+                return;
+            }
+
+            pendingChunks.push(encoded);
+            pendingChars += encoded.length;
+            if (
+                pendingChunks.length > MAX_PREFLIGHT_CHUNKS ||
+                pendingChars > MAX_PREFLIGHT_CHARS
+            ) {
+                // Bound browser memory even if speech recognition never returns.
+                // The fallback remains compatible with Gemini's automatic VAD.
+                disablePreflight();
+            }
         };
 
         source.connect(processor);
         processor.connect(silentGain);
         silentGain.connect(audioCtx.destination);
 
-        console.log(`Microphone Live prêt : ${audioCtx.sampleRate} Hz → PCM 16 kHz.`);
+        console.log(
+            `Microphone Live prêt : ${audioCtx.sampleRate} Hz → PCM 16 kHz.` +
+            (preflightEnabled ? " Rappel mémoire préalable activable." : " VAD direct (prétranscription indisponible).")
+        );
         return {
+            handleServerMessage(data) {
+                if (data?.type !== 'audio_context_ready' || !awaitingContext || stopped) return;
+                awaitingContext = false;
+                flushPending();
+                startRecognition();
+            },
             stop() {
+                stopped = true;
+                pendingChunks = [];
+                pendingChars = 0;
+                if (recognition) {
+                    recognition.onresult = null;
+                    recognition.onerror = null;
+                    recognition.onend = null;
+                    try { recognition.stop(); } catch (_) { /* already stopped */ }
+                }
+                recognition = null;
+                recognitionStarted = false;
                 if (processor) {
                     processor.disconnect();
                     processor.onaudioprocess = null;
@@ -131,6 +266,9 @@ export async function initLiveAudioStream(socket) {
         };
     } catch (error) {
         console.error("Erreur d'accès au microphone :", error);
+        if (recognition) {
+            try { recognition.stop(); } catch (_) { /* already stopped */ }
+        }
         if (stream) stream.getTracks().forEach(track => track.stop());
         if (processor) processor.disconnect();
         if (source) source.disconnect();

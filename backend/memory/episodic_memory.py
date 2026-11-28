@@ -862,6 +862,8 @@ def apply_memory_decay(
           AND source_type IN ('observed', 'taught', 'inferred')
           AND typeof(confidence) IN ('integer', 'real')
           AND confidence BETWEEN 0.0 AND 1.0
+          AND typeof(created_at) = 'text'
+          AND julianday(created_at) IS NOT NULL
           AND typeof(updated_at) = 'text'
           AND julianday(updated_at) IS NOT NULL
           AND julianday(updated_at) < julianday(?)
@@ -924,7 +926,9 @@ def get_memory_statistics(
           AND confidence BETWEEN 0.0 AND 1.0
           AND typeof(access_count) = 'integer' AND access_count >= 0
           AND typeof(created_at) = 'text'
+          AND julianday(created_at) IS NOT NULL
           AND typeof(updated_at) = 'text'
+          AND julianday(updated_at) IS NOT NULL
         """,
         (user_id,),
     )

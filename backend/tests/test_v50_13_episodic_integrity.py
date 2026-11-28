@@ -452,3 +452,48 @@ def test_decay_and_statistics_ignore_empty_categories():
         assert rows["Souvenir sans catégorie"] == 5
     finally:
         db.close()
+
+
+
+def test_decay_and_statistics_ignore_invalid_memory_timestamps():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(
+            db, "owner", "Souvenir avec dates valides",
+            importance=3, source_type="taught",
+        )
+        old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        db.execute(
+            "UPDATE memories_v19 SET created_at=?, updated_at=? WHERE user_id=?",
+            (old, old, "owner"),
+        )
+        db.execute("PRAGMA ignore_check_constraints = ON")
+        db.executemany(
+            """INSERT INTO memories_v19
+               (user_id, category, content, importance, source_type,
+                confidence, tags, access_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                ("owner", "legacy", "Date de création invalide", 5, "taught",
+                 0.9, "[]", 0, "not-a-date", old),
+                ("owner", "legacy", "Date de mise à jour invalide", 5, "taught",
+                 0.9, "[]", 0, old, "not-a-date"),
+            ],
+        )
+        db.commit()
+
+        stats = get_memory_statistics(db, "owner")
+        assert stats["total"] == 1
+
+        assert apply_memory_decay(db, "owner", days=30) == 1
+        rows = {
+            row["content"]: row["importance"]
+            for row in db.execute("SELECT content, importance FROM memories_v19")
+        }
+        assert rows["Souvenir avec dates valides"] == 2
+        assert rows["Date de création invalide"] == 5
+        assert rows["Date de mise à jour invalide"] == 5
+    finally:
+        db.close()

@@ -975,3 +975,24 @@ def test_metacognitive_reviews_reach_shared_chat_live_context_without_cross_user
     assert "Contenu privé autre utilisateur" not in context
     assert "other-user" not in context
     db.close()
+
+def test_snapshot_version_tracks_metacognitive_review_context():
+    db = make_db()
+    db.execute("""
+        CREATE TABLE metacognition_logs (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            audit_type TEXT NOT NULL,
+            confidence_average REAL NOT NULL,
+            confidence_trend TEXT NOT NULL,
+            doubt_count INTEGER NOT NULL,
+            trace_count INTEGER NOT NULL,
+            findings TEXT NOT NULL,
+            recommendations TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    snapshot = get_shared_brain_snapshot(db, "creator")
+    assert snapshot["snapshot_version"] == "35.0"
+    assert "metacognitive_reviews" in snapshot
+    db.close()

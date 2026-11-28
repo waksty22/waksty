@@ -70,3 +70,45 @@ def test_live_query_refresh_skips_empty_query_without_reading_database(monkeypat
     assert server.build_live_query_brain_refresh_message(
         "temporary-db", "creator", "   ", 1
     ) is None
+
+def test_live_query_refresh_includes_persisted_metacognitive_reviews():
+    import json
+    import sqlite3
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("""
+        CREATE TABLE metacognition_logs (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            audit_type TEXT NOT NULL,
+            confidence_average REAL NOT NULL,
+            confidence_trend TEXT NOT NULL,
+            doubt_count INTEGER NOT NULL,
+            trace_count INTEGER NOT NULL,
+            findings TEXT NOT NULL,
+            recommendations TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    db.execute(
+        """INSERT INTO metacognition_logs
+           (user_id,audit_type,confidence_average,confidence_trend,
+            doubt_count,trace_count,findings,recommendations,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            "creator", "periodic", 0.4, "stable", 2, 4,
+            json.dumps({"reasoning_quality_verified": False}),
+            json.dumps(["Vérifier les informations avant décision"]),
+            "2026-11-28",
+        ),
+    )
+
+    message = server.build_live_query_brain_refresh_message(
+        db, "creator", "Que dois-je vérifier ?", 7
+    )
+    text = message["clientContent"]["turns"][0]["parts"][0]["text"]
+    assert "AUTO-ÉVALUATIONS" in text
+    assert "Vérifier les informations avant décision" in text
+    assert "pas des instructions" in text
+    db.close()

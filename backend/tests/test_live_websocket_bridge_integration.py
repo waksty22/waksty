@@ -718,3 +718,30 @@ def test_live_tool_response_precedes_brain_refresh_and_next_user_input(
     assert client.second_input_received.is_set()
     assert any(item.get("type") == "turn_complete" for item in client.sent)
 
+
+
+
+def test_websocket_bridge_persists_rate_limited_video_frame_receipt_with_provenance(
+    live_bridge, monkeypatch
+):
+    run, calls, client = live_bridge
+    client.incoming_payloads = [{
+        "action": "video_frame",
+        "data": "YWJj",
+        "mime_type": "image/jpeg",
+    }]
+    monkeypatch.setattr(server, "live_visual_observation_due", lambda *_args: True)
+
+    run([{"serverContent": {"turnComplete": True}}])
+
+    visual = [
+        item for item in calls["observations"]
+        if item[1] == "vision"
+        and item[3] == "live_camera_frame_received_by_server"
+    ]
+    assert len(visual) == 1
+    metadata = visual[0][4]["metadata"]
+    assert metadata["session_id"]
+    assert metadata["frame_sequence"] == 1
+    assert metadata["image_bytes_persisted"] is False
+    assert metadata["semantic_analysis_performed"] is False

@@ -285,12 +285,18 @@ def evaluate_experiment(
     evidence = db.execute(
         """SELECT
                SUM(CASE WHEN evaluation='supported' THEN 1 ELSE 0 END) AS supported,
-               SUM(CASE WHEN evaluation='contradicted' THEN 1 ELSE 0 END) AS contradicted
+               SUM(CASE WHEN evaluation='contradicted' THEN 1 ELSE 0 END) AS contradicted,
+               SUM(CASE WHEN evaluation='inconclusive' THEN 1 ELSE 0 END) AS inconclusive
            FROM causal_experiments
            WHERE user_id=? AND hypothesis_id=? AND status='completed'""",
         (user_id, row["hid"]),
     ).fetchone()
-    if int(evidence["supported"] or 0) > 0 and int(evidence["contradicted"] or 0) > 0:
+    # An inconclusive result leaves the hypothesis unresolved. A later
+    # favorable or unfavorable result must not silently erase that uncertainty.
+    if (
+        int(evidence["supported"] or 0) > 0
+        and int(evidence["contradicted"] or 0) > 0
+    ) or int(evidence["inconclusive"] or 0) > 0:
         hypothesis_status = "uncertain"
 
     db.execute(

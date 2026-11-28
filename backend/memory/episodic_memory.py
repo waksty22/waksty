@@ -850,6 +850,7 @@ def apply_memory_decay(
             importance = importance - 1,
             updated_at = ?
         WHERE user_id = ?
+          AND typeof(id) = 'integer' AND id > 0
           AND typeof(importance) = 'integer'
           AND importance BETWEEN 2 AND 5
           AND typeof(access_count) = 'integer'
@@ -909,7 +910,7 @@ def get_memory_statistics(
 
         FROM memories_v19
         WHERE user_id = ?
-          AND typeof(id) = 'integer'
+          AND typeof(id) = 'integer' AND id > 0
           AND typeof(user_id) = 'text'
           AND typeof(content) = 'text' AND length(trim(content, char(9)||char(10)||char(11)||char(12)||char(13)||' ')) > 0
           AND typeof(category) = 'text'

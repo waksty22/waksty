@@ -2335,7 +2335,15 @@ def record_memory_relevance_doubt_trace(
             (user_id,),
         ).fetchone()[0]
         if trace_count >= 4 and trace_count % 4 == 0:
-            run_metacognitive_audit(db_trace, user_id)
+            run_metacognitive_audit(
+                db_trace,
+                user_id,
+                thought_types=[
+                    "incertitude_contexte_memoire_chat",
+                    "incertitude_contexte_memoire_gemini_live",
+                ],
+                audit_type="automatic_memory_context",
+            )
         db_trace.commit()
     return True
 

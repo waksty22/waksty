@@ -922,3 +922,56 @@ def test_linked_object_experience_reaches_query_context_without_cross_user_leaka
     assert "J'ai poussé la pomme rouge" in context
     assert "other-user" not in context
     db.close()
+
+def test_metacognitive_reviews_reach_shared_chat_live_context_without_cross_user_leakage():
+    db = make_db()
+    db.execute("""
+        CREATE TABLE metacognition_logs (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            audit_type TEXT NOT NULL,
+            confidence_average REAL NOT NULL,
+            confidence_trend TEXT NOT NULL,
+            doubt_count INTEGER NOT NULL,
+            trace_count INTEGER NOT NULL,
+            findings TEXT NOT NULL,
+            recommendations TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    db.executemany(
+        """INSERT INTO metacognition_logs
+           (id,user_id,audit_type,confidence_average,confidence_trend,
+            doubt_count,trace_count,findings,recommendations,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        [
+            (1, "creator", "general", 0.4, "stable", 2, 4,
+             '{"reasoning_quality_verified":false,"confidence_sample_count":4}',
+             '["Vérifier les informations avant décision"]', "2026-11-27"),
+            (2, "creator", "general", 0.3, "decreasing", 3, 8,
+             '{"reasoning_quality_verified":false,"confidence_sample_count":8}',
+             '["Examiner les causes de baisse de confiance"]', "2026-11-28"),
+            (3, "other-user", "general", 0.99, "increasing", 0, 100,
+             '{"reasoning_quality_verified":true}',
+             '["Contenu privé autre utilisateur"]', "2026-11-28"),
+        ],
+    )
+
+    snapshot = get_shared_brain_snapshot(db, "creator", limit=5)
+    reviews = snapshot["metacognitive_reviews"]
+
+    assert [row["id"] for row in reviews] == [2, 1]
+    assert reviews[0]["findings"]["reasoning_quality_verified"] is False
+    assert reviews[0]["recommendations"] == [
+        "Examiner les causes de baisse de confiance"
+    ]
+    assert snapshot["statistics"]["totals"]["metacognitive_reviews"] == 2
+
+    context = format_shared_brain_context(snapshot)
+    assert "AUTO-ÉVALUATIONS" in context
+    assert "recommandations hypothétiques" in context
+    assert "reasoning_quality_verified" in context
+    assert "Examiner les causes de baisse de confiance" in context
+    assert "Contenu privé autre utilisateur" not in context
+    assert "other-user" not in context
+    db.close()

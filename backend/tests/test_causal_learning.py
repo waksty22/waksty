@@ -459,3 +459,61 @@ def test_concurrent_causal_evaluation_uses_latest_locked_confidence(db):
     assert stored["confidence"] == 0.7
     assert stored["evidence_count"] == 1
 
+
+
+
+def test_inconclusive_evidence_remains_uncertain_after_supported_followup(db):
+    _, hypothesis = seed_hypothesis(db)
+    inconclusive = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "premier essai ambigu", "la balle tombe", True,
+    )
+    evaluate_experiment(
+        db, "creator", inconclusive["id"], "résultat indéterminé", "inconclusive"
+    )
+
+    supported = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "second essai favorable", "la balle tombe", True,
+    )
+    result = evaluate_experiment(
+        db, "creator", supported["id"], "la balle touche le sol", "supported"
+    )
+
+    stored = db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    review = review_causal_learning(db, "creator")
+    assert result["status"] == "uncertain"
+    assert stored["status"] == "uncertain"
+    assert review["hypotheses"][0]["evidence_assessment"] == "supported_by_recorded_tests"
+    assert review["hypotheses"][0]["evidence_counts"] == {
+        "supported": 1, "contradicted": 0, "inconclusive": 1,
+    }
+
+
+def test_inconclusive_evidence_remains_uncertain_after_contradicted_followup(db):
+    _, hypothesis = seed_hypothesis(db)
+    inconclusive = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "premier essai ambigu", "la balle tombe", True,
+    )
+    evaluate_experiment(
+        db, "creator", inconclusive["id"], "résultat indéterminé", "inconclusive"
+    )
+
+    contradicted = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "second essai contradictoire", "la balle tombe", True,
+    )
+    result = evaluate_experiment(
+        db, "creator", contradicted["id"], "la balle reste immobile", "contradicted"
+    )
+
+    stored = db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    assert result["status"] == "uncertain"
+    assert stored["status"] == "uncertain"

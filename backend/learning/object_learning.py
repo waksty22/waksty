@@ -261,24 +261,38 @@ def correct_object_property(
         raise ValueError("La nouvelle valeur existe déjà pour cette propriété.")
 
     now = utc_now()
-    history = db.execute(
-        """INSERT INTO object_property_history
-           (user_id, object_id, property_key, previous_value, corrected_value,
-            previous_source_type, previous_confidence, previous_evidence,
-            correction_evidence, corrected_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (user_id, object_id, key, previous, corrected, row["source_type"],
-         row["confidence"], row["evidence"], evidence, now),
-    )
-    updated = db.execute(
-        """UPDATE object_properties
-           SET property_value=?, source_type='confirmed', confidence=1.0,
-               evidence=?, updated_at=?
-           WHERE id=? AND user_id=?""",
-        (corrected, evidence, now, row["id"], user_id),
-    )
-    if updated.rowcount != 1:
-        raise RuntimeError("La correction de propriété n'a pas pu être vérifiée.")
+    # Compare-and-swap the exact value that was read. The UPDATE acquires
+    # SQLite's write lock; a concurrent correction of the same old value
+    # therefore cannot be silently overwritten by this stale request.
+    db.execute("SAVEPOINT object_property_correction")
+    try:
+        updated = db.execute(
+            """UPDATE object_properties
+               SET property_value=?, source_type='confirmed', confidence=1.0,
+                   evidence=?, updated_at=?
+               WHERE id=? AND user_id=? AND property_value=?
+                 AND source_type=? AND confidence=? AND evidence=?""",
+            (corrected, evidence, now, row["id"], user_id, previous,
+             row["source_type"], row["confidence"], row["evidence"]),
+        )
+        if updated.rowcount != 1:
+            raise ValueError(
+                "Cette propriété a été corrigée entre-temps ; recharge son état avant une nouvelle correction."
+            )
+        history = db.execute(
+            """INSERT INTO object_property_history
+               (user_id, object_id, property_key, previous_value, corrected_value,
+                previous_source_type, previous_confidence, previous_evidence,
+                correction_evidence, corrected_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, object_id, key, previous, corrected, row["source_type"],
+             row["confidence"], row["evidence"], evidence, now),
+        )
+        db.execute("RELEASE SAVEPOINT object_property_correction")
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT object_property_correction")
+        db.execute("RELEASE SAVEPOINT object_property_correction")
+        raise
     return {
         "word": word, "property_key": key, "previous_value": previous,
         "property_value": corrected, "source_type": "confirmed",

@@ -788,3 +788,42 @@ def test_known_object_list_hides_objects_before_vocabulary_recognition(db):
     assert len(listed) == 1
     assert listed[0]["word"] == word
     assert listed[0]["vocabulary_state"] == "recognized"
+
+
+
+def test_concurrent_object_property_correction_cannot_overwrite_newer_value(db):
+    add_recognized_object(db, "pomme")
+    teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Première leçon du Créateur.", confidence=0.8,
+    )
+
+    class ConditionalUpdateMiss:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def execute(self, sql, params=()):
+            if sql.lstrip().startswith("UPDATE object_properties"):
+                # Model the compare-and-swap losing to a concurrent commit.
+                # The competing transaction is external to this savepoint.
+                return type("MissedUpdate", (), {"rowcount": 0})()
+            return self.connection.execute(sql, params)
+
+    with pytest.raises(ValueError, match="corrigée entre-temps"):
+        correct_object_property(
+            ConditionalUpdateMiss(db), "creator", "pomme", "couleur",
+            "rouge", "jaune", "Deuxième correction explicite du Créateur.",
+        )
+
+    current = db.execute(
+        """SELECT property_value, evidence FROM object_properties
+           WHERE user_id='creator' AND object_id='object:pomme'
+             AND property_key='couleur'"""
+    ).fetchone()
+    assert dict(current) == {
+        "property_value": "rouge",
+        "evidence": "Première leçon du Créateur.",
+    }
+    assert db.execute(
+        "SELECT COUNT(*) FROM object_property_history"
+    ).fetchone()[0] == 0

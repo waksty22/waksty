@@ -83,6 +83,10 @@ def test_supervised_simulation_can_be_planned(db):
         "lâcher une balle virtuelle", "elle touche le sol", True,
     )
     assert experiment["status"] == "planned"
+    assert db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()["status"] == "testing"
     assert experiment["supervisor_approved"] is True
 
 
@@ -144,6 +148,62 @@ def test_mixed_supported_and_contradicted_results_remain_uncertain(db):
         "supported": 1, "contradicted": 1, "inconclusive": 0,
     }
     assert review["history_is_preserved"] is True
+
+
+def test_planning_new_experiment_preserves_mixed_evidence_uncertainty(db):
+    _, hypothesis = seed_hypothesis(db)
+    for evaluation, result in (
+        ("supported", "la balle tombe"),
+        ("contradicted", "la balle reste immobile"),
+    ):
+        experiment = plan_experiment(
+            db, "creator", hypothesis["id"], "simulation",
+            f"essai {evaluation}", "la balle tombe", True,
+        )
+        evaluate_experiment(db, "creator", experiment["id"], result, evaluation)
+
+    planned = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "troisième essai virtuel", "la balle tombe", True,
+    )
+    stored = db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    review = review_causal_learning(db, "creator")
+    item = review["hypotheses"][0]
+
+    assert planned["status"] == "planned"
+    assert stored["status"] == "uncertain"
+    assert item["status"] == "uncertain"
+    assert item["evidence_assessment"] == "mixed_evidence"
+    assert item["planned_experiments_count"] == 1
+    assert review["history_is_preserved"] is True
+
+
+def test_planning_new_experiment_preserves_inconclusive_uncertainty(db):
+    _, hypothesis = seed_hypothesis(db)
+    first = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "premier essai virtuel", "la balle tombe", True,
+    )
+    evaluate_experiment(
+        db, "creator", first["id"], "résultat ambigu", "inconclusive"
+    )
+
+    plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "deuxième essai virtuel", "la balle tombe", True,
+    )
+
+    stored = db.execute(
+        "SELECT status FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    item = review_causal_learning(db, "creator")["hypotheses"][0]
+    assert stored["status"] == "uncertain"
+    assert item["status"] == "uncertain"
+    assert item["evidence_assessment"] == "inconclusive"
 
 
 def test_inconclusive_result_does_not_change_confidence(db):

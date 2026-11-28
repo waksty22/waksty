@@ -7488,6 +7488,43 @@ async def websocket_endpoint(
                         continue
                     action = payload.get("action")
                     pending_merged_user_text = None
+                    if action == "audio_transcript_ready":
+                        # Browser-side speech recognition is used only as a
+                        # retrieval hint. The original PCM remains the sole
+                        # audio input sent to Gemini and the sole source used
+                        # for confirmed-turn learning.
+                        raw_hint = payload.get("text", "")
+                        if (
+                            not isinstance(raw_hint, str)
+                            or not raw_hint.strip()
+                            or len(raw_hint) > MAX_LIVE_TEXT_CHUNK_CHARS
+                        ):
+                            continue
+                        transcript_hint = raw_hint.strip()
+                        await brain_context_ready.wait()
+                        try:
+                            with db_connection() as query_brain_db:
+                                query_refresh = build_live_query_brain_refresh_message(
+                                    query_brain_db,
+                                    user_id,
+                                    transcript_hint,
+                                    live_turn_state["brain_refresh_version"] + 1,
+                                )
+                            if query_refresh is not None:
+                                await send_to_gemini(query_refresh)
+                                live_turn_state["brain_refresh_version"] += 1
+                        except Exception:
+                            log.exception(
+                                "[GEMINI LIVE] Échec du rappel mémoire avant le flux audio"
+                            )
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "Le rappel mémoire a échoué ; le flux audio n'a pas été transmis.",
+                            })
+                            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                            return
+                        await websocket.send_json({"type": "audio_context_ready"})
+                        continue
                     if action == "audio_chunk":
                         pcm = payload.get("pcm_data")
                         # Audio is base64 PCM. Bound each frame before forwarding

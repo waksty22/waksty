@@ -8,6 +8,7 @@ from memory.autobiographical import (
     init_autobiographical_tables,
     list_autobiographical_events,
     search_autobiographical_events,
+    autobiographical_statistics,
 )
 
 
@@ -205,4 +206,47 @@ def test_related_event_search_batches_source_provenance_checks_per_page():
     assert len(results) == 7
     assert len(grouped_source_selects) == 1
     assert all(item["relation_status"] == "candidate_only" for item in results)
+    db.close()
+
+
+
+def test_sql_provenance_accepts_ascii_whitespace_removed_during_indexing():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.executescript("""
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    init_autobiographical_tables(db)
+    timestamp = "2026-11-28T08:00:00Z"
+    db.execute(
+        "INSERT INTO conversations VALUES (1, 'creator', 'user', ?, ?)",
+        ("\\tSouvenir horloge rouge\\n", timestamp),
+    )
+    db.execute(
+        """
+        INSERT INTO autobiographical_events
+            (user_id, source_conversation_id, actor, event_type, content,
+             happened_at, importance, created_at)
+        VALUES ('creator', 1, 'user', 'user_statement',
+                'Souvenir horloge rouge', ?, 3, ?)
+        """,
+        (timestamp, timestamp),
+    )
+    db.commit()
+
+    listed = list_autobiographical_events(db, "creator", limit=10)
+    searched = search_autobiographical_events(
+        db, "creator", "souvenir horloge", limit=5
+    )
+    stats = autobiographical_statistics(db, "creator")
+
+    assert [item["source_conversation_id"] for item in listed] == [1]
+    assert [item["source_conversation_id"] for item in searched] == [1]
+    assert stats["total_events"] == 1
     db.close()

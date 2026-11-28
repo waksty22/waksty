@@ -356,7 +356,7 @@ def test_decay_and_statistics_ignore_ascii_whitespace_only_content():
                (user_id, category, content, importance, source_type, confidence,
                 tags, access_count, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("owner", "legacy", "\\t\\r\\n", 5, "taught", 0.9,
+            ("owner", "legacy", "\t\r\n", 5, "taught", 0.9,
              "[]", 0, old, old),
         )
         db.commit()
@@ -370,6 +370,6 @@ def test_decay_and_statistics_ignore_ascii_whitespace_only_content():
             for row in db.execute("SELECT content, importance FROM memories_v19")
         }
         assert rows["Souvenir réellement renseigné"] == 2
-        assert rows["\\t\\r\\n"] == 5
+        assert rows["\t\r\n"] == 5
     finally:
         db.close()

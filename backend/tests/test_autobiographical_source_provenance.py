@@ -226,7 +226,7 @@ def test_sql_provenance_accepts_ascii_whitespace_removed_during_indexing():
     timestamp = "2026-11-28T08:00:00Z"
     db.execute(
         "INSERT INTO conversations VALUES (1, 'creator', 'user', ?, ?)",
-        ("\\tSouvenir horloge rouge\\n", timestamp),
+        ("\tSouvenir horloge rouge\n", timestamp),
     )
     db.execute(
         """

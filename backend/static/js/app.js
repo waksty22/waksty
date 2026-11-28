@@ -910,6 +910,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 liveStatus.textContent = data.message;
             }
 
+            if (data.type === "audio_context_ready" && liveRecorder?.handleServerMessage) {
+                liveRecorder.handleServerMessage(data);
+            }
+
             if (data.type === "user_text" && typeof data.text === "string") {
                 const transcript = document.getElementById("liveTranscript");
                 if (transcript) {

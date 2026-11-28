@@ -83,3 +83,69 @@ def test_successful_chat_persists_memory_doubt_trace_after_conversation_save(
         assert len(traces) == 1
         assert traces[0]["thought_type"] == "incertitude_contexte_memoire_chat"
         assert "zorbital" not in traces[0]["context_summary"]
+
+
+
+def test_completed_conversations_trigger_bounded_automatic_metacognitive_audits(
+    monkeypatch, tmp_path
+):
+    server = _prepare_isolated_server(monkeypatch, tmp_path)
+
+    for index in range(1, 9):
+        assert server.record_memory_relevance_doubt_trace(
+            "creator", f"question-{index}", channel="chat"
+        ) is True
+
+        with server.db_connection() as db:
+            trace_count = db.execute(
+                "SELECT COUNT(*) FROM cognitive_traces WHERE user_id=?",
+                ("creator",),
+            ).fetchone()[0]
+            audit_count = db.execute(
+                "SELECT COUNT(*) FROM metacognition_logs WHERE user_id=?",
+                ("creator",),
+            ).fetchone()[0]
+
+        assert trace_count == index
+        assert audit_count == index // 4
+
+    with server.db_connection() as db:
+        latest = db.execute(
+            "SELECT trace_count, findings FROM metacognition_logs "
+            "WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            ("creator",),
+        ).fetchone()
+        assert latest["trace_count"] == 8
+        assert '"reasoning_quality_verified": false' in latest["findings"]
+
+def test_automatic_metacognitive_audit_cadence_ignores_unrelated_traces(
+    monkeypatch, tmp_path
+):
+    server = _prepare_isolated_server(monkeypatch, tmp_path)
+
+    with server.db_connection() as db:
+        for index in range(3):
+            server.log_cognitive_trace(
+                db,
+                "creator",
+                "general_reasoning",
+                f"Unrelated trace {index}",
+                "Recorded independently",
+                0.8,
+            )
+        db.commit()
+
+    for index in range(1, 5):
+        assert server.record_memory_relevance_doubt_trace(
+            "creator", f"question-{index}", channel="chat"
+        ) is True
+
+    with server.db_connection() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM cognitive_traces WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0] == 7
+        assert db.execute(
+            "SELECT COUNT(*) FROM metacognition_logs WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0] == 1

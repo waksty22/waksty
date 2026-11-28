@@ -412,3 +412,50 @@ def test_mixed_evidence_remains_uncertain_after_inconclusive_followup(db):
     assert review["hypotheses"][0]["evidence_counts"] == {
         "supported": 1, "contradicted": 1, "inconclusive": 1,
     }
+
+def test_concurrent_causal_evaluation_uses_latest_locked_confidence(db):
+    _, hypothesis = seed_hypothesis(db)
+    experiment = plan_experiment(
+        db, "creator", hypothesis["id"], "simulation",
+        "essai favorable", "la balle tombe", True,
+    )
+
+    class ConcurrentConfidenceUpdate:
+        def __init__(self, connection):
+            self.connection = connection
+            self.injected = False
+
+        def execute(self, sql, params=()):
+            if (
+                sql.lstrip().startswith("UPDATE causal_experiments SET status='completed'")
+                and not self.injected
+            ):
+                self.injected = True
+                self.connection.execute(
+                    "UPDATE causal_hypotheses SET confidence=0.6 WHERE id=? AND user_id=?",
+                    (hypothesis["id"], "creator"),
+                )
+            return self.connection.execute(sql, params)
+
+        def commit(self):
+            return self.connection.commit()
+
+    result = evaluate_experiment(
+        ConcurrentConfidenceUpdate(db),
+        "creator",
+        experiment["id"],
+        "la balle touche le sol",
+        "supported",
+    )
+
+    # The supported update must be based on 0.6 (the latest committed value),
+    # not 0.4 (the stale value read before the concurrent update).
+    assert result["previous_confidence"] == 0.6
+    assert result["confidence"] == 0.7
+    stored = db.execute(
+        "SELECT confidence, evidence_count FROM causal_hypotheses WHERE id=?",
+        (hypothesis["id"],),
+    ).fetchone()
+    assert stored["confidence"] == 0.7
+    assert stored["evidence_count"] == 1
+

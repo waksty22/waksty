@@ -172,3 +172,28 @@ def test_automatic_metacognitive_audit_reaches_shared_brain_context(
     assert "AUTO-ÉVALUATIONS" in context
     assert "reasoning_quality_verified" in context
     assert "Renforcer la vérification des informations" in context
+
+
+def test_manual_metacognitive_audit_preserves_requested_filter_metadata(
+    monkeypatch, tmp_path
+):
+    server = _prepare_isolated_server(monkeypatch, tmp_path)
+
+    with server.db_connection() as db:
+        server.log_cognitive_trace(
+            db, "creator", "general_reasoning", "General trace", "Review", 0.8
+        )
+        server.log_cognitive_trace(
+            db, "creator", "memory_doubt", "Memory trace", "Verify", 0.3
+        )
+
+        general = server.run_metacognitive_audit(db, "creator")
+        filtered = server.run_metacognitive_audit(
+            db, "creator", thought_types=["memory_doubt"]
+        )
+        db.commit()
+
+    assert general["findings"]["thought_types_filter"] is None
+    assert filtered["findings"]["thought_types_filter"] == ["memory_doubt"]
+    assert filtered["trace_count"] == 1
+

@@ -281,7 +281,13 @@ def test_chat_rejects_ambiguous_or_non_creator_vocabulary_corrections(
     ).fetchone()[0] == 0
 
 
-def test_non_creator_cannot_promote_vocabulary_even_with_approval(language_api_db):
+def test_non_creator_cannot_promote_vocabulary_even_with_approval(
+    monkeypatch, language_api_db
+):
+    # Bypass the current single-owner instance guard to exercise this route's
+    # explicit creator-only authorization independently.
+    monkeypatch.setattr(server, "valid_user", lambda user_id: user_id)
+
     async def run():
         await server.api_teach_vocabulary(
             payload("pomme", "heard"), auth="other"

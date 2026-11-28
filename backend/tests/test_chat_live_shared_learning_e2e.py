@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -863,3 +866,90 @@ def test_live_audio_can_search_older_shared_sensory_observations_via_read_only_t
     assert unique_memory in encoded
     assert "secret autre utilisateur" not in encoded
     assert any(item.get("type") == "turn_complete" for item in fake_client.sent)
+
+
+def test_shared_brain_reloads_persisted_sensory_memory_in_a_fresh_process(
+    monkeypatch, tmp_path
+):
+    """A new OS process must rebuild the same user-scoped brain from durable SQLite."""
+    import server
+
+    database_path = tmp_path / "fresh-process-shared-brain.sqlite3"
+    monkeypatch.setenv("CHAPPIE_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setenv("CHAPPIE_SQLITE_PATH", str(database_path))
+    monkeypatch.setenv("CHAPPIE_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CHAPPIE_ALLOW_TURSO_MIGRATION", raising=False)
+    monkeypatch.setattr(server, "DB_PATH", database_path)
+    monkeypatch.setattr(server, "STORAGE_MIGRATION_PENDING_CUTOVER", False)
+    server.init_db()
+
+    expected_memory = "souvenir durable processus neuf cristal bleu"
+    with server.db_connection() as db:
+        server.record_observation(
+            db,
+            "creator",
+            "vision",
+            expected_memory,
+            "process_restart_acceptance_test",
+            confidence=0.0,
+            metadata={"test_fixture": True},
+        )
+        server.record_observation(
+            db,
+            "another-user",
+            "vision",
+            "secret isolé autre utilisateur",
+            "process_restart_acceptance_test",
+            confidence=0.0,
+            metadata={"test_fixture": True},
+        )
+        db.commit()
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    child_env = os.environ.copy()
+    child_env["CHAPPIE_STORAGE_BACKEND"] = "sqlite"
+    child_env["CHAPPIE_SQLITE_PATH"] = str(database_path)
+    child_env["CHAPPIE_DATA_DIR"] = str(tmp_path)
+    child_env.pop("TURSO_DATABASE_URL", None)
+    child_env.pop("TURSO_AUTH_TOKEN", None)
+    child_env.pop("CHAPPIE_ALLOW_TURSO_MIGRATION", None)
+    child_env["PYTHONPATH"] = os.pathsep.join(
+        [str(backend_dir), child_env.get("PYTHONPATH", "")]
+    )
+    child_script = (
+        "import json; import server; "
+        "server.init_db(); "
+        "db_context = server.db_connection(); "
+        "db = db_context.__enter__(); "
+        "snapshot = server.get_shared_brain_snapshot(db, 'creator'); "
+        "print('SNAPSHOT_JSON=' + json.dumps(snapshot, ensure_ascii=False)); "
+        "db_context.__exit__(None, None, None)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", child_script],
+        cwd=backend_dir,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=True,
+    )
+
+    snapshot_line = next(
+        (
+            line[len("SNAPSHOT_JSON="):]
+            for line in result.stdout.splitlines()
+            if line.startswith("SNAPSHOT_JSON=")
+        ),
+        None,
+    )
+    assert snapshot_line is not None, result.stdout + result.stderr
+    child_snapshot = json.loads(snapshot_line)
+    sensory_text = json.dumps(
+        child_snapshot.get("sensory_observations", []),
+        ensure_ascii=False,
+    )
+    assert expected_memory in sensory_text
+    assert "secret isolé autre utilisateur" not in sensory_text

@@ -124,3 +124,45 @@ def test_promoted_fusion_cannot_be_relabelled_or_promoted_twice(db):
     assert db.execute("SELECT COUNT(*) FROM world_entities").fetchone()[0] == 3
     assert db.execute("SELECT COUNT(*) FROM world_relations").fetchone()[0] == 2
     assert first["object_label"] == "tasse"
+
+
+def test_concurrent_promotion_conflict_rolls_back_all_semantic_writes(db):
+    candidate_id, _, _ = make_confirmed_candidate(db)
+    before = db.execute(
+        "SELECT evidence_json FROM perception_fusion_candidates WHERE id=?",
+        (candidate_id,),
+    ).fetchone()["evidence_json"]
+
+    class MissedUpdate:
+        rowcount = 0
+
+    class CompetingPromotionConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def execute(self, sql, parameters=()):
+            normalized = " ".join(sql.split()).casefold()
+            if normalized.startswith(
+                "update perception_fusion_candidates set evidence_json=?"
+            ):
+                return MissedUpdate()
+            return self.connection.execute(sql, parameters)
+
+    with pytest.raises(ValueError, match="modifié entre-temps"):
+        promote_confirmed_perception_fusion(
+            CompetingPromotionConnection(db),
+            "creator",
+            candidate_id,
+            "bol",
+            "Une autre requête a gagné la course.",
+        )
+
+    assert db.execute("SELECT COUNT(*) FROM world_entities").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM world_relations").fetchone()[0] == 0
+    after = db.execute(
+        "SELECT evidence_json FROM perception_fusion_candidates WHERE id=?",
+        (candidate_id,),
+    ).fetchone()["evidence_json"]
+    assert after == before
+    # The savepoint was released after rollback and the connection remains usable.
+    db.execute("SELECT 1").fetchone()

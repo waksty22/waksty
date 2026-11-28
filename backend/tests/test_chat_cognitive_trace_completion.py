@@ -115,5 +115,5 @@ def test_completed_conversations_trigger_bounded_automatic_metacognitive_audits(
             "WHERE user_id=? ORDER BY id DESC LIMIT 1",
             ("creator",),
         ).fetchone()
-        assert latest["trace_count"] == 4
+        assert latest["trace_count"] == 8
         assert '"reasoning_quality_verified": false' in latest["findings"]

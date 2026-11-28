@@ -772,3 +772,45 @@ def test_websocket_bridge_persists_rate_limited_video_frame_receipt_with_provena
     assert metadata["frame_sequence"] == 1
     assert metadata["image_bytes_persisted"] is False
     assert metadata["semantic_analysis_performed"] is False
+
+
+def test_live_turn_storage_failure_never_releases_uncommitted_assistant_audio(
+    live_bridge, monkeypatch, caplog
+):
+    run, _calls, client = live_bridge
+    save_attempts = []
+
+    def fail_completed_turn_once(user, user_text, assistant_text, **kwargs):
+        source = kwargs.get("source")
+        save_attempts.append((source, user_text, assistant_text))
+        if source == "gemini_live":
+            raise RuntimeError("simulated completed-turn commit failure")
+
+    monkeypatch.setattr(server, "save_conversation_turn", fail_completed_turn_once)
+    monkeypatch.setattr(server, "get_skills_summary", lambda _user: {"average_level": 3})
+
+    run([
+        {"serverContent": {"inputTranscription": {"text": "Bonjour"}}},
+        {"serverContent": {
+            "outputTranscription": {"text": "Bonjour"},
+            "modelTurn": {"parts": [{
+                "inlineData": {
+                    "data": "YXVkaW8=",
+                    "mimeType": "audio/pcm;rate=24000",
+                }
+            }]},
+            "turnComplete": True,
+        }},
+    ])
+
+    assert save_attempts == [
+        ("gemini_live", "Bonjour", "Bonjour"),
+        ("gemini_live_interrupted", "Bonjour", ""),
+    ]
+    assert not any(item.get("type") == "audio_stream" for item in client.sent)
+    assert not any(
+        item.get("type") == "text" and item.get("text") == "Bonjour"
+        for item in client.sent
+    )
+    assert any(item.get("type") == "error" for item in client.sent)
+    assert "simulated completed-turn commit failure" in caplog.text

@@ -195,6 +195,33 @@ def test_websocket_bridge_commits_cognitive_learning_once_after_merged_turn(live
     ), "Unchanged brain snapshots should not be resent."
 
 
+def test_websocket_bridge_records_memory_doubt_only_after_turn_persistence(
+    live_bridge, monkeypatch
+):
+    run, _calls, _client = live_bridge
+    events = []
+
+    def record_turn(user, user_text, assistant_text, **kwargs):
+        events.append(("persist", user, user_text, assistant_text, kwargs))
+
+    def record_doubt(user, query, *, channel, relevant_memories=None):
+        events.append(("doubt", user, query, channel))
+
+    monkeypatch.setattr(server, "save_conversation_turn", record_turn)
+    monkeypatch.setattr(server, "record_memory_relevance_doubt_trace", record_doubt)
+
+    run([
+        {"serverContent": {"inputTranscription": {"text": "Bonjour"}}},
+        {"serverContent": {"outputTranscription": {"text": "Bonjour"}, "turnComplete": True}},
+    ])
+
+    assert [event[0] for event in events] == ["persist", "doubt"]
+    assert events[0][1:] == (
+        "creator", "Bonjour", "Bonjour", {"source": "gemini_live"}
+    )
+    assert events[1] == ("doubt", "creator", "Bonjour", "gemini_live")
+
+
 def test_websocket_bridge_never_promotes_disconnected_partial_transcript(live_bridge):
     run, calls, _client = live_bridge
     run([

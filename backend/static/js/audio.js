@@ -167,11 +167,20 @@ export async function initLiveAudioStream(socket) {
         if (SpeechRecognitionClass) {
             try {
                 recognition = new SpeechRecognitionClass();
-                recognition.lang = 'fr-FR';
-                recognition.continuous = false;
-                recognition.interimResults = false;
-                preflightEnabled = true;
-                recognition.onresult = (event) => {
+                // Never send microphone audio to a remote Web Speech service.
+                // Preflight is enabled only where the browser explicitly
+                // exposes on-device recognition; otherwise Gemini's existing
+                // direct-audio path remains in use.
+                if (!('processLocally' in recognition)) {
+                    recognition = null;
+                } else {
+                    recognition.processLocally = true;
+                    recognition.lang = 'fr-FR';
+                    recognition.continuous = false;
+                    recognition.interimResults = false;
+                    preflightEnabled = true;
+                }
+                if (recognition) recognition.onresult = (event) => {
                     const result = event.results?.[event.resultIndex ?? 0];
                     const transcript = result?.[0]?.transcript?.trim();
                     if (!transcript) {
@@ -184,18 +193,22 @@ export async function initLiveAudioStream(socket) {
                         text: transcript
                     });
                 };
-                recognition.onerror = (event) => {
-                    console.warn("Prétranscription Live interrompue :", event?.error || "erreur");
-                    disablePreflight();
-                };
-                recognition.onend = () => {
-                    recognitionStarted = false;
-                    if (!preflightEnabled || stopped || awaitingContext) return;
-                    // No finalized transcript: send the captured audio through
-                    // the legacy VAD path rather than silently losing speech.
-                    flushPending();
-                    startRecognition();
-                };
+                if (recognition) {
+                    recognition.onerror = (event) => {
+                        console.warn("Prétranscription Live interrompue :", event?.error || "erreur");
+                        disablePreflight();
+                    };
+                    recognition.onend = () => {
+                        recognitionStarted = false;
+                        if (!preflightEnabled || stopped || awaitingContext) return;
+                        // No finalized transcript: send the captured audio through
+                        // the legacy VAD path rather than silently losing speech.
+                        flushPending();
+                        startRecognition();
+                    };
+                } else {
+                    preflightEnabled = false;
+                }
             } catch (error) {
                 console.warn("Reconnaissance vocale indisponible :", error);
                 recognition = null;

@@ -149,3 +149,23 @@ def test_automatic_metacognitive_audit_cadence_ignores_unrelated_traces(
             "SELECT COUNT(*) FROM metacognition_logs WHERE user_id=?",
             ("creator",),
         ).fetchone()[0] == 1
+
+def test_automatic_metacognitive_audit_reaches_shared_brain_context(
+    monkeypatch, tmp_path
+):
+    server = _prepare_isolated_server(monkeypatch, tmp_path)
+
+    for index in range(4):
+        assert server.record_memory_relevance_doubt_trace(
+            "creator", f"question-{index}", channel="chat"
+        ) is True
+
+    with server.db_connection() as db:
+        snapshot = server.get_shared_brain_snapshot(db, "creator")
+        context = server.format_shared_brain_context(snapshot)
+
+    assert snapshot["snapshot_version"] == "35.0"
+    assert len(snapshot["metacognitive_reviews"]) == 1
+    assert "AUTO-ÉVALUATIONS" in context
+    assert "reasoning_quality_verified" in context
+    assert "Renforcer la vérification des informations" in context

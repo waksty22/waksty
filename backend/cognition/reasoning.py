@@ -481,15 +481,32 @@ def evaluate_memory_relevance_doubt(
 def get_cognitive_traces(
     db,
     user_id: str,
-    limit: int = DEFAULT_AUDIT_LIMIT
+    limit: int = DEFAULT_AUDIT_LIMIT,
+    thought_types: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
-    """Retourne les dernières traces d'un utilisateur."""
+    """Retourne les dernières traces d'un utilisateur, éventuellement filtrées."""
 
     user_id = _normalize_user_id(user_id)
     limit = _safe_limit(limit)
+    params: list[Any] = [user_id]
+    type_filter = ""
+    if thought_types is not None:
+        if (
+            not isinstance(thought_types, list)
+            or not thought_types
+            or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 100
+                for item in thought_types
+            )
+        ):
+            raise ValueError("thought_types doit être une liste non vide de types valides.")
+        normalized_types = list(dict.fromkeys(item.strip() for item in thought_types))
+        type_filter = " AND thought_type IN (" + ", ".join("?" for _ in normalized_types) + ")"
+        params.extend(normalized_types)
+    params.append(limit)
 
     rows = db.execute(
-        """
+        f"""
         SELECT
             id,
             user_id,
@@ -499,11 +516,11 @@ def get_cognitive_traces(
             confidence,
             created_at
         FROM cognitive_traces
-        WHERE user_id = ?
+        WHERE user_id = ?{type_filter}
         ORDER BY id DESC
         LIMIT ?
         """,
-        (user_id, limit)
+        tuple(params)
     ).fetchall()
 
     return [
@@ -575,7 +592,10 @@ def get_metacognition_logs(
 def run_metacognitive_audit(
     db,
     user_id: str,
-    limit: int = DEFAULT_AUDIT_LIMIT
+    limit: int = DEFAULT_AUDIT_LIMIT,
+    *,
+    thought_types: Optional[list[str]] = None,
+    audit_type: str = "general",
 ) -> dict[str, Any]:
     """
     Analyse les dernières traces cognitives.
@@ -594,18 +614,21 @@ def run_metacognitive_audit(
 
     user_id = _normalize_user_id(user_id)
     limit = _safe_limit(limit)
+    if not isinstance(audit_type, str) or not audit_type.strip() or len(audit_type) > 64:
+        raise ValueError("audit_type doit être un libellé valide.")
 
     traces = get_cognitive_traces(
         db,
         user_id,
-        limit
+        limit,
+        thought_types=thought_types,
     )
 
     if not traces:
 
         return {
             "user_id": user_id,
-            "audit_type": "general",
+            "audit_type": audit_type.strip(),
             "trace_count": 0,
             "confidence_average": 0.0,
             "confidence_trend": "insufficient_data",
@@ -730,7 +753,8 @@ def run_metacognitive_audit(
 
         "trend_measure": "confidence_only",
 
-        "reasoning_quality_verified": False
+        "reasoning_quality_verified": False,
+        "thought_types_filter": list(thought_types) if thought_types is not None else None,
     }
 
     # --------------------------------------------------------
@@ -802,7 +826,7 @@ def run_metacognitive_audit(
         """,
         (
             user_id,
-            "general",
+            audit_type.strip(),
             round(confidence_average, 4),
             confidence_trend,
             doubt_count,
@@ -818,7 +842,7 @@ def run_metacognitive_audit(
 
         "user_id": user_id,
 
-        "audit_type": "general",
+        "audit_type": audit_type.strip(),
 
         "trace_count": len(traces),
 

@@ -145,10 +145,13 @@ def test_automatic_metacognitive_audit_cadence_ignores_unrelated_traces(
             "SELECT COUNT(*) FROM cognitive_traces WHERE user_id=?",
             ("creator",),
         ).fetchone()[0] == 7
-        assert db.execute(
-            "SELECT COUNT(*) FROM metacognition_logs WHERE user_id=?",
+        audit = db.execute(
+            "SELECT audit_type, trace_count, findings FROM metacognition_logs WHERE user_id=?",
             ("creator",),
-        ).fetchone()[0] == 1
+        ).fetchone()
+        assert audit["audit_type"] == "automatic_memory_context"
+        assert audit["trace_count"] == 4
+        assert '"thought_types_filter"' in audit["findings"]
 
 def test_automatic_metacognitive_audit_reaches_shared_brain_context(
     monkeypatch, tmp_path

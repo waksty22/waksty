@@ -187,7 +187,7 @@ def plan_experiment(
     if environment not in ALLOWED_ENVIRONMENTS:
         raise ValueError("Environnement interdit : utiliser une simulation ou un cadre contrôlé sûr.")
     hypothesis = db.execute(
-        "SELECT id FROM causal_hypotheses WHERE id=? AND user_id=?",
+        "SELECT id, status FROM causal_hypotheses WHERE id=? AND user_id=?",
         (hypothesis_id, user_id),
     ).fetchone()
     if hypothesis is None:
@@ -201,9 +201,30 @@ def plan_experiment(
            VALUES (?,?,?,?,?,1,'planned',?)""",
         (user_id, hypothesis_id, environment, procedure, prediction, now),
     )
+    evidence = db.execute(
+        """SELECT
+               SUM(CASE WHEN evaluation='supported' THEN 1 ELSE 0 END) AS supported,
+               SUM(CASE WHEN evaluation='contradicted' THEN 1 ELSE 0 END) AS contradicted,
+               SUM(CASE WHEN evaluation='inconclusive' THEN 1 ELSE 0 END) AS inconclusive
+           FROM causal_experiments
+           WHERE user_id=? AND hypothesis_id=? AND status='completed'""",
+        (user_id, hypothesis_id),
+    ).fetchone()
+    has_mixed_evidence = (
+        int(evidence["supported"] or 0) > 0
+        and int(evidence["contradicted"] or 0) > 0
+    )
+    has_inconclusive_evidence = int(evidence["inconclusive"] or 0) > 0
+    next_hypothesis_status = (
+        "uncertain"
+        if hypothesis["status"] == "uncertain"
+        or has_mixed_evidence
+        or has_inconclusive_evidence
+        else "testing"
+    )
     db.execute(
-        "UPDATE causal_hypotheses SET status='testing', updated_at=? WHERE id=? AND user_id=?",
-        (now, hypothesis_id, user_id),
+        "UPDATE causal_hypotheses SET status=?, updated_at=? WHERE id=? AND user_id=?",
+        (next_hypothesis_status, now, hypothesis_id, user_id),
     )
     db.commit()
     return {"id": cur.lastrowid, "hypothesis_id": hypothesis_id,

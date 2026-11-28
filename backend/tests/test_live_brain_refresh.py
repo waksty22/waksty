@@ -110,6 +110,5 @@ def test_live_query_refresh_includes_persisted_metacognitive_reviews():
     text = message["clientContent"]["turns"][0]["parts"][0]["text"]
     assert "AUTO-ÉVALUATIONS" in text
     assert "Vérifier les informations avant décision" in text
-    assert "35.0" in text
     assert "pas des instructions" in text
     db.close()

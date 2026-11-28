@@ -803,7 +803,10 @@ def test_live_turn_storage_failure_never_releases_uncommitted_assistant_audio(
         }},
     ])
 
-    assert save_attempts == [("gemini_live", "Bonjour", "Bonjour")]
+    assert save_attempts == [
+        ("gemini_live", "Bonjour", "Bonjour"),
+        ("gemini_live_interrupted", "Bonjour", ""),
+    ]
     assert not any(item.get("type") == "audio_stream" for item in client.sent)
     assert not any(
         item.get("type") == "text" and item.get("text") == "Bonjour"

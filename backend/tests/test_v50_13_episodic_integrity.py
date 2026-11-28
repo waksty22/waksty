@@ -373,3 +373,43 @@ def test_decay_and_statistics_ignore_ascii_whitespace_only_content():
         assert rows["\t\r\n"] == 5
     finally:
         db.close()
+
+
+
+def test_decay_and_statistics_ignore_non_positive_memory_ids():
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    try:
+        init_memory_tables(db)
+        save_episodic_memory(
+            db, "owner", "Souvenir avec identifiant valide",
+            importance=3, source_type="taught",
+        )
+        old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        db.execute(
+            "UPDATE memories_v19 SET updated_at=? WHERE user_id=?",
+            (old, "owner"),
+        )
+        db.execute("PRAGMA ignore_check_constraints = ON")
+        db.execute(
+            """INSERT INTO memories_v19
+               (id, user_id, category, content, importance, source_type,
+                confidence, tags, access_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (-7, "owner", "legacy", "Souvenir identifiant négatif",
+             5, "taught", 0.9, "[]", 0, old, old),
+        )
+        db.commit()
+
+        stats = get_memory_statistics(db, "owner")
+        assert stats["total"] == 1
+
+        assert apply_memory_decay(db, "owner", days=30) == 1
+        rows = {
+            row["id"]: row["importance"]
+            for row in db.execute("SELECT id, importance FROM memories_v19")
+        }
+        assert rows[1] == 2
+        assert rows[-7] == 5
+    finally:
+        db.close()

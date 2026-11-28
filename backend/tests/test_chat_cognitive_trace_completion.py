@@ -117,3 +117,35 @@ def test_completed_conversations_trigger_bounded_automatic_metacognitive_audits(
         ).fetchone()
         assert latest["trace_count"] == 8
         assert '"reasoning_quality_verified": false' in latest["findings"]
+
+def test_automatic_metacognitive_audit_cadence_ignores_unrelated_traces(
+    monkeypatch, tmp_path
+):
+    server = _prepare_isolated_server(monkeypatch, tmp_path)
+
+    with server.db_connection() as db:
+        for index in range(3):
+            server.log_cognitive_trace(
+                db,
+                "creator",
+                "general_reasoning",
+                f"Unrelated trace {index}",
+                "Recorded independently",
+                0.8,
+            )
+        db.commit()
+
+    for index in range(1, 5):
+        assert server.record_memory_relevance_doubt_trace(
+            "creator", f"question-{index}", channel="chat"
+        ) is True
+
+    with server.db_connection() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM cognitive_traces WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0] == 7
+        assert db.execute(
+            "SELECT COUNT(*) FROM metacognition_logs WHERE user_id=?",
+            ("creator",),
+        ).fetchone()[0] == 1

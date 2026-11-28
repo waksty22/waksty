@@ -227,7 +227,8 @@ def test_integrity_report_does_not_count_control_whitespace_as_valid_source():
         "INSERT INTO conversations VALUES (?, 'creator', 'user', ?, ?)",
         [
             (1, "\t\r\n", timestamp),
-            (2, "Source valide", timestamp),
+            (2, "\u00a0\u2003\u3000", timestamp),
+            (3, "Source valide", timestamp),
         ],
     )
     db.execute(
@@ -235,7 +236,7 @@ def test_integrity_report_does_not_count_control_whitespace_as_valid_source():
         INSERT INTO autobiographical_events
             (user_id, source_conversation_id, actor, event_type, content,
              happened_at, importance, created_at)
-        VALUES ('creator', 2, 'user', 'user_statement', 'Source valide', ?, 3, ?)
+        VALUES ('creator', 3, 'user', 'user_statement', 'Source valide', ?, 3, ?)
         """,
         (timestamp, timestamp),
     )

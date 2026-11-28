@@ -7796,16 +7796,6 @@ async def websocket_endpoint(
 
                         if confirmed_user_text:
                             try:
-                                record_memory_relevance_doubt_trace(
-                                    user_id,
-                                    confirmed_user_text,
-                                    channel="gemini_live",
-                                )
-                            except Exception:
-                                log.exception(
-                                    "[GEMINI LIVE] Échec d'évaluation du doute fondé sur la mémoire"
-                                )
-                            try:
                                 live_emotions = update_emotions_once(
                                     user_id, confirmed_user_text
                                 )
@@ -7887,6 +7877,21 @@ async def websocket_endpoint(
                             except Exception:
                                 log.exception("[V34] Échec d'enregistrement du tour Live")
                                 raise
+
+                            # A cognitive doubt trace belongs to a durable completed
+                            # turn. Persist it only after transcript, sensory evidence,
+                            # learning, and conversation storage have all succeeded.
+                            if confirmed_user_text:
+                                try:
+                                    record_memory_relevance_doubt_trace(
+                                        user_id,
+                                        confirmed_user_text,
+                                        channel="gemini_live",
+                                    )
+                                except Exception:
+                                    log.exception(
+                                        "[GEMINI LIVE] Échec d'évaluation du doute fondé sur la mémoire"
+                                    )
 
                         # Release generated speech only after every persistence step succeeded.
                         if lexical_gate_passed:

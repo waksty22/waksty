@@ -7943,8 +7943,12 @@ async def websocket_endpoint(
                         refresh_succeeded = False
                         try:
                             with db_connection() as refresh_db:
+                                # Keep the just-completed Live topic salient for
+                                # the next turn, including audio turns whose
+                                # transcript was unavailable before provider input.
                                 refreshed_snapshot = get_shared_brain_snapshot(
-                                    refresh_db, user_id, limit=8
+                                    refresh_db, user_id, limit=8,
+                                    query=confirmed_user_text,
                                 )
                             with db_connection() as language_db:
                                 refreshed_words = set(

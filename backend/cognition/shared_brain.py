@@ -14,7 +14,7 @@ import unicodedata
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-SNAPSHOT_VERSION = "34.0"
+SNAPSHOT_VERSION = "35.0"
 DEFAULT_LIMIT = 8
 MAX_LIMIT = 30
 MAX_CONTEXT_CHARS = 18000

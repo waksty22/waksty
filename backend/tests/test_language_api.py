@@ -279,3 +279,26 @@ def test_chat_rejects_ambiguous_or_non_creator_vocabulary_corrections(
     assert language_api_db.execute(
         "SELECT COUNT(*) FROM personal_vocabulary_history"
     ).fetchone()[0] == 0
+
+
+def test_non_creator_cannot_promote_vocabulary_even_with_approval(language_api_db):
+    async def run():
+        await server.api_teach_vocabulary(
+            payload("pomme", "heard"), auth="other"
+        )
+        with pytest.raises(HTTPException) as denied:
+            await server.api_teach_vocabulary(
+                payload(
+                    "pomme", "imitated",
+                    evidence="Le mot a été répété correctement plusieurs fois.",
+                    supervisor_approved=True,
+                ),
+                auth="other",
+            )
+        assert denied.value.status_code == 403
+
+    asyncio.run(run())
+    row = language_api_db.execute(
+        "SELECT state FROM personal_vocabulary WHERE user_id='other' AND word='pomme'"
+    ).fetchone()
+    assert row["state"] == "heard"

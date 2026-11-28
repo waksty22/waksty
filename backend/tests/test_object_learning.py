@@ -788,3 +788,51 @@ def test_known_object_list_hides_objects_before_vocabulary_recognition(db):
     assert len(listed) == 1
     assert listed[0]["word"] == word
     assert listed[0]["vocabulary_state"] == "recognized"
+
+
+
+def test_concurrent_object_property_correction_cannot_overwrite_newer_value(db):
+    add_recognized_object(db, "pomme")
+    teach_object_property(
+        db, "creator", "pomme", "couleur", "rouge",
+        evidence="Première leçon du Créateur.", confidence=0.8,
+    )
+
+    class ConcurrentCorrection:
+        def __init__(self, connection):
+            self.connection = connection
+            self.injected = False
+
+        def execute(self, sql, params=()):
+            if (
+                sql.lstrip().startswith("UPDATE object_properties")
+                and not self.injected
+            ):
+                self.injected = True
+                self.connection.execute(
+                    """UPDATE object_properties
+                       SET property_value='verte', source_type='confirmed',
+                           confidence=1.0, evidence='Correction concurrente'
+                       WHERE user_id='creator' AND object_id='object:pomme'
+                         AND property_key='couleur' AND property_value='rouge'"""
+                )
+            return self.connection.execute(sql, params)
+
+    with pytest.raises(ValueError, match="corrigée entre-temps"):
+        correct_object_property(
+            ConcurrentCorrection(db), "creator", "pomme", "couleur",
+            "rouge", "jaune", "Deuxième correction explicite du Créateur.",
+        )
+
+    current = db.execute(
+        """SELECT property_value, evidence FROM object_properties
+           WHERE user_id='creator' AND object_id='object:pomme'
+             AND property_key='couleur'"""
+    ).fetchone()
+    assert dict(current) == {
+        "property_value": "verte",
+        "evidence": "Correction concurrente",
+    }
+    assert db.execute(
+        "SELECT COUNT(*) FROM object_property_history"
+    ).fetchone()[0] == 0

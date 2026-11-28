@@ -548,6 +548,45 @@ def test_websocket_bridge_rejects_non_boolean_turn_complete_flags(
     )]
 
 
+def test_websocket_bridge_refreshes_audio_memory_before_forwarding_pcm(
+    live_bridge, monkeypatch
+):
+    run, calls, client = live_bridge
+    client.incoming_payloads = [
+        {"action": "audio_transcript_ready", "text": "Parle-moi du chien"},
+        {"action": "audio_chunk", "pcm_data": "cGNt"},
+    ]
+    refresh = {
+        "clientContent": {
+            "turns": [{"role": "user", "parts": [{"text": "souvenir chien"}]}],
+            "turnComplete": False,
+        }
+    }
+    monkeypatch.setattr(
+        server,
+        "build_live_query_brain_refresh_message",
+        lambda _db, user, query, version: refresh
+        if (user, query, version) == ("creator", "Parle-moi du chien", 1)
+        else pytest.fail("unexpected audio preflight query"),
+    )
+
+    provider = run([
+        {"serverContent": {"inputTranscription": {"text": "Parle-moi du chien"}}},
+        {"serverContent": {"turnComplete": True}},
+    ])
+
+    refresh_index = provider.sent.index(refresh)
+    audio_index = next(
+        index for index, message in enumerate(provider.sent)
+        if message.get("realtimeInput", {}).get("audio", {}).get("data") == "cGNt"
+    )
+    assert refresh_index < audio_index
+    assert {"type": "audio_context_ready"} in client.sent
+    # The browser transcript is a retrieval hint only; the provider transcript
+    # remains the durable source of the confirmed user turn.
+    assert calls["learning"] == [("creator", "Parle-moi du chien")]
+
+
 def test_websocket_bridge_refreshes_persisted_brain_before_releasing_next_turn(
     live_bridge, monkeypatch
 ):

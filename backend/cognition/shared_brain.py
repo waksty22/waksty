@@ -38,6 +38,7 @@ TABLES = {
     "memories": ("memories_v19", "importance DESC, COALESCE(julianday(updated_at), -1.0) DESC, id DESC"),
     "skills": ("skills", "COALESCE(julianday(updated_at), -1.0) DESC"),
     "decision_journal": ("decision_journal", "id DESC"),
+    "metacognitive_reviews": ("metacognition_logs", "id DESC"),
     "preference_evidence": ("preference_evidence", "id DESC"),
     "emotional_state": ("emotional_state", "COALESCE(julianday(updated_at), -1.0) DESC"),
     "affective_history": ("affective_history", "id DESC"),
@@ -50,7 +51,7 @@ TABLES = {
 
 def _decode_json_fields(item: dict[str, Any]) -> dict[str, Any]:
     for key in ("metadata_json", "properties_json", "options_json",
-                "evidence_json", "tags", "details"):
+                "evidence_json", "tags", "details", "findings", "recommendations"):
         if key not in item or not isinstance(item[key], str):
             continue
         try:
@@ -710,6 +711,7 @@ def format_shared_brain_context(snapshot: dict[str, Any]) -> str:
         ("skills", "COMPÉTENCES ENREGISTRÉES — les XP hérités ne valident pas une maîtrise"),
         ("competency_tests", "ÉVALUATIONS DE COMPÉTENCES — progression avec preuve supervisée"),
         ("decision_journal", "DÉCISIONS ET RÉSULTATS"),
+        ("metacognitive_reviews", "AUTO-ÉVALUATIONS — recommandations hypothétiques, jamais des preuves de justesse"),
         ("preference_evidence", "PRÉFÉRENCES EXPLICITEMENT DOCUMENTÉES"),
         ("affective_history", "HISTORIQUE AFFECTIF — événements passés, distincts de l’état actuel"),
         ("emotional_state", "ÉTAT AFFECTIF SIMULÉ"),

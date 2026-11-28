@@ -6874,6 +6874,11 @@ async def api_teach_vocabulary(
     auth=Depends(require_auth),
 ):
     user_id = _authenticated_user(auth)
+    if payload.state != "heard" and user_id != CHAPPIE_OWNER_ID:
+        raise HTTPException(
+            status_code=403,
+            detail="Seul le Créateur peut valider la progression du vocabulaire de Chappie.",
+        )
     try:
         with db_connection() as db:
             existing = db.execute(

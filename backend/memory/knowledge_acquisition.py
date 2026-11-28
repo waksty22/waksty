@@ -245,7 +245,7 @@ def _experience_source_is_valid(
         """SELECT 1 FROM conversations
            WHERE id=? AND user_id=? AND role=?
              AND typeof(content)='text'
-             AND substr(trim(content), 1, 8000)=?
+             AND substr(trim(content, char(9)||char(10)||char(11)||char(12)||char(13)||' '), 1, 8000)=?
              AND created_at=? LIMIT 1""",
         (source_id, user_id, actor, content, happened_at),
     ).fetchone() is not None
@@ -289,7 +289,7 @@ def retrieve_acquired_knowledge(
         "AND c.role=autobiographical_events.actor "
         "AND c.role IN ('user', 'assistant') "
         "AND typeof(c.content)='text' "
-        "AND substr(trim(c.content), 1, 8000)=autobiographical_events.content "
+        "AND substr(trim(c.content, char(9)||char(10)||char(11)||char(12)||char(13)||' '), 1, 8000)=autobiographical_events.content "
         "AND c.created_at=autobiographical_events.happened_at)"
         if has_conversations else ""
     )

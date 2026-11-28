@@ -253,7 +253,24 @@ def evaluate_experiment(
     evaluation = evaluation.strip().lower() if isinstance(evaluation, str) else ""
     if evaluation not in ALLOWED_RESULTS:
         raise ValueError("Évaluation attendue : supported, contradicted ou inconclusive.")
-    prior = float(row["confidence"])
+    now = _now()
+    finalized = db.execute(
+        """UPDATE causal_experiments SET status='completed', result=?, evaluation=?, completed_at=?
+           WHERE id=? AND user_id=? AND status='planned'""",
+        (observed_result, evaluation, now, experiment_id, user_id),
+    )
+    if finalized.rowcount != 1:
+        raise ValueError("Cette expérience a déjà été clôturée.")
+    # The conditional write above acquires SQLite's write lock. Read the
+    # confidence only after it succeeds so concurrent experiment evaluations
+    # cannot both calculate from the same stale value and lose an update.
+    current = db.execute(
+        "SELECT confidence FROM causal_hypotheses WHERE id=? AND user_id=?",
+        (row["hid"], user_id),
+    ).fetchone()
+    if current is None:
+        raise ValueError("Hypothèse introuvable pour cet utilisateur.")
+    prior = float(current["confidence"])
     if evaluation == "supported":
         updated = min(0.98, prior + (1.0 - prior) * 0.25)
         hypothesis_status = "supported"
@@ -263,14 +280,6 @@ def evaluate_experiment(
     else:
         updated = prior
         hypothesis_status = "uncertain"
-    now = _now()
-    finalized = db.execute(
-        """UPDATE causal_experiments SET status='completed', result=?, evaluation=?, completed_at=?
-           WHERE id=? AND user_id=? AND status='planned'""",
-        (observed_result, evaluation, now, experiment_id, user_id),
-    )
-    if finalized.rowcount != 1:
-        raise ValueError("Cette expérience a déjà été clôturée.")
     # A hypothesis with both supporting and contradicting completed tests
     # must not inherit the label of whichever experiment happened last.
     evidence = db.execute(

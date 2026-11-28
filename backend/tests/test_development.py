@@ -83,3 +83,45 @@ def test_decision_can_be_revised_once_before_final_evaluation(development_db):
             decision["id"],
             "Nouvelle tentative d'écrasement.",
         )
+
+def test_concurrent_decision_evaluation_cannot_overwrite_first_committed_result(development_db):
+    decision = record_decision(
+        development_db,
+        "creator",
+        "Quel protocole retenir ?",
+        ["A", "B"],
+        chosen_option="A",
+    )
+
+    class ConcurrentEvaluation:
+        def __init__(self, connection):
+            self.connection = connection
+            self.injected = False
+
+        def execute(self, sql, params=()):
+            if sql.lstrip().startswith("UPDATE decision_journal SET outcome") and not self.injected:
+                self.injected = True
+                self.connection.execute(
+                    """UPDATE decision_journal
+                    SET outcome=?, status='evaluated', updated_at=?
+                    WHERE id=? AND user_id=?""",
+                    ("Résultat enregistré par la première requête.", "2026-11-28T00:00:00+00:00",
+                     decision["id"], "creator"),
+                )
+            return self.connection.execute(sql, params)
+
+    with pytest.raises(ValueError, match="déjà été évaluée par une autre opération"):
+        evaluate_decision(
+            ConcurrentEvaluation(development_db),
+            "creator",
+            decision["id"],
+            "Résultat concurrent qui ne doit pas remplacer le premier.",
+        )
+
+    row = development_db.execute(
+        "SELECT outcome, status FROM decision_journal WHERE id=?",
+        (decision["id"],),
+    ).fetchone()
+    assert row["outcome"] == "Résultat enregistré par la première requête."
+    assert row["status"] == "evaluated"
+

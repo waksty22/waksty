@@ -191,11 +191,17 @@ def evaluate_decision(
             raise ValueError("Le choix révisé doit figurer parmi les options.")
     status = "revised" if revised_choice else "evaluated"
     now = _now()
-    db.execute(
+    cursor = db.execute(
         """UPDATE decision_journal SET outcome=?, chosen_option=?,
-        status=?, updated_at=? WHERE id=? AND user_id=?""",
+        status=?, updated_at=? WHERE id=? AND user_id=?
+        AND status IN ('considered', 'chosen')""",
         (outcome, choice, status, now, int(decision_id), user_id),
     )
+    if cursor.rowcount != 1:
+        raise ValueError(
+            "Cette décision a déjà été évaluée par une autre opération ; "
+            "son résultat ne peut pas être remplacé."
+        )
     return {"id": int(decision_id), "outcome": outcome,
             "chosen_option": choice, "status": status, "updated_at": now}
 

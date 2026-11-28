@@ -74,7 +74,7 @@ def test_acquired_knowledge_keeps_experience_with_ascii_whitespace_source():
     timestamp = "2026-11-28T08:00:00Z"
     db.execute(
         "INSERT INTO conversations VALUES (1, 'creator', 'user', ?, ?)",
-        ("\\tSouvenir horloge rouge\\n", timestamp),
+        ("\tSouvenir horloge rouge\n", timestamp),
     )
     db.execute(
         """

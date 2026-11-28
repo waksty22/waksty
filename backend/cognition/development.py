@@ -173,6 +173,11 @@ def evaluate_decision(
     ).fetchone()
     if row is None:
         raise ValueError("Décision introuvable.")
+    if row["status"] in {"evaluated", "revised"}:
+        raise ValueError(
+            "Cette décision possède déjà un résultat évalué ; "
+            "le résultat initial ne peut pas être écrasé."
+        )
     outcome = _text(outcome, 3000)
     if not outcome:
         raise ValueError("Le résultat observé est obligatoire.")

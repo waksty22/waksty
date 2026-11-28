@@ -857,6 +857,7 @@ def apply_memory_decay(
           AND access_count BETWEEN 0 AND 1
           AND typeof(content) = 'text' AND length(trim(content, char(9)||char(10)||char(11)||char(12)||char(13)||' ')) > 0
           AND typeof(category) = 'text'
+          AND length(trim(category, char(9)||char(10)||char(11)||char(12)||char(13)||' ')) > 0
           AND typeof(source_type) = 'text'
           AND source_type IN ('observed', 'taught', 'inferred')
           AND typeof(confidence) IN ('integer', 'real')
@@ -914,6 +915,7 @@ def get_memory_statistics(
           AND typeof(user_id) = 'text'
           AND typeof(content) = 'text' AND length(trim(content, char(9)||char(10)||char(11)||char(12)||char(13)||' ')) > 0
           AND typeof(category) = 'text'
+          AND length(trim(category, char(9)||char(10)||char(11)||char(12)||char(13)||' ')) > 0
           AND typeof(importance) = 'integer'
           AND importance BETWEEN 1 AND 5
           AND typeof(source_type) = 'text'

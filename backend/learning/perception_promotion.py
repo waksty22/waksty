@@ -76,57 +76,77 @@ def promote_confirmed_perception_fusion(
     if any(row["source"] == "live_camera_frame_received_by_server" for row in observations):
         raise ValueError("Une réception technique de caméra ne peut pas devenir un fait appris.")
 
+    original_evidence_json = candidate["evidence_json"] or "{}"
     object_id = _stable_entity_id(user_id, "object", object_label.casefold())
-    upsert_world_entity(
-        db, user_id, object_id, "object",
-        {
-            "label": object_label,
-            "learned_from_perception_fusion": candidate_id,
-            "audio_observation_id": candidate["audio_observation_id"],
-            "vision_observation_id": candidate["vision_observation_id"],
-            "confirmation_evidence": evidence,
-        },
-        source_type="confirmed", confidence=1.0,
-    )
-
-    relation_ids = []
-    for modality in ("audio", "vision"):
-        observation = by_modality[modality]
-        observation_id = observation["observation_id"]
-        observation_entity_id = _stable_entity_id(
-            user_id, "sensory-observation", observation_id
-        )
+    db.execute("SAVEPOINT perception_fusion_promotion")
+    try:
         upsert_world_entity(
-            db, user_id, observation_entity_id, "sensory_observation",
+            db, user_id, object_id, "object",
             {
-                "observation_id": observation_id,
-                "modality": modality,
-                "excerpt": str(observation["content"] or "")[:500],
-                "source": str(observation["source"] or "")[:100],
+                "label": object_label,
+                "learned_from_perception_fusion": candidate_id,
+                "audio_observation_id": candidate["audio_observation_id"],
+                "vision_observation_id": candidate["vision_observation_id"],
+                "confirmation_evidence": evidence,
             },
-            source_type="observed", confidence=0.8,
-        )
-        relation = add_world_relation(
-            db, user_id, object_id, observation_entity_id,
-            relation_type=f"confirmed_by_{modality}_observation",
             source_type="confirmed", confidence=1.0,
         )
-        relation_ids.append(relation["id"])
 
-    stored_evidence["semantic_promotion"] = {
-        "object_label": object_label,
-        "object_entity_id": object_id,
-        "audio_observation_id": candidate["audio_observation_id"],
-        "vision_observation_id": candidate["vision_observation_id"],
-        "relation_ids": relation_ids,
-        "evidence": evidence,
-        "promoted": True,
-    }
-    db.execute(
-        """UPDATE perception_fusion_candidates SET evidence_json=?
-           WHERE id=? AND user_id=? AND status='confirmed'""",
-        (json.dumps(stored_evidence, ensure_ascii=False, allow_nan=False), candidate_id, user_id),
-    )
+        relation_ids = []
+        for modality in ("audio", "vision"):
+            observation = by_modality[modality]
+            observation_id = observation["observation_id"]
+            observation_entity_id = _stable_entity_id(
+                user_id, "sensory-observation", observation_id
+            )
+            upsert_world_entity(
+                db, user_id, observation_entity_id, "sensory_observation",
+                {
+                    "observation_id": observation_id,
+                    "modality": modality,
+                    "excerpt": str(observation["content"] or "")[:500],
+                    "source": str(observation["source"] or "")[:100],
+                },
+                source_type="observed", confidence=0.8,
+            )
+            relation = add_world_relation(
+                db, user_id, object_id, observation_entity_id,
+                relation_type=f"confirmed_by_{modality}_observation",
+                source_type="confirmed", confidence=1.0,
+            )
+            relation_ids.append(relation["id"])
+
+        stored_evidence["semantic_promotion"] = {
+            "object_label": object_label,
+            "object_entity_id": object_id,
+            "audio_observation_id": candidate["audio_observation_id"],
+            "vision_observation_id": candidate["vision_observation_id"],
+            "relation_ids": relation_ids,
+            "evidence": evidence,
+            "promoted": True,
+        }
+        updated_evidence_json = json.dumps(
+            stored_evidence, ensure_ascii=False, allow_nan=False
+        )
+        # Compare-and-swap the candidate record. If another request promoted
+        # or relabelled it after our initial read, roll back every entity and
+        # relation written in this savepoint instead of leaving orphaned facts.
+        finalized = db.execute(
+            """UPDATE perception_fusion_candidates SET evidence_json=?
+               WHERE id=? AND user_id=? AND status='confirmed'
+                 AND evidence_json=?""",
+            (updated_evidence_json, candidate_id, user_id, original_evidence_json),
+        )
+        if finalized.rowcount != 1:
+            raise ValueError(
+                "Ce rapprochement a été transformé ou modifié entre-temps ; recharge son état."
+            )
+        db.execute("RELEASE SAVEPOINT perception_fusion_promotion")
+    except Exception:
+        db.execute("ROLLBACK TO SAVEPOINT perception_fusion_promotion")
+        db.execute("RELEASE SAVEPOINT perception_fusion_promotion")
+        raise
+
     return {
         "candidate_id": candidate_id,
         "object_label": object_label,
